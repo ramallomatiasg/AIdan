@@ -15,13 +15,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
 
 def start_collector():
     """Iniciar Collector en segundo plano"""
-    from src.collector.main import main as collector_main
-    collector_main()
+    from src.collector.main import run_collector
+    run_collector()
 
 def start_analyzer():
     """Iniciar Analyzer en segundo plano"""
-    from src.analyzer.main import main as analyzer_main
-    analyzer_main()
+    from src.analyzer.main import run_analyzer
+    run_analyzer()
 
 def start_api():
     """Iniciar FastAPI server"""
