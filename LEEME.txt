@@ -1,132 +1,61 @@
 ════════════════════════════════════════════════════════════════════
   💱 AIdan v1.1 - Sistema de Trading EUR/USD
+  Análisis de noticias financieras con IA
 ════════════════════════════════════════════════════════════════════
 
-🚀 INSTALACIÓN RÁPIDA (30 segundos)
+🚀 INSTALACIÓN ULTRA RÁPIDA (1 minuto)
 
-📦 VERSIÓN DESKTOP (Recomendada - MÁS FÁCIL)
-   
-   1️⃣ Doble clic en: AIdan_Desktop.exe (en carpeta dist/)
-   2️⃣ ¡Listo! Se abre la ventana del dashboard
-   
-   ✅ No necesita Python instalado
-   ✅ No necesita configuración
-   ✅ No necesita API keys
-   ✅ Todo funciona automáticamente
+1. Abre la carpeta "dist"
+2. Doble click en: AIdan_Desktop.exe
+3. ¡Listo! Se abre el dashboard
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📝 VERSIÓN CON PYTHON (Desarrolladores)
-
-1️⃣ INSTALAR PYTHON (si no lo tienes)
-   → Ve a: https://www.python.org/downloads/
-   → Descarga Python 3.11 o superior
-   → IMPORTANTE: Marca la casilla "Add Python to PATH"
-   → Instala normalmente
-
-2️⃣ INSTALAR DEPENDENCIAS
-   → Abre PowerShell en esta carpeta
-   → Ejecuta: pip install -r requirements.txt
-
-3️⃣ INICIAR EL SISTEMA
-   → Doble clic en: start_system.bat
-   → Se abrirá tu navegador en http://localhost:8000
-   → Si no se abre, ve a: http://localhost:8000
-
-4️⃣ DETENER EL SISTEMA
-   → Haz doble clic en: stop_system.bat
-   → O cierra las ventanas CMD que se abrieron
+✅ No necesita Python
+✅ No necesita configuración
+✅ No necesita API keys
+✅ Todo funciona automáticamente
 
 ════════════════════════════════════════════════════════════════════
 
-📊 ¿QUÉ HACE ESTE SISTEMA?
+💡 CÓMO USAR
 
-✅ Recolecta noticias financieras en tiempo real
-✅ Analiza impacto en el par EUR/USD
-✅ Genera señales CALL (Compra) o PUT (Venta)
-✅ Muestra probabilidades con colores (🟢🟡🔴)
-✅ Orientado a trading binario de 1-5 minutos
+El dashboard muestra:
+- 📰 Noticias financieras en tiempo real
+- 📊 Impacto en EUR/USD (0-100)
+- 🎯 Señales CALL/PUT para trading
+- ⏰ Timeframes sugeridos (1-5 min)
+- 🟢🟡🔴 Probabilidad de acierto
 
-════════════════════════════════════════════════════════════════════
-
-⚙️ CONFIGURACIÓN (OPCIONAL)
-
-Si quieres cambiar las fuentes de noticias:
-   → Abre: config/sources.yaml
-   → Agrega o quita URLs de feeds RSS
+Solo aparecen noticias de ALTO impacto (score ≥ 80)
 
 ════════════════════════════════════════════════════════════════════
 
-❓ PROBLEMAS COMUNES
+🧠 ANÁLISIS CON IA (OPCIONAL)
 
-❌ "Python no se reconoce como comando"
-   → Reinstala Python y marca "Add Python to PATH"
-   → Reinicia tu computadora
+Para análisis más preciso con IA local:
 
-❌ "No aparece el dashboard"
-   → Espera 30 segundos después de iniciar
-   → Verifica que el puerto 8000 esté libre
-   → Revisa las ventanas CMD por errores
+1. Instala Ollama: https://ollama.com/download
+2. Abre PowerShell y ejecuta:
+   ollama pull llama3.1:8b
+3. Reinicia AIdan_Desktop.exe
 
-❌ "No hay noticias"
-   → Espera 10 minutos (primer ciclo de recolección)
-   → Verifica tu conexión a Internet
-
-❌ Error al instalar dependencias
-   → Abre CMD como Administrador
-   → Ve a esta carpeta: cd C:\ruta\a\AIdan
-   → Ejecuta: pip install -r requirements.txt
-
-════════════════════════════════════════════════════════════════════
-
-📁 ESTRUCTURA DE ARCHIVOS
-
-AIdan/
-  ├── start_system.bat          ⭐ EJECUTA ESTE
-  ├── stop_system.bat           🛑 Detener sistema
-  ├── INSTALAR.bat              📦 Instalar dependencias
-  ├── requirements.txt          📋 Lista de librerías
-  ├── dashboard_retro.html      🖥️ Interfaz principal
-  ├── about.html                👤 Sobre el desarrollador
-  ├── config/
-  │   └── sources.yaml          📰 Fuentes RSS
-  ├── src/
-  │   ├── collector/            📡 Recolector de noticias
-  │   ├── analyzer/             🔍 Analizador EUR/USD
-  │   └── admin/                🌐 API y Dashboard
-  └── state/                    💾 Base de datos (se crea auto)
-
-════════════════════════════════════════════════════════════════════
-
-💡 TIPS PARA TRADING
-
-🟢 Verde (BAJO RIESGO)    → NO operar, esperar señal
-🟡 Amarillo (RIESGO MEDIO) → Precaución, reducir tamaño
-🔴 Rojo (ALTO RIESGO)     → Oportunidad de volatilidad
-
-📈 CALL (Compra)  → EUR sube contra USD
-📉 PUT (Venta)    → EUR baja contra USD
-
-⏰ Mejor horario: 9:30-16:00 (Horario NY)
-⚡ Timeframe: 1-5 minutos para opciones binarias
+Con Ollama: Análisis avanzado GRATIS
+Sin Ollama: Análisis básico (también funciona bien)
 
 ════════════════════════════════════════════════════════════════════
 
 ⚠️ ADVERTENCIA IMPORTANTE
 
-Este sistema es una HERRAMIENTA DE ANÁLISIS de noticias.
+Este sistema es informativo solamente.
 NO es asesoramiento financiero.
-Opera bajo tu propio riesgo y responsabilidad.
+El trading de opciones binarias tiene alto riesgo.
+Usa bajo tu propia responsabilidad.
 
 ════════════════════════════════════════════════════════════════════
 
-📧 SOPORTE
+📞 SOPORTE
 
-Desarrollador: Matias Ramallo
-Email: ramallomatiasg@gmail.com
-GitHub: github.com/ramallomatiasg
+Si algo no funciona:
+- GitHub: github.com/ramallomatiasg/AIdan
+- LinkedIn: linkedin.com/in/ramallomatiasg
 
-Versión: 1.1
-Fecha: Febrero 2026
-
-════════════════════════════════════════════════════════════════════
+Desarrollado por Matias Ramallo
