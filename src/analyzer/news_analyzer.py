@@ -322,49 +322,67 @@ class NewsAnalyzer:
         try:
             import requests
             
-            prompt = f"""Eres un experto trader de opciones binarias EUR/USD. Analiza esta noticia:
+            prompt = f"""Eres un analista experto de mercados financieros especializado en EUR/USD y trading de opciones binarias.
 
+Analiza esta noticia:
 TÍTULO: {title}
-RESUMEN: {summary[:500]}
-ENTIDADES: {entities}
+CONTENIDO: {summary[:500]}
 
-Responde SOLO en formato JSON válido (sin markdown):
+Evalúa el impacto en EUR/USD y genera una señal de trading.
+
+Responde SOLO con un JSON válido (sin texto adicional, sin markdown):
 {{
-    "impact_score": <número 0-100>,
-    "level": "<ALTA/MEDIA/BAJA>",
-    "direction": "<CALL/PUT/NEUTRAL>",
-    "confidence": <número 0-100>,
-    "timeframe": "<1-5 minutos>",
-    "explanation": "<breve explicación>",
-    "eur_usd_impact": "<cómo afecta a EUR/USD>",
-    "market_implications": "<recomendación de trading>"
-}}"""
+    "impact_score": 85,
+    "level": "ALTA",
+    "direction": "CALL",
+    "confidence": 75,
+    "timeframe": "3-5 minutos",
+    "explanation": "Explica brevemente por qué",
+    "eur_usd_impact": "Describe el impacto en el par",
+    "market_implications": "Recomendación de trading específica"
+}}
 
+Reglas:
+- impact_score: 0-100 (impacto en el mercado)
+- level: ALTA (score>80), MEDIA (50-80), o BAJA (<50)
+- direction: CALL (sube EUR/USD), PUT (baja EUR/USD), NEUTRAL
+- confidence: 0-100 (probabilidad de acierto)
+- timeframe: "1-5 minutos" ideal para binarias"""
+
+            self.logger.info(f"Analizando noticia #{news_id} con Ollama/Llama...")
+            
             response = requests.post('http://localhost:11434/api/generate', 
                 json={
                     'model': 'llama3.1:8b',
                     'prompt': prompt,
                     'stream': False,
+                    'format': 'json',
                     'options': {
-                        'temperature': 0.3,
-                        'top_p': 0.9
+                        'temperature': 0.2,
+                        'top_p': 0.9,
+                        'num_predict': 500
                     }
                 },
-                timeout=30
+                timeout=45
             )
             
             if response.status_code != 200:
+                self.logger.error(f"Ollama HTTP error: {response.status_code}")
                 return None
             
             result_text = response.json().get('response', '')
+            self.logger.debug(f"Ollama response: {result_text[:200]}")
             
-            # Extraer JSON de la respuesta (a veces viene con texto extra)
+            # Extraer JSON de la respuesta
             json_start = result_text.find('{')
             json_end = result_text.rfind('}') + 1
             if json_start >= 0 and json_end > json_start:
                 result = json.loads(result_text[json_start:json_end])
             else:
+                self.logger.error("No se encontró JSON válido en respuesta de Ollama")
                 return None
+            
+            self.logger.info(f"✅ Ollama análisis exitoso: {result.get('level')} - {result.get('direction')}")
             
             # Formatear resultado
             return {
