@@ -1,61 +1,63 @@
 ════════════════════════════════════════════════════════════════════
   💱 AIdan v1.1 - Sistema de Trading EUR/USD
-  Análisis de noticias financieras con IA
 ════════════════════════════════════════════════════════════════════
 
-🚀 INSTALACIÓN ULTRA RÁPIDA (1 minuto)
+🚀 INICIO RÁPIDO (2 pasos):
 
-1. Abre la carpeta "dist"
-2. Doble click en: AIdan_Desktop.exe
-3. ¡Listo! Se abre el dashboard
+   PASO 1: Doble click en start_system.bat
+           (Empieza a recolectar noticias)
+   
+   PASO 2: Abre tu navegador en: http://localhost:8000
+           (Ver dashboard con alertas)
 
-✅ No necesita Python
-✅ No necesita configuración
-✅ No necesita API keys
-✅ Todo funciona automáticamente
-
-════════════════════════════════════════════════════════════════════
-
-💡 CÓMO USAR
-
-El dashboard muestra:
-- 📰 Noticias financieras en tiempo real
-- 📊 Impacto en EUR/USD (0-100)
-- 🎯 Señales CALL/PUT para trading
-- ⏰ Timeframes sugeridos (1-5 min)
-- 🟢🟡🔴 Probabilidad de acierto
-
-Solo aparecen noticias de ALTO impacto (score ≥ 80)
+   ⚠️  Deja la ventana negra abierta mientras usas AIdan
 
 ════════════════════════════════════════════════════════════════════
 
-🧠 ANÁLISIS CON IA (OPCIONAL)
+🖥️ VERSIÓN VENTANA (opcional):
 
-Para análisis más preciso con IA local:
-
-1. Instala Ollama: https://ollama.com/download
-2. Abre PowerShell y ejecuta:
-   ollama pull llama3.1:8b
-3. Reinicia AIdan_Desktop.exe
-
-Con Ollama: Análisis avanzado GRATIS
-Sin Ollama: Análisis básico (también funciona bien)
+   • Doble click en dist/AIdan_Desktop.exe
+   • Abre ventana sin navegador
+   • Más ligero, solo para ver dashboard
+   
+   IMPORTANTE: Ejecuta start_system.bat primero para tener noticias
 
 ════════════════════════════════════════════════════════════════════
 
-⚠️ ADVERTENCIA IMPORTANTE
+💡 QUÉ VES EN EL DASHBOARD:
 
-Este sistema es informativo solamente.
-NO es asesoramiento financiero.
-El trading de opciones binarias tiene alto riesgo.
-Usa bajo tu propia responsabilidad.
+   📰 Noticias financieras en tiempo real
+   📊 Impacto en EUR/USD (0-100)
+   🎯 Señales CALL/PUT para trading
+   ⏰ Timeframes (1-5 minutos)
+   🟢🟡🔴 Probabilidad de acierto
+
+   Solo se muestran noticias de ALTO impacto (score ≥ 80)
 
 ════════════════════════════════════════════════════════════════════
 
-📞 SOPORTE
+🧠 MEJORAR CON IA (opcional):
 
-Si algo no funciona:
-- GitHub: github.com/ramallomatiasg/AIdan
-- LinkedIn: linkedin.com/in/ramallomatiasg
+   1. Instala Ollama: https://ollama.com/download
+   2. Abre PowerShell:
+      ollama pull llama3.1:8b
+   3. Reinicia AIdan
 
-Desarrollado por Matias Ramallo
+   ✅ Análisis más preciso con IA local gratis
+
+════════════════════════════════════════════════════════════════════
+
+⚠️  ADVERTENCIA:
+
+   Este sistema es informativo, NO es asesoramiento financiero.
+   Trading de opciones binarias tiene alto riesgo.
+   Nunca inviertas más de lo que puedas perder.
+
+════════════════════════════════════════════════════════════════════
+
+📞 AYUDA:
+
+   • GitHub: github.com/ramallomatiasg/AIdan
+   • Problemas: Abre un Issue en GitHub
+
+   Desarrollado por Matias Ramallo

@@ -41,16 +41,12 @@ def check_server_ready(max_attempts=15):
     return False
 
 if __name__ == '__main__':
-    print("🚀 Iniciando AIdan v1.1...")
-    
-    # Iniciar servicios en procesos separados
-    print("📡 Iniciando Collector...")
-    collector_process = Process(target=start_collector, daemon=True)
-    collector_process.start()
-    
-    print("🔍 Iniciando Analyzer...")
-    analyzer_process = Process(target=start_analyzer, daemon=True)
-    analyzer_process.start()
+    print("🚀 Iniciando AIdan v1.1 (Solo Dashboard)...")
+    print("")
+    print("⚠️  IMPORTANTE:")
+    print("    Este modo SOLO muestra el dashboard.")
+    print("    Para recolectar noticias, ejecuta: start_system.bat")
+    print("")
     
     print("🌐 Iniciando API...")
     api_thread = threading.Thread(target=start_api, daemon=True)
