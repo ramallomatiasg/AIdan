@@ -1,0 +1,39 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  collector:
+    build:
+      context: ./src/collector
+    volumes:
+      - ./data:/app/data
+      - ./state:/app/state
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - FETCH_INTERVAL_MINUTES=${FETCH_INTERVAL_MINUTES}
+
+  analyzer:
+    build:
+      context: ./src/analyzer
+    volumes:
+      - ./data:/app/data
+      - ./state:/app/state
+    environment:
+      - ALERT_THRESHOLD_HIGH=${ALERT_THRESHOLD_HIGH}
+      - ALERT_THRESHOLD_MED=${ALERT_THRESHOLD_MED}
+
+  admin:
+    build:
+      context: ./src/admin
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./state:/app/state
+
+  janitor:
+    image: python:3.11
+    volumes:
+      - ./data:/app/data
+    command: ["python", "-m", "janitor.main"]

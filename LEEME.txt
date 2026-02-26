@@ -1,0 +1,119 @@
+════════════════════════════════════════════════════════════════════
+  💱 AIdan v1.1 - Sistema de Trading EUR/USD
+════════════════════════════════════════════════════════════════════
+
+🚀 INSTALACIÓN RÁPIDA (5 minutos)
+
+1️⃣ INSTALAR PYTHON (si no lo tienes)
+   → Ve a: https://www.python.org/downloads/
+   → Descarga Python 3.11 o superior
+   → IMPORTANTE: Marca la casilla "Add Python to PATH"
+   → Instala normalmente
+
+2️⃣ INSTALAR DEPENDENCIAS
+   → Abre esta carpeta en el Explorador
+   → Haz doble clic en: INSTALAR.bat
+   → Espera a que termine (puede tardar 2-3 minutos)
+
+3️⃣ INICIAR EL SISTEMA
+   → Haz doble clic en: start_system.bat
+   → Se abrirá tu navegador automáticamente
+   → Si no se abre, ve a: http://localhost:8000
+
+4️⃣ DETENER EL SISTEMA
+   → Haz doble clic en: stop_system.bat
+   → O cierra las ventanas CMD que se abrieron
+
+════════════════════════════════════════════════════════════════════
+
+📊 ¿QUÉ HACE ESTE SISTEMA?
+
+✅ Recolecta noticias financieras en tiempo real
+✅ Analiza impacto en el par EUR/USD
+✅ Genera señales CALL (Compra) o PUT (Venta)
+✅ Muestra probabilidades con colores (🟢🟡🔴)
+✅ Orientado a trading binario de 1-5 minutos
+
+════════════════════════════════════════════════════════════════════
+
+⚙️ CONFIGURACIÓN (OPCIONAL)
+
+Si quieres cambiar las fuentes de noticias:
+   → Abre: config/sources.yaml
+   → Agrega o quita URLs de feeds RSS
+
+════════════════════════════════════════════════════════════════════
+
+❓ PROBLEMAS COMUNES
+
+❌ "Python no se reconoce como comando"
+   → Reinstala Python y marca "Add Python to PATH"
+   → Reinicia tu computadora
+
+❌ "No aparece el dashboard"
+   → Espera 30 segundos después de iniciar
+   → Verifica que el puerto 8000 esté libre
+   → Revisa las ventanas CMD por errores
+
+❌ "No hay noticias"
+   → Espera 10 minutos (primer ciclo de recolección)
+   → Verifica tu conexión a Internet
+
+❌ Error al instalar dependencias
+   → Abre CMD como Administrador
+   → Ve a esta carpeta: cd C:\ruta\a\AIdan
+   → Ejecuta: pip install -r requirements.txt
+
+════════════════════════════════════════════════════════════════════
+
+📁 ESTRUCTURA DE ARCHIVOS
+
+AIdan/
+  ├── start_system.bat          ⭐ EJECUTA ESTE
+  ├── stop_system.bat           🛑 Detener sistema
+  ├── INSTALAR.bat              📦 Instalar dependencias
+  ├── requirements.txt          📋 Lista de librerías
+  ├── dashboard_retro.html      🖥️ Interfaz principal
+  ├── about.html                👤 Sobre el desarrollador
+  ├── config/
+  │   └── sources.yaml          📰 Fuentes RSS
+  ├── src/
+  │   ├── collector/            📡 Recolector de noticias
+  │   ├── analyzer/             🔍 Analizador EUR/USD
+  │   └── admin/                🌐 API y Dashboard
+  └── state/                    💾 Base de datos (se crea auto)
+
+════════════════════════════════════════════════════════════════════
+
+💡 TIPS PARA TRADING
+
+🟢 Verde (BAJO RIESGO)    → NO operar, esperar señal
+🟡 Amarillo (RIESGO MEDIO) → Precaución, reducir tamaño
+🔴 Rojo (ALTO RIESGO)     → Oportunidad de volatilidad
+
+📈 CALL (Compra)  → EUR sube contra USD
+📉 PUT (Venta)    → EUR baja contra USD
+
+⏰ Mejor horario: 9:30-16:00 (Horario NY)
+⚡ Timeframe: 1-5 minutos para opciones binarias
+
+════════════════════════════════════════════════════════════════════
+
+⚠️ ADVERTENCIA IMPORTANTE
+
+Este sistema es una HERRAMIENTA DE ANÁLISIS de noticias.
+NO es asesoramiento financiero.
+Opera bajo tu propio riesgo y responsabilidad.
+
+════════════════════════════════════════════════════════════════════
+
+📧 SOPORTE
+
+Desarrollador: Matias Ramallo
+Email: ramallomatiasg@gmail.com
+GitHub: github.com/ramallomatiasg
+
+Versión: 1.1
+Fecha: Febrero 2026
+
+════════════════════════════════════════════════════════════════════
