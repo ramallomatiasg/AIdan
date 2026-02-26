@@ -5,6 +5,11 @@ import sys
 import os
 from multiprocessing import Process
 
+# Configurar encoding UTF-8 para evitar errores con emojis
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
 
