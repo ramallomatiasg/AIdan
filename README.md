@@ -1,41 +1,63 @@
-# Financial News Monitoring Agent
+# AIdan v1.1 - Financial News Analysis System
 
-Un agente inteligente que monitorea feeds de noticias financieras, detecta eventos económicos importantes, calcula su impacto y envía alertas automáticas.
+Sistema inteligente de análisis de noticias financieras enfocado en el par EUR/USD para trading de opciones binarias. Utiliza IA (Claude) para analizar noticias en tiempo real y generar señales de trading.
+
+**Desarrollado por Matias Ramallo**
 
 ## 📋 Características
 
-- **Collector**: Fetch automático de feeds RSS de múltiples fuentes (FT, Reuters, Bloomberg, etc.)
-- **Analyzer**: Análisis de impacto con scoring 0-100 y detección de entidades/tags
-- **Admin API**: Dashboard REST con FastAPI para ver estadísticas, alertas y noticias recientes
-- **Database**: SQLite para persistencia (noticias, alertas, errores)
-- **Telegram Alerts**: Notificaciones automáticas con nivel [ALTA/MEDIA/BAJA]
-- **Data Cleanup**: Limpieza automática de datos antiguos (default: 72h)
+- **Dashboard Retro Terminal**: Interfaz estilo Matrix con efectos CRT
+- **Análisis con IA**: Procesamiento con Claude (Anthropic) para evaluar impacto en EUR/USD
+- **Señales de Trading**: Recomendaciones CALL/PUT con probabilidad y timeframes (1-5 min)
+- **Scoring 0-100**: Sistema de puntuación de impacto en el mercado
+- **Alertas en Tiempo Real**: Solo muestra noticias de ALTO impacto (score >= 80)
+- **Feeds RSS**: Recolección automática de Bloomberg, Reuters, Financial Times
+- **Versión Desktop**: Ejecutable standalone sin necesidad de navegador
+- **Timezone Argentina**: Horarios ajustados automáticamente a UTC-3
+
+## 🎯 Uso Principal
+
+Este sistema está diseñado para traders de opciones binarias en el par EUR/USD:
+
+- Monitorea noticias económicas 24/7
+- Analiza impacto potencial con IA
+- Genera señales direccionales (CALL/PUT)
+- Sugiere timeframes óptimos (1-5 minutos)
+- Muestra probabilidad de acierto con indicadores visuales 🟢🟡🔴
+
+## 📋 Características Técnicas
+
+- **Collector**: Fetch automático de feeds RSS cada 10 minutos
+- **Analyzer**: Análisis de impacto con Claude AI y scoring 0-100
+- **Admin API**: Dashboard REST con FastAPI en puerto 8000
+- **Database**: SQLite para persistencia de noticias y alertas
+- **Data Cleanup**: Limpieza automática de datos antiguos (72h)
 
 ## 🏗️ Arquitectura
 
 ```
 ┌─────────────────────────────────────────┐
-│     Collector (cada 10-15 min)          │
-│   - Fetch RSS feeds                     │
-│   - Normalizar noticias (HTML → JSON)   │
-│   - Detectar idioma y entidades         │
-│   - Guardar a BD + archivos JSONL       │
+│     Collector (cada 10 min)             │
+│   - Fetch RSS feeds (Bloomberg, etc)    │
+│   - Normalizar noticias                 │
+│   - Detectar idioma                     │
+│   - Guardar a BD                        │
 └──────────────────┬──────────────────────┘
                    │
 ┌─────────────────────────────────────────┐
 │     Analyzer (cada 2 min)               │
-│   - Leer noticias sin procesar          │
-│   - Calcular score de impacto (0-100)   │
-│   - Generar resúmenes                   │
-│   - Enviar alertas Telegram             │
+│   - Analizar con Claude AI              │
+│   - Calcular impacto EUR/USD (0-100)    │
+│   - Generar señales CALL/PUT            │
+│   - Determinar probabilidad             │
 └──────────────────┬──────────────────────┘
                    │
 ┌─────────────────────────────────────────┐
 │     Admin API (FastAPI :8000)           │
-│   - /health                             │
+│   - Dashboard Retro Terminal            │
 │   - /stats (estadísticas)               │
-│   - /recent-alerts (últimas 50)         │
-│   - /recent-news (últimas 200)          │
+│   - /recent-alerts (solo ALTA)          │
+│   - /about (perfil desarrollador)       │
 └─────────────────────────────────────────┘
 ```
 
@@ -77,7 +99,26 @@ AIdan/
 
 ## 🚀 Instalación y Ejecución
 
-### Opción 1: Con Python local
+### Opción 1: Versión Desktop (Recomendada) 💻
+
+La forma más sencilla de usar AIdan es con la **versión desktop standalone**:
+
+#### 1. Descargar el ejecutable
+- Descarga **AIdan_Desktop.exe** desde [Releases](https://github.com/ramallomatiasg/AIdan/releases)
+- Descarga también las carpetas **config/** y **static/**
+
+#### 2. Configurar variables de entorno
+- Crea un archivo `.env` en la misma carpeta del ejecutable con:
+```
+ANTHROPIC_API_KEY=tu_api_key_aqui
+```
+
+#### 3. Ejecutar
+- Doble click en **AIdan_Desktop.exe** o ejecuta `start_desktop.bat`
+- Se abrirá una ventana nativa con el dashboard
+- **No requiere navegador ni instalación de Python**
+
+### Opción 2: Con Python local
 
 #### 1. Instalar dependencias
 ```bash
@@ -87,29 +128,21 @@ pip install -r requirements.txt
 #### 2. Configurar variables de entorno
 ```bash
 cp .env.example .env
-# Editar .env con tus valores (tokens Telegram, etc.)
+# Editar .env con tu ANTHROPIC_API_KEY
 ```
 
-#### 3. Correr servicios en terminales separadas
-
-Terminal 1 - Collector:
+#### 3. Iniciar sistema
 ```bash
-python src/collector/main.py
+# Windows
+start_system.bat
+
+# Linux/Mac
+./start_system.sh
 ```
 
-Terminal 2 - Analyzer:
-```bash
-python src/analyzer/main.py
-```
+Esto inicia los 3 servicios automáticamente. Luego accede a: http://localhost:8000
 
-Terminal 3 - Admin API:
-```bash
-python src/admin/main.py
-```
-
-Luego acceder a: http://localhost:8000/docs
-
-### Opción 2: Con Docker Compose
+### Opción 3: Con Docker Compose
 
 ```bash
 docker compose up --build
@@ -117,20 +150,28 @@ docker compose up --build
 
 Acceder a: http://localhost:8000/docs
 
-### Opción 3: Demo rápida
+### Opción 4: Compilar tu propia versión
 
 ```bash
-python demo.py
+# Instalar PyInstaller
+pip install pyinstaller
+
+# Compilar todos los ejecutables
+build_exe.bat  # Windows
+./build_exe.sh # Linux/Mac
 ```
 
-Esto ejecuta un demo con datos de prueba y muestra estadísticas.
+Esto genera en `dist/`:
+- **AIdan_Desktop.exe** - Versión todo-en-uno (recomendada)
+- AIdan_Admin.exe - Solo API/Dashboard
+- AIdan_Collector.exe - Solo recolector
+- AIdan_Analyzer.exe - Solo analizador
 
 ## ⚙️ Configuración
 
 ### .env
 ```
-TELEGRAM_TOKEN=tu_bot_token_aqui
-TELEGRAM_CHAT_ID=tu_chat_id_aqui
+ANTHROPIC_API_KEY=tu_api_key_de_claude_aqui
 COLLECTOR_INTERVAL=600          # 10 minutos
 ANALYZER_INTERVAL=120           # 2 minutos
 DATA_RETENTION_HOURS=72
@@ -209,29 +250,30 @@ GET /recent-news?limit=200
 
 ## 📈 Lógica de Scoring
 
-El analyzer calcula impact_score (0-100) considerando:
-
-1. **Keywords de Alto Impacto** (+30 puntos máx):
-   - "fed", "interest rate", "recession", "crash", "emergency", etc.
-
-2. **Keywords de Medio Impacto** (+20 puntos máx):
-   - "market", "stock", "earnings", "analyst", etc.
-
-3. **Entidades Detectadas** (+15 puntos máx):
-   - FED, ECB, Powell, CPI, GDP, S&P500, Nasdaq, DOW
-
-4. **Tags** (+10 puntos cada una):
-   - `monetary_policy`, `market_volatility`, `earnings`, `merger`, `crypto`, `tech`, `energy`, `geopolitics`
-
-5. **Breaking News** (+20 puntos):
-   - Si contiene "breaking", "alert", "emergency", "urgent"
+El analyzer usa Claude AI para evaluar el impacto de cada noticia en EUR/USD (0-100):
 
 **Niveles de Alerta:**
-- **ALTA**: score ≥ 80
-- **MEDIA**: 50 ≤ score < 80
-- **BAJA**: score < 50 (sin alerta)
+- **🔴 ALTA**: score ≥ 80 (se muestra en dashboard)
+- **🟡 MEDIA**: 67 ≤ score < 80
+- **🟢 BAJA**: score < 67 (no se muestra)
 
-## 🔧 Desarrollo
+**Señales de Trading:**
+- **CALL**: Se recomienda compra (expectativa alcista EUR/USD)
+- **PUT**: Se recomienda venta (expectativa bajista EUR/USD)
+- **Probabilidad**: Indicador visual 🟢 (alta), 🟡 (media), 🔴 (baja)
+- **Timeframe**: Duración sugerida del trade (1-5 minutos)
+
+## ⚠️ Advertencia Importante
+
+Este sistema es una herramienta de análisis informativo. **NO ES ASESORAMIENTO FINANCIERO**:
+
+- Las señales son generadas por IA y pueden ser incorrectas
+- El trading de opciones binarias conlleva alto riesgo
+- Siempre realiza tu propio análisis antes de operar
+- Nunca inviertas más de lo que puedas permitirte perder
+- Consulta con asesores financieros certificados
+
+## 🔧 Desarrollo y Personalización
 
 ### Estructura de módulos
 
@@ -247,14 +289,45 @@ El analyzer calcula impact_score (0-100) considerando:
 
 ### Extensiones futuras
 
-- [ ] Integración real con Telegram Bot API
-- [ ] Machine Learning para scoring dinámico
-- [ ] Más fuentes de noticias (APIs REST además de RSS)
-- [ ] Caché distribuido (Redis)
-- [ ] Autenticación en API
-- [ ] Frontend React para dashboard
-- [ ] Webhooks para notificaciones externas
-- [ ] Análisis de sentimiento
+- [ ] Análisis de múltiples pares de divisas
+- [ ] Integración con brokers de opciones binarias
+- [ ] Backtesting de señales históricas
+- [ ] Machine Learning para mejorar precisión
+- [ ] Alertas por email/Telegram
+- [ ] Dashboard móvil responsive
+- [ ] API para bots de trading automatizado
+- [ ] Análisis de volumen y volatilidad
+
+## 🤝 Contribuciones
+
+Las contribuciones son bienvenidas. Por favor:
+
+1. Fork el proyecto
+2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
+3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
+4. Push a la rama (`git push origin feature/AmazingFeature`)
+5. Abre un Pull Request
+
+## 📄 Licencia
+
+Este proyecto está bajo Licencia MIT. Ver archivo [LICENSE](LICENSE) para más detalles.
+
+## 👨‍💻 Autor
+
+**Matias Ramallo**
+- Ingeniero Desarrollador de Software
+- GitHub: [@ramallomatiasg](https://github.com/ramallomatiasg)
+- LinkedIn: [Matias Ramallo](https://www.linkedin.com/in/ramallomatiasg/)
+
+## 📞 Soporte
+
+Si encuentras algún problema o tienes preguntas:
+- Abre un [Issue](https://github.com/ramallomatiasg/AIdan/issues)
+- Contacta vía LinkedIn
+
+---
+
+⭐ Si este proyecto te resulta útil, considera darle una estrella en GitHub!
 
 ## 📝 Logging
 
