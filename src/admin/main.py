@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
@@ -14,6 +15,15 @@ from src.common.db import init_db, get_stats, get_recent_alerts
 logger = setup_logging(__name__, Config.LOG_LEVEL)
 
 app = FastAPI(title="Financial News Monitor API", version="1.0.0")
+
+# Configurar CORS para permitir peticiones desde PyWebView y navegadores
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite todas las origins (localhost, file://, etc)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Detectar si estamos en ejecutable o desarrollo
 if getattr(sys, 'frozen', False):
