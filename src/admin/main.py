@@ -15,8 +15,16 @@ logger = setup_logging(__name__, Config.LOG_LEVEL)
 
 app = FastAPI(title="Financial News Monitor API", version="1.0.0")
 
+# Detectar si estamos en ejecutable o desarrollo
+if getattr(sys, 'frozen', False):
+    # Estamos en ejecutable PyInstaller
+    base_path = sys._MEIPASS
+else:
+    # Estamos en desarrollo
+    base_path = os.path.join(os.path.dirname(__file__), '../..')
+
 # Montar carpeta static para servir archivos estáticos (imágenes, etc)
-static_path = os.path.join(os.path.dirname(__file__), '../../static')
+static_path = os.path.join(base_path, 'static')
 if os.path.exists(static_path):
     app.mount("/static", StaticFiles(directory=static_path), name="static")
 
@@ -24,7 +32,7 @@ if os.path.exists(static_path):
 @app.get("/")
 async def root():
     """Servir dashboard.html"""
-    dashboard_path = os.path.join(os.path.dirname(__file__), '../../dashboard_retro.html')
+    dashboard_path = os.path.join(base_path, 'dashboard_retro.html')
     if os.path.exists(dashboard_path):
         return FileResponse(dashboard_path, media_type="text/html")
     # Fallback al dashboard original
@@ -37,7 +45,7 @@ async def root():
 @app.get("/about")
 async def about():
     """Servir página sobre el desarrollador"""
-    about_path = os.path.join(os.path.dirname(__file__), '../../about.html')
+    about_path = os.path.join(base_path, 'about.html')
     if os.path.exists(about_path):
         return FileResponse(about_path, media_type="text/html")
     return {"message": "About page not found"}

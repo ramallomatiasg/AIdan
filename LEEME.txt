@@ -11,6 +11,8 @@
            (Ver dashboard con alertas)
 
    ⚠️  Deja la ventana negra abierta mientras usas AIdan
+   
+   Para cerrar: Ctrl+C en la ventana negra o cierra la ventana
 
 ════════════════════════════════════════════════════════════════════
 
@@ -45,19 +47,9 @@
 
    ✅ Análisis más preciso con IA local gratis
 
-════════════════════════════════════════════════════════════════════
-
-⚠️  ADVERTENCIA:
-
-   Este sistema es informativo, NO es asesoramiento financiero.
-   Trading de opciones binarias tiene alto riesgo.
-   Nunca inviertas más de lo que puedas perder.
 
 ════════════════════════════════════════════════════════════════════
 
 📞 AYUDA:
-
-   • GitHub: github.com/ramallomatiasg/AIdan
-   • Problemas: Abre un Issue en GitHub
 
    Desarrollado por Matias Ramallo
