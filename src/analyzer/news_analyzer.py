@@ -1,9 +1,13 @@
 import re
+import json
+import os
 from datetime import datetime
 
 class NewsAnalyzer:
     def __init__(self, logger):
         self.logger = logger
+        self.ai_mode = self._detect_ai_mode()
+        self.logger.info(f"Analyzer initialized in {self.ai_mode.upper()} mode")
         
         # Impact keywords
         self.high_impact_keywords = [
@@ -31,10 +35,42 @@ class NewsAnalyzer:
             'eur/usd': 'Directamente sobre el par'
         }
     
+    def _detect_ai_mode(self):
+        """Detecta qué modo de IA usar: ollama > claude > keywords"""
+        # Prioridad: Ollama (local/gratis) > Claude (API/pago) > Keywords (fallback)
+        
+        if self._check_ollama():
+            return 'ollama'
+        elif os.getenv('ANTHROPIC_API_KEY'):
+            return 'claude'
+        else:
+            return 'keywords'
+    
+    def _check_ollama(self):
+        """Verifica si Ollama está disponible"""
+        try:
+            import requests
+            response = requests.get('http://localhost:11434/api/tags', timeout=2)
+            if response.status_code == 200:
+                models = response.json().get('models', [])
+                # Verifica si hay algún modelo Llama disponible
+                return any('llama' in m.get('name', '').lower() for m in models)
+            return False
+        except:
+            return False
+    
     def analyze(self, news_id, title, summary, entities, tags):
         """Analyze news and calculate impact score with EUR/USD analysis"""
         try:
-            # Calculate impact score (0-100)
+            # Use AI analysis if available, fallback to keywords
+            if self.ai_mode in ['ollama', 'claude']:
+                result = self._analyze_with_ai(news_id, title, summary, entities, tags)
+                if result:
+                    return result
+                # If AI fails, fallback to keywords
+                self.logger.warning(f"AI analysis failed, using keywords fallback")
+            
+            # Keyword-based analysis (original logic)
             score = self._calculate_impact_score(title, summary, entities, tags)
             
             # Determine severity level
@@ -269,3 +305,85 @@ class NewsAnalyzer:
         implications += "⚡ Mejor momento para opciones binarias corto plazo"
         
         return implications[:max_length]
+    
+    def _analyze_with_ai(self, news_id, title, summary, entities, tags):
+        """Analiza noticia con IA (Ollama o Claude)"""
+        try:
+            if self.ai_mode == 'ollama':
+                return self._analyze_with_ollama(news_id, title, summary, entities, tags)
+            elif self.ai_mode == 'claude':
+                return self._analyze_with_claude(news_id, title, summary, entities, tags)
+        except Exception as e:
+            self.logger.error(f"AI analysis error: {str(e)}")
+            return None
+    
+    def _analyze_with_ollama(self, news_id, title, summary, entities, tags):
+        """Analiza con Llama local via Ollama"""
+        try:
+            import requests
+            
+            prompt = f"""Eres un experto trader de opciones binarias EUR/USD. Analiza esta noticia:
+
+TÍTULO: {title}
+RESUMEN: {summary[:500]}
+ENTIDADES: {entities}
+
+Responde SOLO en formato JSON válido (sin markdown):
+{{
+    "impact_score": <número 0-100>,
+    "level": "<ALTA/MEDIA/BAJA>",
+    "direction": "<CALL/PUT/NEUTRAL>",
+    "confidence": <número 0-100>,
+    "timeframe": "<1-5 minutos>",
+    "explanation": "<breve explicación>",
+    "eur_usd_impact": "<cómo afecta a EUR/USD>",
+    "market_implications": "<recomendación de trading>"
+}}"""
+
+            response = requests.post('http://localhost:11434/api/generate', 
+                json={
+                    'model': 'llama3.1:8b',
+                    'prompt': prompt,
+                    'stream': False,
+                    'options': {
+                        'temperature': 0.3,
+                        'top_p': 0.9
+                    }
+                },
+                timeout=30
+            )
+            
+            if response.status_code != 200:
+                return None
+            
+            result_text = response.json().get('response', '')
+            
+            # Extraer JSON de la respuesta (a veces viene con texto extra)
+            json_start = result_text.find('{')
+            json_end = result_text.rfind('}') + 1
+            if json_start >= 0 and json_end > json_start:
+                result = json.loads(result_text[json_start:json_end])
+            else:
+                return None
+            
+            # Formatear resultado
+            return {
+                'news_id': news_id,
+                'impact_score': int(result.get('impact_score', 50)),
+                'level': result.get('level', 'MEDIA'),
+                'explanation': result.get('explanation', ''),
+                'eur_usd_impact': result.get('eur_usd_impact', ''),
+                'market_implications': result.get('market_implications', ''),
+                'should_alert': result.get('level') == 'ALTA'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Ollama analysis error: {str(e)}")
+            return None
+    
+    def _analyze_with_claude(self, news_id, title, summary, entities, tags):
+        """Analiza con Claude AI (requiere ANTHROPIC_API_KEY)"""
+        # Placeholder para futura implementación
+        self.logger.warning("Claude analysis not implemented yet")
+        return None
+

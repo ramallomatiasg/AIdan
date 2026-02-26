@@ -169,9 +169,37 @@ Esto genera en `dist/`:
 
 ## ⚙️ Configuración
 
-### .env
+### Modos de Análisis de IA
+
+AIdan soporta **3 modos de análisis** (auto-detecta el mejor disponible):
+
+#### 1. Modo Ollama (Recomendado) 🆓
+- **Gratis y local** - Sin límites ni costos
+- **Funciona offline** - No necesita internet
+- **Análisis avanzado con Llama 3.1**
+- Instalación:
+  ```bash
+  # Descargar de https://ollama.com/download
+  ollama pull llama3.1:8b  # 4.7GB
+  ```
+- **Requiere**: 16GB RAM (recomendado), 8GB mínimo
+
+#### 2. Modo Claude (Pago) 💳
+- **Análisis más preciso** pero de pago
+- Requiere API key de Anthropic
+- Configurar en `.env`:
+  ```
+  ANTHROPIC_API_KEY=tu_clave_aqui
+  ```
+
+#### 3. Modo Keywords (Fallback) 📝
+- **Análisis básico por palabras clave**
+- Funciona siempre sin configuración
+- Precisión limitada
+
+### Variables de entorno (.env)
 ```
-ANTHROPIC_API_KEY=tu_api_key_de_claude_aqui
+# Opcionales - El sistema usa valores por defecto
 COLLECTOR_INTERVAL=600          # 10 minutos
 ANALYZER_INTERVAL=120           # 2 minutos
 DATA_RETENTION_HOURS=72
