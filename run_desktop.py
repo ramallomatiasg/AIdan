@@ -43,32 +43,35 @@ def check_server_ready(max_attempts=15):
 if __name__ == '__main__':
     print("🚀 Iniciando AIdan v1.1 (Solo Dashboard)...")
     print("")
-    print("⚠️  IMPORTANTE:")
-    print("    Este modo SOLO muestra el dashboard.")
-    print("    Para recolectar noticias, ejecuta: start_system.bat")
-    print("")
     
-    print("🌐 Iniciando API...")
-    api_thread = threading.Thread(target=start_api, daemon=True)
-    api_thread.start()
-    
-    # Esperar a que el servidor esté listo
-    print("⏳ Esperando a que el servidor inicie...")
-    if check_server_ready():
+    # Verificar si ya hay una API corriendo
+    print("🔍 Verificando si ya hay una API activa...")
+    if check_server_ready(max_attempts=2):
+        print("✅ API ya está corriendo (probablemente desde start_system.bat)")
+        print("🖥️ Abriendo dashboard...")
+    else:
+        print("⚠️  No se detectó API activa")
+        print("🌐 Iniciando API...")
+        api_thread = threading.Thread(target=start_api, daemon=True)
+        api_thread.start()
+        
+        print("⏳ Esperando a que el servidor inicie...")
+        if not check_server_ready():
+            print("❌ Error: No se pudo iniciar el servidor")
+            input("Presiona Enter para salir...")
+            sys.exit(1)
+        
         print("✅ Servidor listo!")
         print("🖥️ Abriendo dashboard...")
-        
-        # Crear ventana desktop
-        webview.create_window(
-            '💱 AIdan v1.1 - Trading EUR/USD',
-            'http://127.0.0.1:8000',
-            width=1400,
-            height=900,
-            resizable=True,
-            fullscreen=False,
-            min_size=(800, 600)
-        )
-        webview.start()
-    else:
-        print("❌ Error: No se pudo iniciar el servidor")
-        input("Presiona Enter para salir...")
+    
+    # Crear ventana desktop
+    webview.create_window(
+        '💱 AIdan v1.1 - Trading EUR/USD',
+        'http://127.0.0.1:8000',
+        width=1400,
+        height=900,
+        resizable=True,
+        fullscreen=False,
+        min_size=(800, 600)
+    )
+    webview.start()

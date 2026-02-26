@@ -18,11 +18,14 @@
 
 🖥️ VERSIÓN VENTANA (opcional):
 
-   • Doble click en dist/AIdan_Desktop.exe
-   • Abre ventana sin navegador
-   • Más ligero, solo para ver dashboard
+   PASO 1: Doble click en start_system.bat
+           (Inicia los servicios de recolección)
    
-   IMPORTANTE: Ejecuta start_system.bat primero para tener noticias
+   PASO 2: Doble click en dist/AIdan_Desktop.exe
+           (Abre ventana con el dashboard)
+   
+   ✅ La ventana se conecta automáticamente a los servicios
+   ✅ Se actualiza en tiempo real con nuevas noticias
 
 ════════════════════════════════════════════════════════════════════
 
