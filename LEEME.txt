@@ -2,7 +2,21 @@
   💱 AIdan v1.1 - Sistema de Trading EUR/USD
 ════════════════════════════════════════════════════════════════════
 
-🚀 INSTALACIÓN RÁPIDA (5 minutos)
+🚀 INSTALACIÓN RÁPIDA (30 segundos)
+
+📦 VERSIÓN DESKTOP (Recomendada - MÁS FÁCIL)
+   
+   1️⃣ Doble clic en: AIdan_Desktop.exe (en carpeta dist/)
+   2️⃣ ¡Listo! Se abre la ventana del dashboard
+   
+   ✅ No necesita Python instalado
+   ✅ No necesita configuración
+   ✅ No necesita API keys
+   ✅ Todo funciona automáticamente
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📝 VERSIÓN CON PYTHON (Desarrolladores)
 
 1️⃣ INSTALAR PYTHON (si no lo tienes)
    → Ve a: https://www.python.org/downloads/
@@ -11,13 +25,12 @@
    → Instala normalmente
 
 2️⃣ INSTALAR DEPENDENCIAS
-   → Abre esta carpeta en el Explorador
-   → Haz doble clic en: INSTALAR.bat
-   → Espera a que termine (puede tardar 2-3 minutos)
+   → Abre PowerShell en esta carpeta
+   → Ejecuta: pip install -r requirements.txt
 
 3️⃣ INICIAR EL SISTEMA
-   → Haz doble clic en: start_system.bat
-   → Se abrirá tu navegador automáticamente
+   → Doble clic en: start_system.bat
+   → Se abrirá tu navegador en http://localhost:8000
    → Si no se abre, ve a: http://localhost:8000
 
 4️⃣ DETENER EL SISTEMA
