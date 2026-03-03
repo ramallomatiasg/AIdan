@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial News Monitor - Multi Theme</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&family=Orbitron:wght@400;700&family=Crimson+Text&family=Cinzel&display=swap');
+
+        /* ===== VARIABLES CSS POR TEMA ===== */
+        :root {
+            /* Theme colors - defaults (Matrix) */
+            --bg-primary: #000000;
+            --bg-secondary: #001100;
+            --bg-tertiary: #002200;
+            --text-primary: #00ff00;
+            --text-secondary: #00cc00;
+            --border-color: #00ff00;
+            --shadow-color: rgba(0, 255, 0, 0.5);
+            --glow-color: rgba(0, 255, 0, 0.7);
+            --font-main: 'VT323', 'Courier New', monospace;
+            --font-size-base: 20px;
+            --border-style: solid;
+            --border-width: 2px;
+        }
+
+        /* === TEMA STEAMPUNK === */
+        [data-theme="steampunk"] {
+            --bg-primary: #1a0f0a;
+            --bg-secondary: #2d1810;
+            --bg-tertiary: #3d2418;
+            --text-primary: #d4a574;
+            --text-secondary: #b8936d;
+            --border-color: #8b6f47;
+            --shadow-color: rgba(139, 111, 71, 0.6);
+            --glow-color: rgba(212, 165, 116, 0.4);
+            --font-main: 'Cinzel', serif;
+            --font-size-base: 16px;
+            --border-style: double;
+            --border-width: 3px;
+        }
+
+        /* === TEMA MODERNO OSCURO === */
+        [data-theme="modern-dark"] {
+            --bg-primary: #0f0f23;
+            --bg-secondary: #1a1a2e;
+            --bg-tertiary: #16213e;
+            --text-primary: #e94560;
+            --text-secondary: #f4f4f4;
+            --border-color: #e94560;
+            --shadow-color: rgba(233, 69, 96, 0.3);
+            --glow-color: rgba(233, 69, 96, 0.5);
+            --font-main: 'Orbitron', sans-serif;
+            --font-size-base: 15px;
+            --border-style: solid;
+            --border-width: 2px;
+        }
+
+        /* === TEMA PDF CLEAN === */
+        [data-theme="pdf"] {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --bg-tertiary: #e9ecef;
+            --text-primary: #212529;
+            --text-secondary: #495057;
+            --border-color: #dee2e6;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --glow-color: rgba(0, 0, 0, 0.05);
+            --font-main: 'Crimson Text', serif;
+            --font-size-base: 16px;
+            --border-style: solid;
+            --border-width: 1px;
+        }
+
+        /* === TEMA CYBERPUNK === */
+        [data-theme="cyberpunk"] {
+            --bg-primary: #0a0e27;
+            --bg-secondary: #1a1d3a;
+            --bg-tertiary: #2a2d4a;
+            --text-primary: #00ffff;
+            --text-secondary: #ff00ff;
+            --border-color: #ff00ff;
+            --shadow-color: rgba(255, 0, 255, 0.5);
+            --glow-color: rgba(0, 255, 255, 0.6);
+            --font-main: 'Orbitron', sans-serif;
+            --font-size-base: 16px;
+            --border-style: solid;
+            --border-width: 2px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            font-size: var(--font-size-base);
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        /* Layout Principal */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 650px;
+            gap: 0;
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+
+        .content-area {
+            overflow-y: auto;
+            padding: 20px;
+            height: 100vh;
+        }
+
+        .content-wrapper {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .chat-sidebar {
+            background: var(--bg-secondary);
+            border-left: var(--border-width) var(--border-style) var(--border-color);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            position: sticky;
+            top: 0;
+            right: 0;
+        }
+
+        /* Header con selector de temas */
+        .header {
+            background: var(--bg-secondary);
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+            position: relative;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .header-content {
+            flex: 1;
+            text-align: center;
+        }
+
+        .theme-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 10px;
+            background: var(--bg-tertiary);
+            border: 1px var(--border-style) var(--border-color);
+            border-radius: 8px;
+        }
+
+        .theme-btn {
+            padding: 10px 16px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px var(--border-style) var(--border-color);
+            cursor: pointer;
+            font-family: var(--font-main);
+            font-size: 13px;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            border-radius: 6px;
+            text-align: center;
+            min-width: 120px;
+        }
+
+        .theme-btn:hover {
+            box-shadow: 0 0 10px var(--glow-color);
+            transform: scale(1.05);
+        }
+
+        .theme-btn.active {
+            background: var(--text-primary);
+            color: var(--bg-primary);
+            font-weight: bold;
+        }
+
+        .header-title {
+            font-size: 2.5rem;
+            color: var(--text-primary);
+            margin: 10px 0;
+            text-shadow: 0 0 10px var(--glow-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .aidan-logo {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: 2px solid var(--border-color);
+            box-shadow: 0 0 15px var(--glow-color);
+        }
+
+        .header-subtitle {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            letter-spacing: 1px;
+            font-family: 'VT323', monospace;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s;
+            border-radius: 10px;
+        }
+
+        .stat-card:hover {
+            box-shadow: 0 0 25px var(--glow-color);
+            background: var(--bg-tertiary);
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            text-shadow: 0 0 10px var(--shadow-color);
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            text-transform: uppercase;
+        }
+
+        /* Alerts */
+        .section-title {
+            font-size: 2rem;
+            color: var(--text-primary);
+            margin: 25px 0;
+            padding: 10px;
+            border: var(--border-width) var(--border-style) var(--border-color);
+            background: var(--bg-secondary);
+            text-shadow: 0 0 10px var(--shadow-color);
+            text-align: center;
+            border-radius: 8px;
+        }
+
+        .alerts-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .alert-item {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border: var(--border-width) var(--border-style) var(--border-color);
+            box-shadow: 0 0 10px var(--shadow-color);
+            transition: all 0.3s;
+            border-radius: 10px;
+        }
+
+        .alert-item:hover {
+            box-shadow: 0 0 25px var(--glow-color);
+        }
+
+        .alert-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .alert-level, .alert-score {
+            padding: 5px 15px;
+            font-size: 1rem;
+            text-transform: uppercase;
+            border-radius: 6px;
+            font-weight: bold;
+        }
+
+        .alert-item.high-impact .alert-level,
+        .alert-item.high-impact .alert-score {
+            background: #ff4444;
+            color: #000;
+            box-shadow: 0 0 15px rgba(255, 68, 68, 0.6);
+        }
+
+        .alert-item.medium-impact .alert-level,
+        .alert-item.medium-impact .alert-score {
+            background: #ffcc00;
+            color: #000;
+            box-shadow: 0 0 15px rgba(255, 204, 0, 0.6);
+        }
+
+        .alert-item:not(.high-impact):not(.medium-impact) .alert-level,
+        .alert-item:not(.high-impact):not(.medium-impact) .alert-score {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px var(--border-style) var(--border-color);
+        }
+
+        .alert-title {
+            font-size: 1.5rem;
+            color: var(--text-primary);
+            margin-bottom: 15px;
+            line-height: 1.4;
+            font-weight: bold;
+        }
+
+        .alert-detail-section {
+            background: var(--bg-tertiary);
+            border-left: 3px var(--border-style) var(--border-color);
+            padding: 15px;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 1.2rem;
+        }
+
+        .detail-title {
+            color: var(--text-primary);
+            font-size: 1.4rem;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        /* === SECCIÓN DE SEÑALES CLARA === */
+        .signal-box {
+            background: var(--bg-secondary);
+            border: 3px solid var(--border-color);
+            padding: 25px;
+            margin: 20px 0;
+            border-radius: 12px;
+            box-shadow: 0 0 30px var(--glow-color);
+        }
+
+        .signal-title {
+            font-size: 1.8rem;
+            color: var(--text-primary);
+            text-align: center;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 15px var(--glow-color);
+        }
+
+        .signal-decision {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .signal-action {
+            font-size: 1.8rem;
+            font-weight: bold;
+            padding: 12px 25px;
+            border-radius: 8px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            animation: pulse 2s infinite;
+            text-shadow: 0 0 15px currentColor;
+        }
+
+        .signal-action.operate {
+            background: #00ff00;
+            color: #000;
+            border: 2px solid #00ff00;
+            box-shadow: 0 0 25px #00ff00;
+        }
+
+        .signal-action.no-operate {
+            background: #ff0000;
+            color: #000;
+            border: 2px solid #ff0000;
+            box-shadow: 0 0 25px #ff0000;
+        }
+
+        .signal-direction {
+            font-size: 1.5rem;
+            font-weight: bold;
+            padding: 10px 25px;
+            border-radius: 6px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .signal-direction.call {
+            background: #00ff00;
+            color: #000;
+            border: 2px solid #00ff00;
+            box-shadow: 0 0 20px #00ff00;
+        }
+
+        .signal-direction.put {
+            background: #ff4444;
+            color: #fff;
+            border: 2px solid #ff4444;
+            box-shadow: 0 0 20px #ff4444;
+        }
+
+        .signal-confidence {
+            font-size: 1.5rem;
+            color: var(--text-primary);
+            text-align: center;
+            margin: 10px 0;
+        }
+
+        .signal-timeframe {
+            font-size: 1.3rem;
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 10px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 20px;
+            margin-top: 30px;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .footer a {
+            color: var(--text-primary);
+            text-decoration: none;
+            border: 1px solid var(--border-color);
+            padding: 5px 12px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .footer a:hover {
+            background: var(--text-primary);
+            color: var(--bg-primary);
+            box-shadow: 0 0 10px var(--glow-color);
+        }
+
+        .alert-time {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 15px;
+        }
+
+        .alert-link {
+            color: var(--text-primary);
+            text-decoration: none;
+            border: 1px var(--border-style) var(--border-color);
+            padding: 5px 10px;
+            transition: all 0.2s;
+            border-radius: 4px;
+        }
+
+        .alert-link:hover {
+            background: var(--text-primary);
+            color: var(--bg-primary);
+        }
+
+        /* === CHAT SIDEBAR === */
+        .chat-header {
+            background: var(--bg-tertiary);
+            padding: 15px;
+            border-bottom: var(--border-width) var(--border-style) var(--border-color);
+            text-align: center;
+            border-radius: 0;
+        }
+
+        .chat-title {
+            font-size: 1.5rem;
+            color: var(--text-primary);
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .chat-title img {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid var(--border-color);
+        }
+
+        .chat-subtitle {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .chat-message {
+            padding: 12px;
+            border-radius: 8px;
+            max-width: 85%;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .chat-message.user {
+            background: var(--bg-tertiary);
+            border: 1px var(--border-style) var(--border-color);
+            align-self: flex-end;
+            color: var(--text-primary);
+        }
+
+        .chat-message.assistant {
+            background: var(--bg-secondary);
+            border: 1px var(--border-style) var(--text-primary);
+            align-self: flex-start;
+            color: var(--text-secondary);
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+
+        .chat-message.assistant::before {
+            content: '';
+            display: block;
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            background-image: url('/static/vaultboy_avatar.png');
+            background-size: cover;
+            background-position-x: center;
+            border-radius: 50%;
+            border: 1px solid var(--border-color);
+        }
+
+        .chat-message.system {
+            background: transparent;
+            border: none;
+            align-self: center;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            font-style: italic;
+            max-width: 100%;
+            text-align: center;
+        }
+
+        .chat-message-content {
+            flex: 1;
+        }
+
+        .chat-input-area {
+            padding: 15px;
+            border-top: var(--border-width) var(--border-style) var(--border-color);
+            background: var(--bg-tertiary);
+        }
+
+        .chat-image-upload {
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .chat-image-label {
+            display: inline-block;
+            padding: 8px 16px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px var(--border-style) var(--border-color);
+            cursor: pointer;
+            font-family: var(--font-main);
+            font-size: 12px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .chat-image-label:hover {
+            box-shadow: 0 0 10px var(--glow-color);
+        }
+
+        #chatImageInput {
+            display: none;
+        }
+
+        .chat-image-preview {
+            margin-top: 10px;
+            max-width: 200px;
+            border: 1px var(--border-style) var(--border-color);
+            border-radius: 4px;
+        }
+
+        .chat-input-container {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 10px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px var(--border-style) var(--border-color);
+            font-family: var(--font-main);
+            font-size: 14px;
+            resize: none;
+            border-radius: 6px;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            box-shadow: 0 0 10px var(--glow-color);
+        }
+
+        .chat-send-btn {
+            padding: 10px 20px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: var(--border-width) var(--border-style) var(--border-color);
+            cursor: pointer;
+            font-family: var(--font-main);
+            transition: all 0.2s;
+            border-radius: 6px;
+        }
+
+        .chat-send-btn:hover:not(:disabled) {
+            box-shadow: 0 0 15px var(--glow-color);
+            transform: scale(1.05);
+        }
+
+        .chat-send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .chat-clear-btn {
+            width: 100%;
+            padding: 8px;
+            margin-top: 10px;
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+            border: 1px var(--border-style) var(--border-color);
+            cursor: pointer;
+            font-family: var(--font-main);
+            font-size: 12px;
+            border-radius: 4px;
+        }
+
+        .chat-clear-btn:hover {
+            background: var(--bg-secondary);
+        }
+
+        /* Footer explicativo */
+        .footer-info {
+            background: var(--bg-secondary);
+            border: var(--border-width) var(--border-style) var(--border-color);
+            padding: 15px;
+            margin-top: 30px;
+            border-radius: 8px;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .footer-info strong {
+            color: var(--text-primary);
+            display: block;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+
+        /* Botón refresh */
+        .refresh-btn {
+            max-width: 400px;
+            margin: 20px auto;
+            padding: 12px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: var(--border-width) var(--border-style) var(--border-color);
+            cursor: pointer;
+            font-family: var(--font-main);
+            font-size: 1.1rem;
+            transition: all 0.3s;
+            border-radius: 8px;
+            display: block;
+        }
+
+        .refresh-btn:hover:not(:disabled) {
+            box-shadow: 0 0 20px var(--glow-color);
+            background: var(--bg-tertiary);
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .chat-sidebar {
+                display: none;
+            }
+
+            .theme-selector {
+                position: relative;
+                justify-content: center;
+                max-width: 100%;
+                margin-bottom: 15px;
+            }
+        }
+
+        /* Efectos específicos por tema */
+        [data-theme="matrix"] body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 255, 0, 0.03) 0px,
+                transparent 1px,
+                transparent 2px,
+                rgba(0, 255, 0, 0.03) 3px
+            );
+            pointer-events: none;
+            z-index: 1000;
+            animation: flicker 0.15s infinite;
+        }
+
+        @keyframes flicker {
+            0% { opacity: 0.95; }
+            50% { opacity: 1; }
+            100% { opacity: 0.95; }
+        }
+
+        [data-theme="matrix"] body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(ellipse at center, rgba(0, 255, 0, 0.05) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        [data-theme="steampunk"] body {
+            background-image: 
+                repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(139, 111, 71, 0.05) 2px, rgba(139, 111, 71, 0.05) 4px),
+                repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(139, 111, 71, 0.05) 2px, rgba(139, 111, 71, 0.05) 4px);
+        }
+
+        [data-theme="steampunk"] .stat-card::before {
+            content: '⚙';
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            font-size: 1.5rem;
+            opacity: 0.3;
+        }
+
+        [data-theme="modern-dark"] body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, rgba(233, 69, 96, 0.05) 0%, transparent 50%, rgba(233, 69, 96, 0.05) 100%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        [data-theme="cyberpunk"] body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                linear-gradient(90deg, transparent 0%, rgba(0, 255, 255, 0.02) 50%, transparent 100%),
+                linear-gradient(0deg, transparent 0%, rgba(255, 0, 255, 0.02) 50%, transparent 100%);
+            pointer-events: none;
+            z-index: 0;
+            animation: cyberpulse 3s ease-in-out infinite;
+        }
+
+        @keyframes cyberpulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+
+        [data-theme="pdf"] body {
+            background: #ffffff;
+        }
+
+        [data-theme="pdf"] .header,
+        [data-theme="pdf"] .stat-card,
+        [data-theme="pdf"] .alert-item {
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* Loading indicator */
+        .typing-indicator {
+            display: inline-block;
+            padding: 10px;
+        }
+
+        .typing-indicator span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: var(--text-primary);
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-10px); }
+        }
+    </style>
+</head>
+<body data-theme="pdf">
+    <div class="main-layout">
+        <!-- Área de contenido principal -->
+        <div class="content-area">
+            <div class="content-wrapper">
+            <div class="header">
+                <div class="header-content" style="width: 100%;">
+                    <h1 class="header-title">
+                        <span style="font-family: 'VT323', monospace; letter-spacing: 3px;">► AIDAN V1.1</span>
+                        <span style="background: var(--text-primary); color: var(--bg-primary); padding: 5px 15px; border-radius: 6px; font-size: 0.5em; letter-spacing: 2px; animation: pulse 2s infinite;">SISTEMA_EN_LÍNEA</span>
+                    </h1>
+                    <p class="header-subtitle">MOTOR DE ANÁLISIS CUANTITATIVO // 2 DE MARZO 2026</p>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalNews">0</div>
+                    <div class="stat-label">Total Noticias</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalAlerts">0</div>
+                    <div class="stat-label">Alertas Generadas</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="newsLastHour">0</div>
+                    <div class="stat-label">Última Hora</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="apiStatus">...</div>
+                    <div class="stat-label">API Status</div>
+                </div>
+            </div>
+
+            <button class="refresh-btn" onclick="refreshData()">⟳ ACTUALIZAR DATOS</button>
+
+            <!-- Sección de Estrategias (estilo Replit) -->
+            <div class="section-title" style="text-align: left; background: var(--bg-tertiary); border-left: 5px solid var(--text-primary);">
+                [ ESTRATEGIAS.DAT ]
+            </div>
+            <div style="background: var(--bg-secondary); padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 2px solid var(--border-color);">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div style="background: var(--bg-tertiary); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                        <div style="color: var(--text-primary); font-weight: bold; margin-bottom: 8px; text-transform: uppercase;">MOMENTUM CONTINUATION</div>
+                        <div style="color: var(--text-secondary); font-size: 0.9em;">
+                            Seguir el impulso de noticias fuertes (impacto > 85) que contradicen el momentum actual. Operar en dirección opuesta a la tendencia.
+                        </div>
+                        <div style="color: var(--text-primary); margin-top: 8px; font-size: 0.85em;">[ ACT ]</div>
+                    </div>
+                    <div style="background: var(--bg-tertiary); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                        <div style="color: var(--text-primary); font-weight: bold; margin-bottom: 8px; text-transform: uppercase;">TREND REVERSAL</div>
+                        <div style="color: var(--text-secondary); font-size: 0.9em;">
+                            Buscar noticias de alto impacto (score > 85) que contradicen la tendencia actual. Operar en la nueva dirección indicada.
+                        </div>
+                        <div style="color: var(--text-primary); margin-top: 8px; font-size: 0.85em;">[ ACT ]</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Alerts -->
+            <div class="section-title" style="text-align: left; background: var(--bg-tertiary); border-left: 5px solid var(--text-primary);">
+                [ FLUJO_DATOS.ERI ] — INGESTA EN TIEMPO REAL
+            </div>
+            <div class="alerts-container" id="alertsContainer">
+                <div class="alert-item">Cargando...</div>
+            </div>
+
+            <!-- Footer explicativo -->
+            <div class="footer-info">
+                <strong>📈 ¿Qué significa el IMPACTO?</strong>
+                El puntaje de impacto (0-100) mide la probabilidad de que una noticia genere movimientos significativos en el par EUR/USD.
+                <br><br>
+                <strong>ALTO (80-100):</strong> Noticias de alto impacto con alta probabilidad de generar volatilidad inmediata. Ideal para opciones de 1-2 minutos.
+                <br>
+                <strong>MEDIO (60-79):</strong> Impacto moderado, puede generar movimientos. Recomendado para opciones de 3-5 minutos.
+                <br>
+                <strong>BAJO (0-59):</strong> Bajo impacto esperado. No se recomienda operar.
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <a href="/about" target="_blank">ℹ️ About</a>
+                <div style="margin-top: 10px; font-size: 0.8rem;">AIdan v1.1 - Desarrollado por Matias Ramallo - 2026</div>
+            </div>
+            </div>
+        </div>
+
+        <!-- Chat Sidebar -->
+        <div class="chat-sidebar">
+            <div class="chat-header">
+                <div class="chat-title">
+                    <img src="/static/vaultboy.gif" alt="AIdan">
+                    AIdan
+                </div>
+                <div class="chat-subtitle">Tu asistente de trading</div>
+            </div>
+
+            <div class="chat-messages" id="chatMessages">
+                <div class="chat-message system">
+                    👋 Soy AIdan. Preguntá directo sobre las alertas, noticias o estrategias de trading EUR/USD.
+                </div>
+            </div>
+
+            <div class="chat-input-area">
+                <div class="chat-image-upload">
+                    <label for="chatImageInput" class="chat-image-label">
+                        🖼️ Adjuntar imagen/gráfico
+                    </label>
+                    <input type="file" id="chatImageInput" accept="image/*" onchange="handleImageUpload(event)">
+                    <div id="imagePreviewContainer"></div>
+                </div>
+                <div class="chat-input-container">
+                    <textarea 
+                        class="chat-input" 
+                        id="chatInput" 
+                        placeholder="Escribe tu pregunta..."
+                        rows="2"
+                        onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendMessage();}"
+                    ></textarea>
+                    <button class="chat-send-btn" id="chatSendBtn" onclick="sendMessage()">Enviar</button>
+                </div>
+                <button class="chat-clear-btn" onclick="clearChat()">🗑 Limpiar conversación</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let chatContext = [];
+        let currentImageBase64 = null;
+
+        // === MANEJO DE IMÁGENES ===
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Validar que sea imagen
+            if (!file.type.startsWith('image/')) {
+                alert('Por favor selecciona un archivo de imagen válido.');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const base64 = e.target.result.split(',')[1]; // Remover prefijo data:image
+                currentImageBase64 = base64;
+
+                // Mostrar preview
+                const previewContainer = document.getElementById('imagePreviewContainer');
+                previewContainer.innerHTML = `
+                    <div style="position: relative; display: inline-block; margin-top: 10px;">
+                        <img src="${e.target.result}" class="chat-image-preview">
+                        <button onclick="removeImage()" style="position: absolute; top: 5px; right: 5px; background: red; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer;">✕</button>
+                    </div>
+                `;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function removeImage() {
+            currentImageBase64 = null;
+            document.getElementById('imagePreviewContainer').innerHTML = '';
+            document.getElementById('chatImageInput').value = '';
+        }
+
+        // === TEMA MATRIX FIJO ===
+        function initThemeSwitcher() {
+            // Siempre usar tema Matrix
+            document.body.setAttribute('data-theme', 'matrix');
+        }
+
+        // === CHAT FUNCTIONS ===
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const sendBtn = document.getElementById('chatSendBtn');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Deshabilitar input
+            input.disabled = true;
+            sendBtn.disabled = true;
+
+            // Agregar mensaje del usuario
+            addChatMessage('user', message);
+            input.value = '';
+
+            // Mostrar typing indicator
+            const typingDiv = addChatMessage('assistant', '<div class="typing-indicator"><span></span><span></span><span></span></div>');
+
+            try {
+                // Construir contexto completo con toda la conversación
+                const fullContext = chatContext.map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                }));
+
+                const response = await fetch(`${API_BASE}/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        context: fullContext,
+                        image_base64: currentImageBase64
+                    })
+                });
+
+                const data = await response.json();
+
+                // Remover typing indicator
+                typingDiv.remove();
+
+                if (data.status === 'success') {
+                    // Agregar respuesta del asistente
+                    addChatMessage('assistant', data.message);
+                    
+                    // Actualizar contexto
+                    chatContext.push({ role: 'user', content: message });
+                    chatContext.push({ role: 'assistant', content: data.message });
+                    
+                    // Mantener últimos 20 mensajes en contexto (10 pares de interacción)
+                    if (chatContext.length > 20) {
+                        chatContext = chatContext.slice(-20);
+                    }
+
+                    // Limpiar imagen después de enviar
+                    if (currentImageBase64) {
+                        removeImage();
+                    }
+                } else {
+                    addChatMessage('system', '❌ ' + (data.message || 'Error al conectar con Ollama'));
+                }
+            } catch (error) {
+                typingDiv.remove();
+                addChatMessage('system', '❌ Error: ' + error.message);
+                console.error('Chat error:', error);
+            }
+
+            // Re-habilitar input
+            input.disabled = false;
+            sendBtn.disabled = false;
+            input.focus();
+        }
+
+        function addChatMessage(role, content) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${role}`;
+            
+            // Parsear markdown simple: **negrita** y *cursiva*
+            if (role === 'assistant') {
+                let parsed = content
+                    .replace(/\*\*(.+?)\*\*/g, '<strong style="color: #10b981; font-weight: 700;">$1</strong>') // **texto**
+                    .replace(/(?<!\*)\*(?!\*)(.+?)\*(?!\*)/g, '<em style="color: #f59e0b; font-style: italic;">$1</em>') // *texto*
+                    .replace(/\n/g, '<br>'); // saltos de línea
+                messageDiv.innerHTML = `<div class="chat-message-content">${parsed}</div>`;
+            } else {
+                messageDiv.innerHTML = content;
+            }
+            
+            messagesDiv.appendChild(messageDiv);
+            
+            // Auto-scroll al final
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            return messageDiv;
+        }
+
+        function clearChat() {
+            if (confirm('¿Limpiar toda la conversación?')) {
+                chatContext = [];
+                document.getElementById('chatMessages').innerHTML = `
+                    <div class="chat-message system">
+                        🔄 Conversación limpiada. Preguntá lo que necesites.
+                    </div>
+                `;
+            }
+        }
+
+        // === DATA LOADING ===
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/stats`);
+                if (!response.ok) throw new Error('Stats API error');
+                const data = await response.json();
+
+                if (data.data) {
+                    document.getElementById('totalNews').textContent = data.data.total_news.toLocaleString('es-ES');
+                    document.getElementById('totalAlerts').textContent = data.data.total_alerts.toLocaleString('es-ES');
+                    document.getElementById('newsLastHour').textContent = data.data.news_last_hour;
+                    document.getElementById('apiStatus').textContent = '✓ OK';
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+                document.getElementById('apiStatus').textContent = '✗ ERROR';
+            }
+        }
+
+        async function loadAlerts() {
+            try {
+                const response = await fetch(`${API_BASE}/recent-alerts?limit=20`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                const data = await response.json();
+
+                const container = document.getElementById('alertsContainer');
+                
+                if (!data.data || data.data.length === 0) {
+                    container.innerHTML = `
+                        <div class="alert-item" style="text-align: center; padding: 40px;">
+                            <div style="font-size: 2rem; margin-bottom: 15px;">📭</div>
+                            <div style="font-size: 1.2rem; margin-bottom: 10px;">NO HAY ALERTAS AÚN</div>
+                            <div style="color: var(--text-secondary); margin-top: 15px;">
+                                El sistema necesita tiempo para:<br>
+                                • Descargar noticias (cada 10 min)<br>
+                                • Analizar con Ollama (cada 2 min)<br>
+                                • Solo muestra impacto ALTO (≥80)<br><br>
+                                <strong>Espera 15 minutos y refresca</strong>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = '';
+                data.data.forEach((alert) => {
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'alert-item';
+                    
+                    // Agregar clase según impacto
+                    if (alert.impact_score >= 80) {
+                        alertDiv.classList.add('high-impact');
+                    } else if (alert.impact_score >= 60) {
+                        alertDiv.classList.add('medium-impact');
+                    }
+
+                    // Convertir a hora de Argentina (UTC-3)
+                    const date = new Date(alert.sent_at);
+                    const argentinaTime = new Date(date.getTime() - (3 * 60 * 60 * 1000));
+                    const timeStr = argentinaTime.toLocaleString('es-AR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+
+                    // Extraer breve descripción
+                    const explainLines = alert.explanation.split('\n').filter(l => l.trim());
+                    const briefDesc = explainLines.slice(0, 2).join(' ').substring(0, 200) + '...';
+
+                    // Determinar dirección EUR/USD desde la IA
+                    let shouldOperate = alert.should_operate || false;
+                    let direction = alert.direction || 'NEUTRAL';
+                    let confidence = alert.confidence || 50;
+                    let operateClass = shouldOperate ? 'operate' : 'no-operate';
+                    let signalClass = 'put';
+                    let signalText = 'PUT (VENDER)';
+                    let directionIcon = '📉';
+                    
+                    // Determinar clase y texto según dirección de la IA
+                    if (direction === 'CALL') {
+                        signalClass = 'call';
+                        signalText = 'CALL (COMPRAR)';
+                        directionIcon = '📈';
+                    } else if (direction === 'PUT') {
+                        signalClass = 'put';
+                        signalText = 'PUT (VENDER)';
+                        directionIcon = '📉';
+                    } else {
+                        signalClass = 'put';
+                        signalText = 'NEUTRAL';
+                        directionIcon = '➡️';
+                    }
+
+                    // Color de probabilidad
+                    let probColor = '#00ff00';
+                    if (confidence < 70) probColor = '#ffcc00';
+                    if (confidence < 60) probColor = '#ff4444';
+
+                    // Indicador de método de análisis
+                    const methodBadge = alert.analysis_method === 'ollama' 
+                        ? '<span style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);">🤖 IA</span>'
+                        : '<span style="background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.5px; box-shadow: 0 2px 4px rgba(99, 102, 241, 0.3);">🔤 KEYWORDS</span>';
+
+                    alertDiv.innerHTML = `
+                        <div class="alert-header">
+                            <span class="alert-level">IMPACTO ${alert.impact_score}/100</span>
+                            <span class="alert-score">${alert.level}</span>
+                        </div>
+                        
+                        <div class="alert-title">${alert.title}</div>
+                        
+                        <!-- ANÁLISIS COMPLETO PRIMERO -->
+                        <div class="alert-detail-section" style="font-size: 1.1rem; line-height: 1.8; padding: 20px; margin: 20px 0;">
+                            <div class="detail-title" style="font-size: 1.3rem; margin-bottom: 15px;">📊 ANÁLISIS IA</div>
+                            <div style="color: var(--text-secondary);">${alert.explanation}</div>
+                        </div>
+                        
+                        <div class="alert-detail-section" style="font-size: 1.1rem; line-height: 1.8; padding: 20px; margin: 20px 0;">
+                            <div class="detail-title" style="font-size: 1.3rem; margin-bottom: 15px;">💱 IMPACTO EUR/USD</div>
+                            <div style="color: var(--text-secondary);">${alert.eur_usd_impact}</div>
+                        </div>
+                        
+                        <!-- SECCIÓN DE SEÑAL CLARA -->
+                        <div class="signal-box">
+                            <div class="signal-title">[ CAPA DE EJECUCIÓN ]</div>
+                            
+                            <div class="signal-decision">
+                                <div class="signal-action ${operateClass}">
+                                    ${shouldOperate ? '✅ OPERAR' : '🚫 NO OPERAR'}
+                                </div>
+                                
+                                ${shouldOperate ? `
+                                    <div class="signal-direction ${signalClass}">
+                                        ${signalText}
+                                    </div>
+                                    <div class="signal-confidence" style="font-size: 1.2rem;">
+                                        CONFIANZA: <span style="color: ${probColor}; font-weight: bold;">${confidence.toFixed(2)}%</span>
+                                    </div>
+                                    <div class="signal-timeframe" style="font-size: 1rem;">
+                                        ⏱️ Timeframe: 1-5 minutos
+                                    </div>
+                                    <div style="font-size: 1.1rem; color: var(--text-secondary); margin-top: 10px;">
+                                        ${directionIcon} ${direction === 'CALL' ? 'EUR sube vs USD' : direction === 'PUT' ? 'EUR baja vs USD' : 'Sin dirección clara'}
+                                    </div>
+                                ` : `
+                                    <div style="font-size: 1.1rem; color: #ff4444; text-align: center; margin-top: 10px;">
+                                        ⚠️ IA determinó NO OPERAR (Impacto: ${alert.impact_score})
+                                    </div>
+                                `}
+                            </div>
+                        </div>
+                        
+                        <div class="alert-time" style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>⏰ ${timeStr} (AR)</span>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                ${methodBadge}
+                                <a href="${alert.url}" target="_blank" class="alert-link">📰 VER NOTICIA</a>
+                            </div>
+                        </div>
+                    `;
+
+                    container.appendChild(alertDiv);
+                });
+
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+                document.getElementById('alertsContainer').innerHTML = `
+                    <div class="alert-item" style="text-align: center; padding: 40px;">
+                        <div style="font-size: 2rem; margin-bottom: 15px;">⚠️</div>
+                        <div style="font-size: 1.2rem; color: #ff4444; margin-bottom: 10px;">ERROR CONECTANDO A LA API</div>
+                        <div style="color: var(--text-secondary); font-size: 0.9em; margin-top: 10px;">
+                            ${error.message}<br><br>
+                            <strong>Posibles causas:</strong><br>
+                            • El Admin API no está corriendo<br>
+                            • Base de datos necesita recrearse<br>
+                            • Ejecutar: stop_system.bat y start_system.bat
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        async function refreshData() {
+            const btn = document.querySelector('.refresh-btn');
+            btn.disabled = true;
+            btn.textContent = '⏳ ACTUALIZANDO...';
+            
+            await loadStats();
+            await loadAlerts();
+            
+            btn.disabled = false;
+            btn.textContent = 'ACTUALIZAR AHORA';
+        }
+
+        // Initialize
+        window.addEventListener('DOMContentLoaded', () => {
+            initThemeSwitcher();
+            refreshData();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(refreshData, 30000);
+        });
+    </script>
+</body>
+</html>

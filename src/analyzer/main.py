@@ -38,16 +38,24 @@ def run_analyzer():
                 if result and result['should_alert']:
                     logger.info(f"[{result['level']}] Alert for: {title[:50]}")
                     
-                    # Record alert with detailed information
+                    # Record alert with detailed information including AI decision
                     add_alert(
                         news_id=news_id,
                         impact_score=result['impact_score'],
                         alert_level=result['level'],
                         explanation=result['explanation'],
                         eur_usd_impact=result['eur_usd_impact'],
-                        market_implications=result['market_implications']
+                        market_implications=result['market_implications'],
+                        analysis_method=result.get('analysis_method', 'keywords'),
+                        should_operate=result.get('should_operate', False),
+                        direction=result.get('direction', 'NEUTRAL'),
+                        confidence=result.get('confidence', 50)
                     )
                     alerts_sent += 1
+                elif result:
+                    logger.info(f"[{result['level']}] No alert (should_operate=False): {title[:50]}")
+                else:
+                    logger.warning(f"Analysis failed (no AI available?): {title[:50]}")
                 
                 # Mark as processed
                 mark_news_processed(news_id)

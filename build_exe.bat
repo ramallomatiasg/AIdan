@@ -1,53 +1,72 @@
 @echo off
 chcp 65001 > nul
-title AIdan - Compilador a Ejecutables
+title AIdan - Compilador Universal
 color 0B
 
 echo.
 echo ════════════════════════════════════════════════════════════════
-echo    🔨 COMPILANDO AIDAN A EJECUTABLES
+echo    🔨 COMPILANDO AIDAN LAUNCHER (Todo-en-Uno)
 echo ════════════════════════════════════════════════════════════════
 echo.
 
 cd /d F:\AIdan
 
-echo [1/5] 📦 Instalando PyInstaller...
+echo [1/3] 📦 Instalando PyInstaller...
 python -m pip install pyinstaller --quiet --upgrade
 timeout /t 2 /nobreak > nul
 
-echo [2/5] ⚙️ Compilando AIdan_Desktop.exe (Todo-en-Uno)...
+echo [2/3] ⚙️ Compilando AIdan_Launcher.exe...
 pyinstaller --onefile ^
-    --name "AIdan_Desktop" ^
+    --name "AIdan_Launcher" ^
+    --add-data "dashboard_multi_theme.html;." ^
     --add-data "dashboard_retro.html;." ^
     --add-data "about.html;." ^
     --add-data "config;config" ^
     --add-data "static;static" ^
+    --add-data "src;src" ^
     --hidden-import uvicorn.logging ^
     --hidden-import uvicorn.loops ^
     --hidden-import uvicorn.loops.auto ^
     --hidden-import uvicorn.protocols.http.auto ^
     --hidden-import uvicorn.protocols.websockets.auto ^
     --hidden-import uvicorn.lifespan.on ^
-    --hidden-import webview ^
+    --hidden-import tkinter ^
+    --hidden-import winreg ^
     --collect-all uvicorn ^
     --collect-all fastapi ^
-    --collect-all webview ^
-    --noconsole ^
-    run_desktop.py
+    --collect-all feedparser ^
+    --collect-all requests ^
+    --windowed ^
+    AIdan_Launcher.py
 
-echo [3/5] ⚙️ Compilando AIdan_Admin.exe (API)...
-pyinstaller --onefile ^
-    --name "AIdan_Admin" ^
-    --add-data "dashboard_retro.html;." ^
-    --add-data "about.html;." ^
-    --add-data "static;static" ^
-    --add-data "config;config" ^
-    --hidden-import uvicorn.logging ^
-    --hidden-import uvicorn.loops.auto ^
-    --hidden-import uvicorn.protocols.http.auto ^
-    --hidden-import uvicorn.protocols.websockets.auto ^
-    --hidden-import uvicorn.lifespan.on ^
-    --collect-all uvicorn ^
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo ❌ Error en la compilación
+    pause
+    exit /b 1
+)
+
+echo.
+echo [3/3] 🧹 Limpiando archivos temporales...
+if exist "build" rmdir /s /q "build"
+if exist "AIdan_Launcher.spec" del /f "AIdan_Launcher.spec"
+
+echo.
+echo ════════════════════════════════════════════════════════════════
+echo    ✅ COMPILACIÓN COMPLETA
+echo ════════════════════════════════════════════════════════════════
+echo.
+echo    📦 Ejecutable: dist\AIdan_Launcher.exe
+echo    📄 Archivos necesarios para distribuir:
+echo       - dist\AIdan_Launcher.exe
+echo       - config\sources.yaml
+echo       - static\ (carpeta completa)
+echo       - LEEME.txt
+echo.
+echo    ⚠️  El usuario final NO necesita Python instalado
+echo    ⚠️  El usuario SÍ necesita instalar Ollama (lo hace automático)
+echo.
+pause
     --collect-all fastapi ^
     --noconsole ^
     src\admin\main.py

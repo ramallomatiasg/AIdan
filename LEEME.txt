@@ -2,57 +2,61 @@
   💱 AIdan v1.1 - Sistema de Trading EUR/USD
 ════════════════════════════════════════════════════════════════════
 
-🚀 INICIO RÁPIDO (2 pasos):
+� ¿QUÉ ES AIDAN?
 
-   PASO 1: Doble click en start_system.bat
-           (Empieza a recolectar noticias)
+   Sistema que monitorea noticias financieras 24/7 y te dice:
    
-   PASO 2: Abre tu navegador en: http://localhost:8000
-           (Ver dashboard con alertas)
-
-   ⚠️  Deja la ventana negra abierta mientras usas AIdan
+   ✅ Cuándo OPERAR en EUR/USD (CALL o PUT)
+   ❌ Cuándo NO operar
+   📊 Impacto esperado en pips
+   ⏰ Timeframe recomendado (1-5 minutos)
+   🎯 Probabilidad de acierto
    
-   Para cerrar: Ctrl+C en la ventana negra o cierra la ventana
+   TODO automático con IA local (gratis).
 
 ════════════════════════════════════════════════════════════════════
 
-🖥️ VERSIÓN VENTANA (opcional):
+🚀 CÓMO USAR (1 solo paso):
 
-   PASO 1: Doble click en start_system.bat
-           (Inicia los servicios de recolección)
+   ▶️  Doble click en: AIdan_Launcher.exe
    
-   PASO 2: Doble click en dist/AIdan_Desktop.exe
-           (Abre ventana con el dashboard)
+   Se abrirá una ventana que hace TODO:
+   - Verifica si tenés Ollama (IA)
+   - Te ofrece instalarlo si no lo tenés
+   - Inicia todos los servicios
+   - Abre el dashboard en tu navegador
    
-   ✅ La ventana se conecta automáticamente a los servicios
-   ✅ Se actualiza en tiempo real con nuevas noticias
+   ¡Listo! Ya está funcionando.
+   
+   ⚠️ Mantené la ventana de AIdan abierta mientras lo usás
 
 ════════════════════════════════════════════════════════════════════
 
-💡 QUÉ VES EN EL DASHBOARD:
+💡 QUÉ VAS A VER EN EL DASHBOARD:
 
-   📰 Noticias financieras en tiempo real
-   📊 Impacto en EUR/USD (0-100)
-   🎯 Señales CALL/PUT para trading
-   ⏰ Timeframes (1-5 minutos)
-   🟢🟡🔴 Probabilidad de acierto
-
-   Solo se muestran noticias de ALTO impacto (score ≥ 80)
+   📰 Noticias de Bloomberg, Reuters, Financial Times
+   🔥 Solo noticias de ALTO impacto (score ≥ 80)
+   💬 Chat con IA para consultas
+   📊 Análisis técnico automático
+   🎯 Señales claras: CALL / PUT / NO OPERAR
 
 ════════════════════════════════════════════════════════════════════
 
-🧠 MEJORAR CON IA (opcional):
+🛠️ MODO AVANZADO (desarrolladores):
 
-   1. Instala Ollama: https://ollama.com/download
-   2. Abre PowerShell:
-      ollama pull llama3.1:8b
-   3. Reinicia AIdan
-
-   ✅ Análisis más preciso con IA local gratis
-
+   Si preferís controlar los servicios manualmente:
+   
+   1. start_system.bat  → Inicia servicios en terminal
+   2. Abre: http://localhost:8000
+   3. stop_system.bat   → Detiene todo
+   
+   Verificar estado: verificar_sistema.bat
 
 ════════════════════════════════════════════════════════════════════
 
 📞 AYUDA:
 
    Desarrollado por Matias Ramallo
+   Versión: 1.1
+   
+   Ollama (IA): https://ollama.com/download

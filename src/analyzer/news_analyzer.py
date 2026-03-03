@@ -50,28 +50,46 @@ class NewsAnalyzer:
         """Verifica si Ollama está disponible"""
         try:
             import requests
-            response = requests.get('http://localhost:11434/api/tags', timeout=2)
+            response = requests.get('http://localhost:11434/api/tags', timeout=3)
             if response.status_code == 200:
                 models = response.json().get('models', [])
                 # Verifica si hay algún modelo Llama disponible
-                return any('llama' in m.get('name', '').lower() for m in models)
+                has_llama = any('llama' in m.get('name', '').lower() for m in models)
+                if has_llama:
+                    return True
+                else:
+                    self.logger.warning("Ollama está corriendo pero no tiene modelo Llama instalado")
+                    self.logger.warning("Ejecutar: ollama pull llama3.1:8b")
+                    return False
             return False
-        except:
+        except requests.exceptions.Timeout:
+            self.logger.warning("Ollama timeout - no está respondiendo")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.logger.warning("Ollama no está corriendo en localhost:11434")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error verificando Ollama: {str(e)}")
             return False
     
     def analyze(self, news_id, title, summary, entities, tags):
-        """Analyze news and calculate impact score with EUR/USD analysis"""
+        """Analyze news and calculate impact score with EUR/USD analysis - REQUIRES AI"""
         try:
-            # Use AI analysis if available, fallback to keywords
-            if self.ai_mode in ['ollama', 'claude']:
-                result = self._analyze_with_ai(news_id, title, summary, entities, tags)
-                if result:
-                    return result
-                # If AI fails, fallback to keywords
-                self.logger.warning(f"AI analysis failed, using keywords fallback")
+            # SOLO USAR IA - NO KEYWORDS
+            if self.ai_mode not in ['ollama', 'claude']:
+                self.logger.error(f"AI NOT AVAILABLE - Ollama debe estar corriendo. No se analizará la noticia.")
+                return None
             
-            # Keyword-based analysis (original logic)
-            score = self._calculate_impact_score(title, summary, entities, tags)
+            result = self._analyze_with_ai(news_id, title, summary, entities, tags)
+            if result:
+                return result
+            
+            # Si falla la IA, NO analizar
+            self.logger.error(f"AI analysis failed for news {news_id} - Noticia NO procesada")
+            return None
+            
+            # CÓDIGO KEYWORDS DESHABILITADO - SOLO IA
+            # score = self._calculate_impact_score(title, summary, entities, tags)
             
             # Determine severity level
             if score >= 80:
@@ -93,6 +111,7 @@ class NewsAnalyzer:
                 'explanation': explanation,
                 'eur_usd_impact': eur_usd_impact,
                 'market_implications': market_implications,
+                'analysis_method': 'keywords',
                 'should_alert': score >= 80  # Only ALTA alerts
             }
         except Exception as e:
@@ -322,32 +341,60 @@ class NewsAnalyzer:
         try:
             import requests
             
-            prompt = f"""Eres un analista experto de mercados financieros especializado en EUR/USD y trading de opciones binarias.
+            prompt = f"""Sos analista de trading de opciones binarias EUR/USD. Tu único trabajo: decidir si OPERAR o NO OPERAR.
 
-Analiza esta noticia:
+Noticia:
 TÍTULO: {title}
 CONTENIDO: {summary[:500]}
 
-Evalúa el impacto en EUR/USD y genera una señal de trading.
-
-Responde SOLO con un JSON válido (sin texto adicional, sin markdown):
+Responde SOLO con JSON válido (sin markdown, sin ```json):
 {{
     "impact_score": 85,
     "level": "ALTA",
+    "should_operate": true,
     "direction": "CALL",
-    "confidence": 75,
-    "timeframe": "3-5 minutos",
-    "explanation": "Explica brevemente por qué",
-    "eur_usd_impact": "Describe el impacto en el par",
-    "market_implications": "Recomendación de trading específica"
+    "confidence": 78.50,
+    "timeframe": "1-5 min",
+    "explanation": "Fed baja tasas de interés. Dólar se debilita inmediatamente.",
+    "eur_usd_impact": "CALL (COMPRAR EUR) - El EUR/USD va a subir. Probabilidad 85%. Razón: Tasas más bajas en USA hacen que el USD pierda valor frente al EUR.",
+    "market_implications": "ACCIÓN: OPERAR → Comprar CALL de 5 minutos. Entrada: INMEDIATA después del anuncio. Target: +15 pips. Stop loss: -10 pips si baja."
 }}
 
-Reglas:
-- impact_score: 0-100 (impacto en el mercado)
-- level: ALTA (score>80), MEDIA (50-80), o BAJA (<50)
-- direction: CALL (sube EUR/USD), PUT (baja EUR/USD), NEUTRAL
-- confidence: 0-100 (probabilidad de acierto)
-- timeframe: "1-5 minutos" ideal para binarias"""
+REGLAS ESTRICTAS:
+
+1. impact_score (0-100): Qué tan importante es la noticia
+   - 90-100: Fed/ECB anuncia cambio de tasas
+   - 80-89: Datos inflación, empleo, PIB importantes
+   - 60-79: Noticias económicas secundarias
+   - <60: Corporativas, earnings
+
+2. confidence (0-100 con 2 decimales): % REAL de probabilidad de acertar
+   - DEBE ser INDEPENDIENTE del impact_score
+   - Basado en: claridad de la noticia, volatilidad esperada, timing
+   - Ejemplo: impact=90 pero confidence=72.35 si hay incertidumbre
+   - Ejemplo: impact=85 pero confidence=91.80 si la señal es muy clara
+   - SIEMPRE con 2 decimales: 78.50, 91.25, 65.00
+
+3. should_operate: 
+   - true SOLO si impact_score >= 80 Y hay dirección clara (CALL/PUT) Y confidence >= 60
+   - false si score < 80 O confidence < 60 O la noticia es irrelevante
+
+4. direction:
+   - "CALL" = COMPRAR (EUR sube vs USD)
+   - "PUT" = VENDER (EUR baja vs USD)  
+   - "NEUTRAL" solo si realmente no afecta al par
+
+5. explanation: MÁXIMO 3 líneas. Qué pasó y por qué importa.
+
+6. eur_usd_impact: EMPEZAR con "CALL" o "PUT" o "NEUTRAL". Explicar impacto en 2-3 frases.
+
+7. market_implications: Si should_operate=true, EMPEZAR con "ACCIÓN: OPERAR". Si false, "ACCIÓN: NO OPERAR".
+
+PRIORIDAD:
+- Claridad brutal
+- Números concretos (pips, %, minutos)
+- Decisión binaria: OPERAR o NO OPERAR
+- Confidence INDEPENDIENTE del impact"""
 
             self.logger.info(f"Analizando noticia #{news_id} con Ollama/Llama...")
             
@@ -382,17 +429,28 @@ Reglas:
                 self.logger.error("No se encontró JSON válido en respuesta de Ollama")
                 return None
             
-            self.logger.info(f"✅ Ollama análisis exitoso: {result.get('level')} - {result.get('direction')}")
+            should_operate = result.get('should_operate', False)
+            impact_score = int(result.get('impact_score', 50))
+            confidence = float(result.get('confidence', 50.0))
+            
+            # Validación: solo alertar si should_operate es True Y score >= 80
+            should_alert = should_operate and impact_score >= 80
+            
+            self.logger.info(f"✅ Ollama: {result.get('level')} - {result.get('direction')} - OPERAR: {should_operate} - Confianza: {confidence:.2f}%")
             
             # Formatear resultado
             return {
                 'news_id': news_id,
-                'impact_score': int(result.get('impact_score', 50)),
+                'impact_score': impact_score,
                 'level': result.get('level', 'MEDIA'),
                 'explanation': result.get('explanation', ''),
                 'eur_usd_impact': result.get('eur_usd_impact', ''),
                 'market_implications': result.get('market_implications', ''),
-                'should_alert': result.get('level') == 'ALTA'
+                'analysis_method': 'ollama',
+                'should_operate': should_operate,
+                'direction': result.get('direction', 'NEUTRAL'),
+                'confidence': confidence,
+                'should_alert': should_alert
             }
             
         except Exception as e:

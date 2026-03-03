@@ -26,7 +26,7 @@ def init_db():
         )
     """)
     
-    # Alerts table - UPDATED con explicación y EUR/USD impact
+    # Alerts table - UPDATED con explicación, EUR/USD impact, y should_operate
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS alerts (
             id INTEGER PRIMARY KEY,
@@ -36,6 +36,10 @@ def init_db():
             explanation TEXT,
             eur_usd_impact TEXT,
             market_implications TEXT,
+            analysis_method TEXT,
+            should_operate INTEGER DEFAULT 0,
+            direction TEXT,
+            confidence REAL,
             alert_sent_at TIMESTAMP,
             telegram_message_id INTEGER,
             FOREIGN KEY(news_id) REFERENCES news(id)
@@ -97,29 +101,30 @@ def mark_news_processed(news_id):
     conn.commit()
     conn.close()
 
-def add_alert(news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications):
-    """Log an alert with detailed information"""
+def add_alert(news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method='keywords', should_operate=False, direction='NEUTRAL', confidence=50):
+    """Log an alert with detailed information including AI decision"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO alerts (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, alert_sent_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, datetime.utcnow()))
+        INSERT INTO alerts (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, should_operate, direction, confidence, alert_sent_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, 1 if should_operate else 0, direction, confidence, datetime.utcnow()))
     conn.commit()
     conn.close()
 
 def get_recent_alerts(limit=50):
-    """Get recent alerts - HIGH impact only, max 20"""
+    """Get recent alerts - only AI-analyzed with ALTA level"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Solo traer alertas ALTA (HIGH)
+    # Solo traer alertas ALTA analizadas por IA (Ollama)
     cursor.execute("""
         SELECT a.id, a.impact_score, a.alert_level, a.alert_sent_at, 
-               n.title, n.url, a.explanation, a.eur_usd_impact, a.market_implications
+               n.title, n.url, a.explanation, a.eur_usd_impact, a.market_implications, 
+               a.analysis_method, a.should_operate, a.direction, a.confidence
         FROM alerts a
         JOIN news n ON a.news_id = n.id
-        WHERE a.alert_level = 'ALTA'
+        WHERE a.alert_level = 'ALTA' AND a.analysis_method = 'ollama'
         ORDER BY a.alert_sent_at DESC
         LIMIT ?
     """, (min(limit, 20),))  # Max 20
