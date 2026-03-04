@@ -36,7 +36,7 @@ pip install -r requirements.txt
 
 ## 📦 Para Compartir
 
-Tu amigo solo necesita estos archivos:
+Solo se necesita estos archivos:
 
 ```
 AIdan/
