@@ -40,10 +40,12 @@ data/
 logs/
 *.log
 
-# PyInstaller build artifacts (pero mantener .spec)
+# PyInstaller
 build/
+dist/
+AIdan_TodoEnUno.spec
 
-# Environment variables
+# Distribución
 .env
 .env.local
 
@@ -59,8 +61,19 @@ build/
 Thumbs.db
 
 # Distribución
-AIdan_Para_Compartir.zip
+AIdan_Portable/
+AIdan_Portable.zip
 *.zip
 
 # Temporal
 check_db.py
+
+# Archivos obsoletos
+about.html
+dashboard_*.html
+AIdan_Launcher.*
+AIdan_Analyzer.*
+AIdan_Collector.*
+AIdan_API.*
+LEEME.txt
+COMO_COMPARTIR.txt

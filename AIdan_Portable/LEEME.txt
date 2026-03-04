@@ -1,8 +1,8 @@
 ════════════════════════════════════════════════════════════════════
-  💱 AIdan v1.1 - Sistema de Trading EUR/USD
+  💱 AIdan v1.2 - Sistema de Trading EUR/USD (100% Portable)
 ════════════════════════════════════════════════════════════════════
 
-� ¿QUÉ ES AIDAN?
+🎯 ¿QUÉ ES AIDAN?
 
    Sistema que monitorea noticias financieras 24/7 y te dice:
    
@@ -18,45 +18,44 @@
 
 🚀 CÓMO USAR (1 solo paso):
 
-   ▶️  Doble click en: AIdan_Launcher.exe
+   ▶️  Doble click en: AIdan.exe
    
-   Se abrirá una ventana que hace TODO:
-   - Verifica si tenés Ollama (IA)
-   - Te ofrece instalarlo si no lo tenés
-   - Inicia todos los servicios
+   Se abre una ventana que hace TODO automáticamente:
+   - Verifica/instala Ollama (motor de IA)
+   - Inicia 3 servicios integrados
    - Abre el dashboard en tu navegador
    
-   ¡Listo! Ya está funcionando.
+   ⚠️ IMPORTANTE: Mantené las ventanas CMD abiertas
+      (Son 3 ventanas negras - podés minimizarlas pero NO cerrarlas)
    
-   ⚠️ Mantené la ventana de AIdan abierta mientras lo usás
+   ⚠️ 100% portable - NO necesita Python instalado
 
 ════════════════════════════════════════════════════════════════════
 
-💡 QUÉ VAS A VER EN EL DASHBOARD:
+💡 QUÉ VAS A VER:
 
+   Dashboard: http://localhost:8000
+   
    📰 Noticias de Bloomberg, Reuters, Financial Times
-   🔥 Solo noticias de ALTO impacto (score ≥ 80)
+   🔥 Solo alertas de ALTO impacto (score ≥ 80)
    💬 Chat con IA para consultas
-   📊 Análisis técnico automático
-   🎯 Señales claras: CALL / PUT / NO OPERAR
+   🎯 Señales: CALL / PUT / NO OPERAR
 
 ════════════════════════════════════════════════════════════════════
 
-🛠️ MODO AVANZADO (desarrolladores):
+🛠️ CONTENIDO:
 
-   Si preferís controlar los servicios manualmente:
-   
-   1. start_system.bat  → Inicia servicios en terminal
-   2. Abre: http://localhost:8000
-   3. stop_system.bat   → Detiene todo
-   
-   Verificar estado: verificar_sistema.bat
+   • AIdan.exe          - Ejecutable único (23MB)
+   • config/            - Configuración RSS
+   • static/            - Recursos web
+   • LEEME.txt          - Este archivo
+   • README.md, LICENSE - Documentación
 
 ════════════════════════════════════════════════════════════════════
 
 📞 AYUDA:
 
-   Desarrollado por Matias Ramallo
-   Versión: 1.1
-   
-   Ollama (IA): https://ollama.com/download
+   Matias Ramallo
+   https://github.com/ramallomatiasg/AIdan
+   Ollama: https://ollama.com/download
+

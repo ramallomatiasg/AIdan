@@ -1,6 +1,8 @@
-# 💱 AIdan v1.1 - Sistema de Trading EUR/USD con IA
+# 💱 AIdan v1.2 - Sistema de Trading EUR/USD con IA (100% Portable)
 
 Sistema automatizado que monitorea noticias financieras 24/7 y genera señales de trading para EUR/USD utilizando análisis de IA local.
+
+**❗ Versión 1.2 - Ahora completamente portable, NO requiere Python instalado**
 
 ## 🎯 Características
 
@@ -13,56 +15,92 @@ Sistema automatizado que monitorea noticias financieras 24/7 y genera señales d
 
 ## 🚀 Instalación Rápida
 
-### Opción 1: Ejecutable (Más fácil)
+### ✅ Opción 1: Ejecutable Portable (Recomendado)
 
-1. Descarga `AIdan_Launcher.exe` de la carpeta `dist/`
-2. Doble click - ¡listo!
+1. Descarga y descomprime `AIdan_Portable.zip`
+2. Doble click en `AIdan_Launcher.exe`
+3. ¡Listo!
 
-El ejecutable verificará e instalará Ollama automáticamente si no lo tenés.
+**Ventajas:**
+- ✅ NO necesita Python instalado
+- ✅ 100% portable
+- ✅ Incluye 4 ejecutables optimizados
+- ✅ Instalación automática de Ollama
 
-### Opción 2: Desde código
+### Opción 2: Desarrollo (Requiere Python)
 
 ```powershell
-# 1. Instalar Ollama
+# 1. Clonar repositorio
+git clone https://github.com/ramallomatiasg/AIdan.git
+cd AIdan
+
+# 2. Instalar Ollama
 # Descargar: https://ollama.com/download/windows
 ollama pull llama3.1:8b
 
-# 2. Instalar dependencias
+# 3. Instalar dependencias Python
 pip install -r requirements.txt
 
-# 3. Iniciar sistema
-.\start_system.bat
+# 4. Iniciar en modo desarrollo
+python AIdan_Launcher.py
 ```
 
-## 📦 Para Compartir
+## 📦 Distribución
 
-Tu amigo solo necesita estos archivos:
+Para crear un paquete portable listo para compartir:
+
+```powershell
+# Compilar todos los ejecutables
+.\build_exe.bat
+
+# Crear paquete portable
+.\crear_paquete.bat
+```
+
+Esto genera `AIdan_Portable.zip` con todo lo necesario:
 
 ```
-AIdan/
-├── AIdan_Launcher.exe  ⭐ (ejecutable principal)
+AIdan_Portable/
+├── AIdan_Launcher.exe   ⭐ Maestro (inicia todo)
+├── AIdan_Collector.exe  📰 Recolector de noticias
+├── AIdan_Analyzer.exe   🤖 Analizador con IA
+├── AIdan_API.exe        🌐 Servidor dashboard
 ├── config/
 │   └── sources.yaml
-├── static/             (imágenes/gifs)
+├── static/              (recursos visuales)
+├── dashboard_*.html     (páginas web)
 └── LEEME.txt
 ```
 
-**NO necesita Python** instalado.
-**SÍ necesita Ollama** (el launcher lo instala automáticamente).
+**Para compartir:** Solo envía el .zip - NO necesita Python instalado.
 
 ## 🛠️ Desarrollo
 
 ```powershell
-# Compilar ejecutable
-.\build_exe.bat
-
 # Estructura del proyecto
 src/
-├── collector/    # Recolección RSS
-├── analyzer/     # Análisis con IA
-├── admin/        # API + Dashboard
+├── collector/    # Recolección RSS (AIdan_Collector.exe)
+├── analyzer/     # Análisis con IA (AIdan_Analyzer.exe)
+├── admin/        # API + Dashboard (AIdan_API.exe)
 └── common/       # Utilidades compartidas
+
+# Compilar ejecutables individuales
+pyinstaller AIdan_Collector.spec
+pyinstaller AIdan_Analyzer.spec
+pyinstaller AIdan_API.spec
+pyinstaller AIdan_Launcher.spec
+
+# O compilar todos
+.\build_exe.bat
 ```
+
+## 📊 Arquitectura
+
+- **4 Ejecutables independientes** que se comunican entre sí
+- **AIdan_Launcher.exe**: Orquestador maestro, gestiona Ollama y lanza servicios
+- **AIdan_Collector.exe**: Descarga y procesa noticias RSS cada 10 min
+- **AIdan_Analyzer.exe**: Analiza noticias con Ollama (IA local)
+- **AIdan_API.exe**: Servidor FastAPI + dashboard web (puerto 8000)
 
 ## 📝 Licencia
 
