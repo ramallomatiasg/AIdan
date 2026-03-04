@@ -171,7 +171,14 @@ class AIdan:
             """Ejecutar API del dashboard"""
             try:
                 from src.admin.main import app
-                config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="error")
+                # Configurar uvicorn sin logging para evitar errores en .exe
+                config = uvicorn.Config(
+                    app, 
+                    host="0.0.0.0", 
+                    port=8000, 
+                    log_config=None,  # Deshabilitar logging config
+                    access_log=False
+                )
                 server = uvicorn.Server(config)
                 server.run()
             except Exception as e:
