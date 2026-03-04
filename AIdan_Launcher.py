@@ -25,6 +25,7 @@ DASHBOARD_URL = "http://localhost:8000"
 
 class AIdan:
     def __init__(self):
+        self.processes = []
         self.root = None
         self.status_label = None
         
@@ -144,60 +145,68 @@ class AIdan:
             return False
     
     def start_services(self):
-        """Iniciar los servicios de AIdan embebidos"""
+        """Iniciar los servicios de AIdan usando subprocesos"""
         self.log("🚀 Iniciando servicios...", "blue")
         
-        # Iniciar todo en threads separados para evitar bloqueos
-        from threading import Thread
-        import uvicorn
+        # Detectar si estamos en ejecutable o desarrollo
+        if getattr(sys, 'frozen', False):
+            # En ejecutable, usar Python del sistema
+            python_exe = sys.executable.replace('AIdan_Launcher.exe', 'python.exe')
+            if not os.path.exists(python_exe):
+                # Buscar Python en PATH
+                python_exe = 'python'
+            base_path = os.path.dirname(sys.executable)
+        else:
+            python_exe = sys.executable
+            base_path = os.path.dirname(os.path.abspath(__file__))
         
-        def run_collector():
-            """Ejecutar collector en background"""
-            try:
-                from src.collector.main import main as collector_main
-                collector_main()
-            except Exception as e:
-                self.log(f"Error en Collector: {e}", "red")
-        
-        def run_analyzer():
-            """Ejecutar analyzer en background"""
-            try:
-                from src.analyzer.main import main as analyzer_main
-                analyzer_main()
-            except Exception as e:
-                self.log(f"Error en Analyzer: {e}", "red")
-        
-        def run_api():
-            """Ejecutar API del dashboard"""
-            try:
-                from src.admin.main import app
-                # Configurar uvicorn sin logging para evitar errores en .exe
-                config = uvicorn.Config(
-                    app, 
-                    host="0.0.0.0", 
-                    port=8000, 
-                    log_config=None,  # Deshabilitar logging config
-                    access_log=False
-                )
-                server = uvicorn.Server(config)
-                server.run()
-            except Exception as e:
-                self.log(f"Error en API: {e}", "red")
-        
-        # Iniciar servicios en threads
+        # Iniciar Collector
         self.log("📰 Iniciando Collector (noticias)...", "blue")
-        collector_thread = Thread(target=run_collector, daemon=True)
-        collector_thread.start()
+        try:
+            collector_script = os.path.join(base_path, 'src', 'collector', 'main.py')
+            collector_process = subprocess.Popen(
+                [python_exe, collector_script],
+                cwd=base_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            self.processes.append(collector_process)
+        except Exception as e:
+            self.log(f"⚠️ Error iniciando Collector: {e}", "orange")
+        
         time.sleep(2)
         
+        # Iniciar Analyzer
         self.log("🧠 Iniciando Analyzer (IA)...", "blue")
-        analyzer_thread = Thread(target=run_analyzer, daemon=True)
-        analyzer_thread.start()
+        try:
+            analyzer_script = os.path.join(base_path, 'src', 'analyzer', 'main.py')
+            analyzer_process = subprocess.Popen(
+                [python_exe, analyzer_script],
+                cwd=base_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            self.processes.append(analyzer_process)
+        except Exception as e:
+            self.log(f"⚠️ Error iniciando Analyzer: {e}", "orange")
+        
         time.sleep(2)
         
+        # Iniciar Admin API
         self.log("🖥️ Iniciando Dashboard API...", "blue")
-        api_thread = Thread(target=run_api, daemon=True)
-        api_thread.start()
+        try:
+            admin_process = subprocess.Popen(
+                [python_exe, "-m", "uvicorn", "src.admin.main:app", "--host", "0.0.0.0", "--port", "8000"],
+                cwd=base_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+            self.processes.append(admin_process)
+        except Exception as e:
+            self.log(f"⚠️ Error iniciando API: {e}", "orange")
         
         # Esperar a que el servidor esté listo
         self.log("⏳ Esperando que el dashboard esté listo...", "blue")
@@ -221,9 +230,17 @@ class AIdan:
         self.log("✅ AIdan está corriendo!", "green")
     
     def cleanup(self):
-        """Cerrar al salir - los threads daemon se cierran automáticamente"""
-        self.log("🛑 Cerrando AIdan...", "orange")
-        # Los threads daemon se cierran automáticamente al cerrar la app
+        """Cerrar todos los procesos al salir"""
+        self.log("🛑 Cerrando servicios...", "orange")
+        for process in self.processes:
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except:
+                try:
+                    process.kill()
+                except:
+                    pass
     
     def run_setup_steps(self):
         """Ejecutar todos los pasos de configuración"""
