@@ -40,8 +40,8 @@ data/
 logs/
 *.log
 
-# PyInstaller
-*.spec
+# PyInstaller build artifacts (pero mantener .spec)
+build/
 
 # Environment variables
 .env
