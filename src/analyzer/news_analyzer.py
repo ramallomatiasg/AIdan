@@ -3,49 +3,94 @@ import json
 import os
 from datetime import datetime
 
+
 class NewsAnalyzer:
     def __init__(self, logger):
         self.logger = logger
         self.ai_mode = self._detect_ai_mode()
         self.logger.info(f"Analyzer initialized in {self.ai_mode.upper()} mode")
-        
-        # Impact keywords
-        self.high_impact_keywords = [
-            'fed', 'interest rate', 'recession', 'crash', 'plunge',
-            'emergency', 'historic', 'surge', 'bankruptcy', 'collapse',
-            'breakthrough', 'merger', 'acquisition', 'earnings beat',
-            'central bank', 'policy', 'inflation', 'inflation data', 'ecb'
-        ]
-        
-        self.medium_impact_keywords = [
-            'market', 'stock', 'trading', 'investor', 'analyst',
-            'report', 'guidance', 'outlook', 'analyst rating'
-        ]
-        
-        # EUR/USD specific keywords
-        self.eur_usd_keywords = {
-            'easing': 'EUR se fortalece (Fed baja tasas)',
-            'tightening': 'EUR se debilita (Fed sube tasas)',
-            'inflation': 'Impacto en paridad EUR/USD',
-            'interest rate': 'Determinante clave para EUR/USD',
-            'ecb': 'Impacto directo en EUR',
-            'fed': 'Impacto directo en USD',
-            'strong dollar': 'EUR/USD tiende a bajar',
-            'weak dollar': 'EUR/USD tiende a subir',
-            'eur/usd': 'Directamente sobre el par'
+
+        # Technical analyzer for cross-referencing
+        try:
+            from src.analyzer.technical import TechnicalAnalyzer
+            self.technical = TechnicalAnalyzer(logger)
+        except Exception as e:
+            self.logger.warning(f"Technical analyzer not available: {e}")
+            self.technical = None
+
+        # === KEYWORD CLASSIFICATION RULES ===
+        # Tier 1: Direct macro data that moves EUR/USD (score 80-95)
+        self.tier1_keywords = {
+            'nfp': 92, 'non-farm': 92, 'payrolls': 90,
+            'cpi data': 90, 'inflation data': 88, 'core cpi': 90,
+            'rate decision': 95, 'rate hike': 92, 'rate cut': 92,
+            'fed decision': 95, 'ecb decision': 95, 'fomc': 88,
+            'gdp growth': 85, 'gdp data': 85, 'pce price': 88,
+            'unemployment rate': 85, 'jobless claims': 80,
         }
-    
+
+        # Tier 2: Fed/ECB statements, PMI (score 55-79)
+        self.tier2_keywords = {
+            'fed chair': 75, 'powell': 72, 'lagarde': 72,
+            'ecb president': 72, 'fed governor': 65, 'ecb member': 65,
+            'pmi': 68, 'manufacturing pmi': 70, 'services pmi': 68,
+            'consumer confidence': 62, 'retail sales': 65,
+            'trade balance': 60, 'current account': 58,
+            'treasury yield': 65, 'bond yield': 62,
+            'minutes': 68, 'monetary policy': 70,
+            'inflation': 65, 'disinflation': 65, 'deflation': 65,
+            'dollar index': 60, 'dxy': 60,
+        }
+
+        # Tier 3: Geopolitical with indirect forex impact (score 35-54)
+        self.tier3_keywords = {
+            'oil price': 50, 'crude oil': 50, 'brent': 48,
+            'middle east': 45, 'war': 45, 'conflict': 42,
+            'sanctions': 48, 'tariff': 50, 'trade war': 52,
+            'china trade': 48, 'trump': 42, 'biden': 40,
+            'geopolit': 42, 'embargo': 45, 'supply chain': 40,
+        }
+
+        # Corporate/irrelevant keywords (score 5-30)
+        self.corporate_keywords = [
+            'ipo', 'merger', 'acquisition', 'earnings', 'profit',
+            'revenue', 'stock', 'shares', 'ceo', 'board',
+            'startup', 'venture', 'funding', 'valuation',
+            'buyback', 'dividend', 'quarterly', 'annual report',
+            'listing', 'delisting', 'bourse',
+        ]
+
+        # Direction hints
+        self.usd_bullish = [
+            'strong dollar', 'dollar surge', 'dollar rally',
+            'rate hike', 'hawkish fed', 'hot inflation', 'cpi above',
+            'nfp beat', 'payrolls beat', 'unemployment fell',
+            'treasury yield rise', 'bond sell',
+        ]
+        self.usd_bearish = [
+            'weak dollar', 'dollar fall', 'dollar drop',
+            'rate cut', 'dovish fed', 'cool inflation', 'cpi below',
+            'nfp miss', 'payrolls miss', 'unemployment rose',
+            'treasury yield fall', 'easing',
+        ]
+        self.eur_bullish = [
+            'ecb hawkish', 'euro surge', 'euro rally',
+            'eurozone growth', 'strong euro', 'ecb rate hike',
+        ]
+        self.eur_bearish = [
+            'ecb dovish', 'euro fall', 'euro drop',
+            'eurozone recession', 'weak euro', 'ecb rate cut',
+        ]
+
     def _detect_ai_mode(self):
         """Detecta qué modo de IA usar: ollama > claude > keywords"""
-        # Prioridad: Ollama (local/gratis) > Claude (API/pago) > Keywords (fallback)
-        
         if self._check_ollama():
             return 'ollama'
         elif os.getenv('ANTHROPIC_API_KEY'):
             return 'claude'
         else:
             return 'keywords'
-    
+
     def _check_ollama(self):
         """Verifica si Ollama está disponible"""
         try:
@@ -53,352 +98,217 @@ class NewsAnalyzer:
             response = requests.get('http://localhost:11434/api/tags', timeout=3)
             if response.status_code == 200:
                 models = response.json().get('models', [])
-                # Verifica si hay algún modelo Llama disponible
                 has_llama = any('llama' in m.get('name', '').lower() for m in models)
                 if has_llama:
                     return True
                 else:
-                    self.logger.warning("Ollama está corriendo pero no tiene modelo Llama instalado")
-                    self.logger.warning("Ejecutar: ollama pull llama3.1:8b")
+                    self.logger.warning("Ollama corriendo pero sin modelo Llama")
                     return False
             return False
-        except requests.exceptions.Timeout:
-            self.logger.warning("Ollama timeout - no está respondiendo")
+        except Exception:
             return False
-        except requests.exceptions.ConnectionError:
-            self.logger.warning("Ollama no está corriendo en localhost:11434")
-            return False
-        except Exception as e:
-            self.logger.error(f"Error verificando Ollama: {str(e)}")
-            return False
-    
+
     def analyze(self, news_id, title, summary, entities, tags):
-        """Analyze news and calculate impact score with EUR/USD analysis - REQUIRES AI"""
+        """Analyze news: keyword pre-score → Ollama for direction → technical validation."""
         try:
-            # SOLO USAR IA - NO KEYWORDS
-            if self.ai_mode not in ['ollama', 'claude']:
-                self.logger.error(f"AI NOT AVAILABLE - Ollama debe estar corriendo. No se analizará la noticia.")
-                return None
-            
-            result = self._analyze_with_ai(news_id, title, summary, entities, tags)
-            if result:
-                return result
-            
-            # Si falla la IA, NO analizar
-            self.logger.error(f"AI analysis failed for news {news_id} - Noticia NO procesada")
-            return None
-            
-            # CÓDIGO KEYWORDS DESHABILITADO - SOLO IA
-            # score = self._calculate_impact_score(title, summary, entities, tags)
-            
-            # Determine severity level
-            if score >= 80:
-                level = "ALTA"
-            elif score >= 50:
-                level = "MEDIA"
+            text = f"{title} {summary or ''}".lower()
+
+            # STEP 1: Keyword pre-classification (deterministic score)
+            pre_score, category = self._classify_by_keywords(text)
+            self.logger.info(f"Pre-classify #{news_id}: score={pre_score} cat={category}")
+
+            # STEP 2: If corporate/irrelevant, skip Ollama entirely
+            if category == 'corporate' or pre_score < 30:
+                self.logger.info(f"⏭️ #{news_id}: Corporativa/irrelevante (score={pre_score}). Skip.")
+                return {
+                    'news_id': news_id,
+                    'impact_score': pre_score,
+                    'level': 'BAJA',
+                    'explanation': self._auto_explain(title, category),
+                    'eur_usd_impact': 'Sin impacto en EUR/USD',
+                    'market_implications': 'NO OPERAR — noticia sin relevancia forex',
+                    'analysis_method': 'keywords',
+                    'should_operate': False,
+                    'direction': 'NEUTRAL',
+                    'confidence': pre_score * 0.3,
+                    'should_alert': False,
+                }
+
+            # STEP 3: Keyword-based direction hint
+            kw_direction = self._detect_direction_keywords(text)
+
+            # STEP 4: Use Ollama for direction + short explanation (simpler task)
+            ai_result = None
+            if self.ai_mode == 'ollama':
+                ai_result = self._ask_ollama_direction(news_id, title, summary, category, pre_score)
+
+            # Merge: use AI direction if available, else keyword direction
+            if ai_result:
+                direction = ai_result.get('direction', kw_direction)
+                explanation = ai_result.get('explanation', '')
+                eur_usd_impact = ai_result.get('eur_usd_impact', '')
+                # Use AI confidence only as a modifier, not absolute
+                ai_conf_raw = ai_result.get('confidence', 50)
+                # Blend: 60% keyword-based + 40% AI
+                confidence = pre_score * 0.6 + ai_conf_raw * 0.4
             else:
-                level = "BAJA"
-            
-            # Generate explanations
-            explanation = self._generate_explanation(title, summary, entities)
-            eur_usd_impact = self._analyze_eur_usd_impact(title, summary)
-            market_implications = self._generate_market_implications(title, summary, entities, tags)
-            
+                direction = kw_direction
+                explanation = self._auto_explain(title, category)
+                eur_usd_impact = self._auto_impact(title, direction, pre_score)
+                confidence = pre_score * 0.7
+
+            # STEP 5: Technical validation
+            tech_validation = None
+            if self.technical and pre_score >= 50:
+                try:
+                    market_state = self.technical.get_market_state()
+                    tech_validation = self.technical.validate_signal(direction, confidence, market_state)
+                    if tech_validation:
+                        old_dir = direction
+                        old_conf = confidence
+                        direction = tech_validation['adjusted_direction']
+                        confidence = tech_validation['adjusted_confidence']
+                        tech_reason = tech_validation['reason']
+                        if old_dir != direction or abs(old_conf - confidence) > 10:
+                            self.logger.info(f"📊 Técnico ajustó #{news_id}: {old_dir}→{direction} conf {old_conf:.0f}→{confidence:.0f} | {tech_reason}")
+                        if tech_reason:
+                            eur_usd_impact = f"{eur_usd_impact} | Técnico: {tech_reason}"
+                except Exception as e:
+                    self.logger.warning(f"Technical validation failed: {e}")
+
+            # STEP 6: Final decisions
+            if direction == 'NEUTRAL':
+                confidence = min(confidence, 50)
+
+            should_operate = (
+                pre_score >= 75 and
+                confidence >= 60 and
+                direction in ('CALL', 'PUT') and
+                category in ('tier1', 'tier2')
+            )
+
+            level = 'ALTA' if pre_score >= 75 else ('MEDIA' if pre_score >= 50 else 'BAJA')
+            should_alert = pre_score >= 50  # Show all medium+ alerts
+
+            # Build market implications
+            if should_operate:
+                market_impl = f"OPERAR {direction} — {explanation[:60]}"
+                if tech_validation and tech_validation.get('technical_agrees'):
+                    market_impl += " | Técnico confirma"
+            else:
+                reasons = []
+                if pre_score < 75:
+                    reasons.append(f"score bajo ({pre_score})")
+                if confidence < 60:
+                    reasons.append(f"confianza baja ({confidence:.0f}%)")
+                if direction == 'NEUTRAL':
+                    reasons.append("sin dirección clara")
+                if category == 'corporate':
+                    reasons.append("noticia corporativa")
+                if tech_validation and tech_validation.get('technical_agrees') is False:
+                    reasons.append("técnico contradice")
+                market_impl = f"NO OPERAR — {', '.join(reasons) if reasons else 'sin setup'}"
+
+            self.logger.info(
+                f"{'✅' if should_operate else '⏭️'} #{news_id}: Score={pre_score} Conf={confidence:.1f}% "
+                f"Dir={direction} Cat={category} Operar={should_operate}"
+            )
+
             return {
                 'news_id': news_id,
-                'impact_score': score,
+                'impact_score': pre_score,
                 'level': level,
-                'explanation': explanation,
-                'eur_usd_impact': eur_usd_impact,
-                'market_implications': market_implications,
-                'analysis_method': 'keywords',
-                'should_alert': score >= 80  # Only ALTA alerts
+                'explanation': explanation[:120],
+                'eur_usd_impact': eur_usd_impact[:150],
+                'market_implications': market_impl[:150],
+                'analysis_method': 'ollama' if ai_result else 'keywords',
+                'should_operate': should_operate,
+                'direction': direction,
+                'confidence': round(confidence, 2),
+                'should_alert': should_alert,
             }
+
         except Exception as e:
-            self.logger.error(f"Error analyzing news {news_id}: {str(e)}")
+            self.logger.error(f"Error analyzing news {news_id}: {e}")
             return None
-    
-    def _calculate_impact_score(self, title, summary, entities, tags):
-        """Calculate impact score based on multiple factors"""
-        score = 50  # Base score
-        
-        full_text = f"{title} {summary}".lower()
-        
-        # Check high-impact keywords
-        high_count = sum(1 for kw in self.high_impact_keywords if kw in full_text)
-        score += min(30, high_count * 5)
-        
-        # Check medium-impact keywords
-        med_count = sum(1 for kw in self.medium_impact_keywords if kw in full_text)
-        score += min(20, med_count * 3)
-        
-        # Check entities
-        if entities and len(entities) > 0:
-            score += min(15, len(entities) * 5)
-        
-        # Check tags
-        critical_tags = {'geopolitics', 'merger', 'earnings', 'market_volatility', 'monetary_policy'}
-        if tags:
-            tag_list = eval(tags) if isinstance(tags, str) else tags
-            for tag in tag_list:
-                if tag in critical_tags:
-                    score += 10
-        
-        # Breaking news indicator
-        if any(word in full_text for word in ['breaking', 'alert', 'emergency', 'urgent']):
-            score += 20
-        
-        return min(100, score)
-    
-    def _generate_explanation(self, title, summary, entities):
-        """Generate detailed explanation of the news"""
-        explanation = f"📰 {title}\n\n"
-        explanation += f"{summary[:200]}...\n\n"
-        
-        if entities:
-            try:
-                entity_list = eval(entities) if isinstance(entities, str) else entities
-                explanation += f"🎯 Entidades: {', '.join(entity_list)}"
-            except:
-                pass
-        
-        return explanation
-    
-    def _analyze_eur_usd_impact(self, title, summary, max_length=400):
-        """Analyze specific EUR/USD impact with clear direction and probability"""
-        full_text = f"{title} {summary}".lower()
-        
-        impact_analysis = "💱 **IMPACTO EUR/USD:**\n\n"
-        
-        # Fed rate hikes/cuts (más importante para USD)
-        if 'fed' in full_text or 'federal reserve' in full_text:
-            if 'raise' in full_text or 'hike' in full_text or 'increase' in full_text:
-                impact_analysis += "🔴 EUR/USD VA A BAJAR\n"
-                impact_analysis += "   Probabilidad: ALTA (80-90%)\n\n"
-                impact_analysis += "¿Por qué? La Fed sube tasas → Dólar más fuerte → EUR vale menos\n"
-                impact_analysis += "Ejemplo: Si está en 1.0800, puede bajar a 1.0700 o menos"
-            elif 'cut' in full_text or 'lower' in full_text or 'reduce' in full_text or 'easing' in full_text:
-                impact_analysis += "🟢 EUR/USD VA A SUBIR\n"
-                impact_analysis += "   Probabilidad: ALTA (80-90%)\n\n"
-                impact_analysis += "¿Por qué? La Fed baja tasas → Dólar más débil → EUR vale más\n"
-                impact_analysis += "Ejemplo: Si está en 1.0800, puede subir a 1.0900 o más"
-            else:
-                impact_analysis += "🟡 EUR/USD IMPACTO MODERADO\n"
-                impact_analysis += "   Probabilidad: MEDIA (50-60%)\n\n"
-                impact_analysis += "Noticia de la Fed sin cambio claro de tasas. Esperar datos concretos."
-        
-        # ECB news (más importante para EUR)
-        elif 'ecb' in full_text or 'european central bank' in full_text:
-            if 'raise' in full_text or 'hike' in full_text or 'tighten' in full_text:
-                impact_analysis += "🟢 EUR/USD VA A SUBIR\n"
-                impact_analysis += "   Probabilidad: ALTA (75-85%)\n\n"
-                impact_analysis += "¿Por qué? BCE sube tasas → Euro más fuerte → EUR vale más vs USD"
-            elif 'cut' in full_text or 'lower' in full_text or 'easing' in full_text:
-                impact_analysis += "🔴 EUR/USD VA A BAJAR\n"
-                impact_analysis += "   Probabilidad: ALTA (75-85%)\n\n"
-                impact_analysis += "¿Por qué? BCE baja tasas → Euro más débil → EUR vale menos vs USD"
-            else:
-                impact_analysis += "🟡 EUR/USD IMPACTO MODERADO\n"
-                impact_analysis += "   Probabilidad: MEDIA (50-60%)\n\n"
-                impact_analysis += "Noticia del BCE. Puede mover el par dependiendo del tono del anuncio."
-        
-        # Inflation news
-        elif 'inflation' in full_text:
-            if 'rising' in full_text or 'higher' in full_text or 'surge' in full_text:
-                impact_analysis += "🟡 EUR/USD VOLÁTIL\n"
-                impact_analysis += "   Probabilidad: MEDIA (60-70%)\n\n"
-                impact_analysis += "Inflación alta → Bancos centrales pueden subir tasas\n"
-                impact_analysis += "Si es inflación USA: EUR/USD baja. Si es inflación Europa: EUR/USD sube."
-            else:
-                impact_analysis += "🟢 EUR/USD PUEDE SUBIR\n"
-                impact_analysis += "   Probabilidad: BAJA-MEDIA (40-60%)\n\n"
-                impact_analysis += "Inflación baja → Menos presión para subir tasas → Dólar más débil"
-        
-        # Risk-off/Risk-on (general market sentiment)
-        elif 'recession' in full_text or 'crash' in full_text or 'crisis' in full_text:
-            impact_analysis += "🔴 EUR/USD VA A BAJAR\n"
-            impact_analysis += "   Probabilidad: ALTA (70-80%)\n\n"
-            impact_analysis += "Pánico en mercados → Todos compran dólares (moneda refugio)\n"
-            impact_analysis += "EUR/USD cae porque USD se fortalece por miedo."
-        
-        # Earnings/Corporate (menos impacto directo)
-        elif 'earnings' in full_text or 'profit' in full_text:
-            impact_analysis += "🟡 EUR/USD IMPACTO BAJO\n"
-            impact_analysis += "   Probabilidad: BAJA (20-40%)\n\n"
-            impact_analysis += "Noticias corporativas afectan poco a EUR/USD directamente.\n"
-            impact_analysis += "Solo si hay efecto cascada en economía general."
-        
-        # Default case
-        else:
-            impact_analysis += "⚪ EUR/USD IMPACTO MÍNIMO\n"
-            impact_analysis += "   Probabilidad: BAJA (10-30%)\n\n"
-            impact_analysis += "Esta noticia no tiene impacto directo en el par EUR/USD.\n"
-            impact_analysis += "Puede afectar indirectamente si mueve sentimiento general del mercado."
-        
-        return impact_analysis[:max_length]
-    
-    def _generate_market_implications(self, title, summary, entities, tags, max_length=500):
-        """Generate market implications focused on EUR/USD binary options trading"""
-        implications = "⚡ **SEÑAL PARA TRADING BINARIO EUR/USD:**\n\n"
-        
-        full_text = f"{title} {summary}".lower()
-        
-        # Fed / Interest rates (IMPACTO MÁS FUERTE)
-        if 'fed' in full_text or 'federal reserve' in full_text:
-            if 'raise' in full_text or 'hike' in full_text:
-                implications += "📉 **PUT (VENTA)** - EUR/USD va a bajar\n"
-                implications += "🎯 Probabilidad: 85%\n"
-                implications += "⏰ Ventana: 30-60 minutos\n"
-                implications += "🔥 Volatilidad: ALTA\n\n"
-                implications += "💡 Estrategia:\n"
-                implications += "   → Opción PUT de 2-5 minutos\n"
-                implications += "   → Entrar apenas salga la noticia\n"
-                implications += "   → Stop si sube más de 10 pips\n"
-            elif 'cut' in full_text or 'lower' in full_text or 'easing' in full_text:
-                implications += "📈 **CALL (COMPRA)** - EUR/USD va a subir\n"
-                implications += "🎯 Probabilidad: 85%\n"
-                implications += "⏰ Ventana: 30-60 minutos\n"
-                implications += "🔥 Volatilidad: ALTA\n\n"
-                implications += "💡 Estrategia:\n"
-                implications += "   → Opción CALL de 2-5 minutos\n"
-                implications += "   → Entrar apenas salga la noticia\n"
-                implications += "   → Stop si baja más de 10 pips\n"
-            else:
-                implications += "⚠️ **ESPERAR** - Sin señal clara\n"
-                implications += "🎯 No operar hasta tener dirección\n"
-        
-        # ECB news (IMPACTO FUERTE)
-        elif 'ecb' in full_text or 'european central bank' in full_text:
-            if 'raise' in full_text or 'hike' in full_text:
-                implications += "📈 **CALL (COMPRA)** - EUR/USD va a subir\n"
-                implications += "🎯 Probabilidad: 80%\n"
-                implications += "⏰ Ventana: 30-90 minutos\n"
-                implications += "🔥 Volatilidad: ALTA\n\n"
-                implications += "💡 Estrategia:\n"
-                implications += "   → Opción CALL de 3-5 minutos\n"
-                implications += "   → BCE sube tasas = Euro más fuerte\n"
-            elif 'cut' in full_text or 'lower' in full_text or 'easing' in full_text:
-                implications += "📉 **PUT (VENTA)** - EUR/USD va a bajar\n"
-                implications += "🎯 Probabilidad: 80%\n"
-                implications += "⏰ Ventana: 30-90 minutos\n"
-                implications += "🔥 Volatilidad: ALTA\n"
-        
-        # Inflation (IMPACTO MEDIO)
-        elif 'inflation' in full_text:
-            if 'us' in full_text or 'united states' in full_text:
-                implications += "📉 **PUT (VENTA)** - EUR/USD baja\n"
-                implications += "🎯 Probabilidad: 70%\n"
-                implications += "⏰ Ventana: 60 minutos\n"
-                implications += "💡 Inflación USA alta → Fed sube tasas → USD fuerte\n"
-            elif 'euro' in full_text or 'europe' in full_text:
-                implications += "📈 **CALL (COMPRA)** - EUR/USD sube\n"
-                implications += "🎯 Probabilidad: 70%\n"
-                implications += "⏰ Ventana: 60 minutos\n"
-                implications += "💡 Inflación Europa alta → BCE sube tasas → EUR fuerte\n"
-            else:
-                implications += "⚠️ Esperar confirmación de qué zona es\n"
-        
-        # Risk-off (Crisis, recesión)
-        elif 'recession' in full_text or 'crash' in full_text or 'crisis' in full_text:
-            implications += "📉 **PUT (VENTA)** - EUR/USD baja por pánico\n"
-            implications += "🎯 Probabilidad: 75%\n"
-            implications += "⏰ Ventana: 2-4 horas\n"
-            implications += "🔥 Volatilidad: MUY ALTA\n\n"
-            implications += "💡 Crisis → Todos compran USD (refugio seguro)\n"
-            implications += "⚠️ Cuidado: Movimientos bruscos\n"
-        
-        # Earnings/Corporate (IMPACTO BAJO)
-        elif 'earnings' in full_text or 'profit' in full_text:
-            implications += "⏸️ **NO OPERAR** - Impacto mínimo en EUR/USD\n"
-            implications += "🎯 Noticias corporativas no mueven pares de divisas\n"
-            implications += "💡 Esperar noticias macroeconómicas\n"
-        
-        # Default
-        else:
-            implications += "📊 **ANALIZAR** - Sin señal automática\n"
-            implications += "🎯 Revisar gráfico EUR/USD en tiempo real\n"
-            implications += "💡 Buscar niveles de soporte/resistencia\n"
-            implications += "⏰ No operar sin confirmación\n"
-        
-        implications += "\n🌍 Horario NY: 9:30-16:00 (mayor volumen)\n"
-        implications += "⚡ Mejor momento para opciones binarias corto plazo"
-        
-        return implications[:max_length]
-    
-    def _analyze_with_ai(self, news_id, title, summary, entities, tags):
-        """Analiza noticia con IA (Ollama o Claude)"""
-        try:
-            if self.ai_mode == 'ollama':
-                return self._analyze_with_ollama(news_id, title, summary, entities, tags)
-            elif self.ai_mode == 'claude':
-                return self._analyze_with_claude(news_id, title, summary, entities, tags)
-        except Exception as e:
-            self.logger.error(f"AI analysis error: {str(e)}")
-            return None
-    
-    def _analyze_with_ollama(self, news_id, title, summary, entities, tags):
-        """Analiza con Llama local via Ollama"""
+
+    def _classify_by_keywords(self, text):
+        """Deterministic classification by keyword matching. Returns (score, category)."""
+        # Check corporate first (exclusion)
+        corp_hits = sum(1 for kw in self.corporate_keywords if kw in text)
+        if corp_hits >= 2:
+            return (10 + corp_hits * 3, 'corporate')
+
+        # Check tier 1
+        best_t1 = 0
+        for kw, score in self.tier1_keywords.items():
+            if kw in text:
+                best_t1 = max(best_t1, score)
+        if best_t1 > 0:
+            return (best_t1, 'tier1')
+
+        # Check tier 2
+        best_t2 = 0
+        for kw, score in self.tier2_keywords.items():
+            if kw in text:
+                best_t2 = max(best_t2, score)
+        if best_t2 > 0:
+            return (best_t2, 'tier2')
+
+        # Check tier 3
+        best_t3 = 0
+        for kw, score in self.tier3_keywords.items():
+            if kw in text:
+                best_t3 = max(best_t3, score)
+        if best_t3 > 0:
+            return (best_t3, 'tier3')
+
+        # Single corporate hit
+        if corp_hits == 1:
+            return (20, 'corporate')
+
+        # Unknown — low score
+        return (25, 'unknown')
+
+    def _detect_direction_keywords(self, text):
+        """Keyword-based direction detection."""
+        bull_score = sum(1 for kw in self.usd_bearish if kw in text)  # USD weak = EUR/USD up = CALL
+        bull_score += sum(1 for kw in self.eur_bullish if kw in text)
+        bear_score = sum(1 for kw in self.usd_bullish if kw in text)  # USD strong = EUR/USD down = PUT
+        bear_score += sum(1 for kw in self.eur_bearish if kw in text)
+
+        if bull_score > bear_score:
+            return 'CALL'
+        elif bear_score > bull_score:
+            return 'PUT'
+        return 'NEUTRAL'
+
+    def _ask_ollama_direction(self, news_id, title, summary, category, pre_score):
+        """Ask Ollama ONLY for direction + short explanation. Simple task for small model."""
         try:
             import requests
-            
-            prompt = f"""Sos analista de trading de opciones binarias EUR/USD. Tu único trabajo: decidir si OPERAR o NO OPERAR.
 
-Noticia:
-TÍTULO: {title}
-CONTENIDO: {summary[:500]}
+            prompt = f"""Analista forex EUR/USD. Lee esta noticia y respondé SOLO con JSON.
 
-Responde SOLO con JSON válido (sin markdown, sin ```json):
-{{
-    "impact_score": 85,
-    "level": "ALTA",
-    "should_operate": true,
-    "direction": "CALL",
-    "confidence": 78.50,
-    "timeframe": "1-5 min",
-    "explanation": "Fed baja tasas de interés. Dólar se debilita inmediatamente.",
-    "eur_usd_impact": "CALL (COMPRAR EUR) - El EUR/USD va a subir. Probabilidad 85%. Razón: Tasas más bajas en USA hacen que el USD pierda valor frente al EUR.",
-    "market_implications": "ACCIÓN: OPERAR → Comprar CALL de 5 minutos. Entrada: INMEDIATA después del anuncio. Target: +15 pips. Stop loss: -10 pips si baja."
-}}
+NOTICIA: {title}
+{(summary or '')[:400]}
 
-REGLAS ESTRICTAS:
+Categoría detectada: {category} (score pre-calculado: {pre_score}/100)
 
-1. impact_score (0-100): Qué tan importante es la noticia
-   - 90-100: Fed/ECB anuncia cambio de tasas
-   - 80-89: Datos inflación, empleo, PIB importantes
-   - 60-79: Noticias económicas secundarias
-   - <60: Corporativas, earnings
+Respondé JSON puro:
+{{"direction": "CALL o PUT o NEUTRAL", "confidence": <número 0-100>, "explanation": "<máximo 15 palabras>", "eur_usd_impact": "<máximo 10 palabras>"}}
 
-2. confidence (0-100 con 2 decimales): % REAL de probabilidad de acertar
-   - DEBE ser INDEPENDIENTE del impact_score
-   - Basado en: claridad de la noticia, volatilidad esperada, timing
-   - Ejemplo: impact=90 pero confidence=72.35 si hay incertidumbre
-   - Ejemplo: impact=85 pero confidence=91.80 si la señal es muy clara
-   - SIEMPRE con 2 decimales: 78.50, 91.25, 65.00
+Reglas:
+- CALL = EUR/USD sube (USD débil o EUR fuerte)
+- PUT = EUR/USD baja (USD fuerte o EUR débil)
+- NEUTRAL = no se puede determinar
+- Si es noticia corporativa/IPO/acciones: SIEMPRE NEUTRAL, confidence < 30
+- Si es geopolítica sin dato económico: confidence < 50
+- explanation y eur_usd_impact deben ser CORTOS y DIRECTOS"""
 
-3. should_operate: 
-   - true SOLO si impact_score >= 80 Y hay dirección clara (CALL/PUT) Y confidence >= 60
-   - false si score < 80 O confidence < 60 O la noticia es irrelevante
+            self.logger.info(f"Asking Ollama direction for #{news_id}...")
 
-4. direction:
-   - "CALL" = COMPRAR (EUR sube vs USD)
-   - "PUT" = VENDER (EUR baja vs USD)  
-   - "NEUTRAL" solo si realmente no afecta al par
-
-5. explanation: MÁXIMO 3 líneas. Qué pasó y por qué importa.
-
-6. eur_usd_impact: EMPEZAR con "CALL" o "PUT" o "NEUTRAL". Explicar impacto en 2-3 frases.
-
-7. market_implications: Si should_operate=true, EMPEZAR con "ACCIÓN: OPERAR". Si false, "ACCIÓN: NO OPERAR".
-
-PRIORIDAD:
-- Claridad brutal
-- Números concretos (pips, %, minutos)
-- Decisión binaria: OPERAR o NO OPERAR
-- Confidence INDEPENDIENTE del impact"""
-
-            self.logger.info(f"Analizando noticia #{news_id} con Ollama/Llama...")
-            
-            response = requests.post('http://localhost:11434/api/generate', 
+            response = requests.post('http://localhost:11434/api/generate',
                 json={
                     'model': 'llama3.1:8b',
                     'prompt': prompt,
@@ -406,60 +316,59 @@ PRIORIDAD:
                     'format': 'json',
                     'options': {
                         'temperature': 0.2,
-                        'top_p': 0.9,
-                        'num_predict': 500
+                        'num_predict': 200,
+                        'repeat_penalty': 1.3
                     }
                 },
                 timeout=45
             )
-            
+
             if response.status_code != 200:
-                self.logger.error(f"Ollama HTTP error: {response.status_code}")
                 return None
-            
+
             result_text = response.json().get('response', '')
-            self.logger.debug(f"Ollama response: {result_text[:200]}")
-            
-            # Extraer JSON de la respuesta
             json_start = result_text.find('{')
             json_end = result_text.rfind('}') + 1
             if json_start >= 0 and json_end > json_start:
                 result = json.loads(result_text[json_start:json_end])
-            else:
-                self.logger.error("No se encontró JSON válido en respuesta de Ollama")
-                return None
-            
-            should_operate = result.get('should_operate', False)
-            impact_score = int(result.get('impact_score', 50))
-            confidence = float(result.get('confidence', 50.0))
-            
-            # Validación: solo alertar si should_operate es True Y score >= 80
-            should_alert = should_operate and impact_score >= 80
-            
-            self.logger.info(f"✅ Ollama: {result.get('level')} - {result.get('direction')} - OPERAR: {should_operate} - Confianza: {confidence:.2f}%")
-            
-            # Formatear resultado
-            return {
-                'news_id': news_id,
-                'impact_score': impact_score,
-                'level': result.get('level', 'MEDIA'),
-                'explanation': result.get('explanation', ''),
-                'eur_usd_impact': result.get('eur_usd_impact', ''),
-                'market_implications': result.get('market_implications', ''),
-                'analysis_method': 'ollama',
-                'should_operate': should_operate,
-                'direction': result.get('direction', 'NEUTRAL'),
-                'confidence': confidence,
-                'should_alert': should_alert
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Ollama analysis error: {str(e)}")
+                direction = result.get('direction', 'NEUTRAL')
+                # Sanitize direction
+                if '/' in direction:
+                    direction = 'NEUTRAL'
+                if direction not in ('CALL', 'PUT', 'NEUTRAL'):
+                    direction = 'NEUTRAL'
+                return {
+                    'direction': direction,
+                    'confidence': min(float(result.get('confidence', 50)), 95),
+                    'explanation': (result.get('explanation', '') or '')[:120],
+                    'eur_usd_impact': (result.get('eur_usd_impact', '') or '')[:100],
+                }
             return None
-    
+
+        except Exception as e:
+            self.logger.warning(f"Ollama direction failed: {e}")
+            return None
+
+    def _auto_explain(self, title, category):
+        """Generate auto explanation when AI is not used."""
+        cat_map = {
+            'tier1': 'Dato macro directo — relevante para EUR/USD',
+            'tier2': 'Declaración/indicador secundario — impacto moderado',
+            'tier3': 'Geopolítica — impacto indirecto en forex',
+            'corporate': 'Noticia corporativa — sin impacto forex',
+            'unknown': 'Relevancia forex no determinada',
+        }
+        return cat_map.get(category, 'Sin clasificar')
+
+    def _auto_impact(self, title, direction, score):
+        """Generate auto impact text."""
+        if direction == 'CALL':
+            return f"EUR/USD podría subir (score {score})"
+        elif direction == 'PUT':
+            return f"EUR/USD podría bajar (score {score})"
+        return f"Sin dirección clara (score {score})"
+
     def _analyze_with_claude(self, news_id, title, summary, entities, tags):
         """Analiza con Claude AI (requiere ANTHROPIC_API_KEY)"""
-        # Placeholder para futura implementación
         self.logger.warning("Claude analysis not implemented yet")
         return None
-

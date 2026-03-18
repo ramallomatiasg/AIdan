@@ -2,7 +2,7 @@
 
 Sistema automatizado que monitorea noticias financieras 24/7 y genera señales de trading para EUR/USD utilizando análisis de IA local.
 
-**❗ Versión 1.2 - Ahora completamente portable, NO requiere Python instalado**
+**✅ Completamente portable - Un solo ejecutable de 23MB**
 
 ## 🎯 Características
 
@@ -15,19 +15,18 @@ Sistema automatizado que monitorea noticias financieras 24/7 y genera señales d
 
 ## 🚀 Instalación Rápida
 
-### ✅ Opción 1: Ejecutable Portable (Recomendado)
+### ✅ Para Usuarios (Ejecutable Portable)
 
-1. Descarga y descomprime `AIdan_Portable.zip`
-2. Doble click en `AIdan_Launcher.exe`
-3. ¡Listo!
+1. Descarga `AIdan_Portable.zip` de [Releases](https://github.com/ramallomatiasg/AIdan/releases)
+2. Descomprime el archivo
+3. Ejecuta `AIdan.exe`
+4. ¡Listo! El sistema se encarga de todo automáticamente
 
-**Ventajas:**
-- ✅ NO necesita Python instalado
-- ✅ 100% portable
-- ✅ Incluye 4 ejecutables optimizados
-- ✅ Instalación automática de Ollama
+**Requisitos:**
+- Windows 10/11
+- Ollama se instala automáticamente si no lo tenés
 
-### Opción 2: Desarrollo (Requiere Python)
+### 🛠️ Para Desarrolladores (Desde Código)
 
 ```powershell
 # 1. Clonar repositorio
@@ -35,45 +34,28 @@ git clone https://github.com/ramallomatiasg/AIdan.git
 cd AIdan
 
 # 2. Instalar Ollama
+# Descargar: hdependencias Python
+pip install -r requirements.txt
+
+# 3. Instalar Ollama
 # Descargar: https://ollama.com/download/windows
 ollama pull llama3.1:8b
 
-# 3. Instalar dependencias Python
-pip install -r requirements.txt
-
-# 4. Iniciar en modo desarrollo
-python AIdan_Launcher.py
+# 4. Ejecutar (modo desarrollo)
+python AIdan_TodoEnUno.py
 ```
 
-## 📦 Distribución
-
-Para crear un paquete portable listo para compartir:
+## 📦 Crear Ejecutable Portable
 
 ```powershell
-# Compilar todos los ejecutables
-.\build_exe.bat
+# Compilar ejecutable
+pyinstaller AIdan_TodoEnUno.spec --clean
 
-# Crear paquete portable
+# Crear paquete para distribuir
 .\crear_paquete.bat
 ```
 
-Esto genera `AIdan_Portable.zip` con todo lo necesario:
-
-```
-AIdan_Portable/
-├── AIdan_Launcher.exe   ⭐ Maestro (inicia todo)
-├── AIdan_Collector.exe  📰 Recolector de noticias
-├── AIdan_Analyzer.exe   🤖 Analizador con IA
-├── AIdan_API.exe        🌐 Servidor dashboard
-├── config/
-│   └── sources.yaml
-├── static/              (recursos visuales)
-├── dashboard_*.html     (páginas web)
-└── LEEME.txt
-```
-
-**Para compartir:** Solo envía el .zip - NO necesita Python instalado.
-
+Resultado: `AIdan_Portable.zip` (~24MB) listo para compartir
 ## 🛠️ Desarrollo
 
 ```powershell
@@ -95,17 +77,27 @@ pyinstaller AIdan_Launcher.spec
 ```
 
 ## 📊 Arquitectura
+AIdan/
+├── AIdan_TodoEnUno.py       # Ejecutable maestro (todo integrado)
+├── AIdan_TodoEnUno.spec     # PyInstaller spec
+├── crear_paquete.bat        # Script para crear .zip portable
+├── requirements.txt         # Dependencias Python
+├── config/
+│   └── sources.yaml         # Fuentes RSS
+├── src/
+│   ├── collector/           # Módulo recolector de noticias
+│   ├── analyzer/            # Módulo análisis con IA
+│   ├── admin/               # Módulo API + Dashboard
+│   └── common/              # Utilidades compartidas
+└── static/                  # Recursos web
+```
 
-- **4 Ejecutables independientes** que se comunican entre sí
-- **AIdan_Launcher.exe**: Orquestador maestro, gestiona Ollama y lanza servicios
-- **AIdan_Collector.exe**: Descarga y procesa noticias RSS cada 10 min
-- **AIdan_Analyzer.exe**: Analiza noticias con Ollama (IA local)
-- **AIdan_API.exe**: Servidor FastAPI + dashboard web (puerto 8000)
+## 📊 Arquitectura
 
-## 📝 Licencia
-
-Ver [LICENSE](LICENSE)
-
-## 👤 Autor
-
-Matias Ramallo
+**Ejecutable Todo-En-Uno:**
+- Un solo archivo `AIdan.exe` (23MB)
+- 3 servicios integrados corriendo como threads:
+  - **Collector**: Descarga noticias RSS cada 10 minutos
+  - **Analyzer**: Analiza con Ollama (IA local)
+  - **API**: Servidor FastAPI + dashboard web (puerto 8000)
+- Ventana GUI para control y monitoreo

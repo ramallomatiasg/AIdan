@@ -141,6 +141,38 @@ class AIdan:
             messagebox.showerror("Error", f"No se pudo instalar el modelo:\n{str(e)}")
             return False
     
+    def check_vision_model(self):
+        """Verificar si hay un modelo de visión (llava) instalado"""
+        try:
+            response = requests.get(OLLAMA_API, timeout=5)
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                for model in models:
+                    name = model.get("name", "").lower()
+                    if any(v in name for v in ['llava', 'llama3.2-vision', 'minicpm-v', 'bakllava']):
+                        return True
+        except:
+            pass
+        return False
+
+    def install_vision_model(self):
+        """Instalar llava para análisis de gráficos"""
+        self.log("📦 Descargando modelo de visión (llava) para análisis de gráficos...", "blue")
+        try:
+            process = subprocess.Popen(
+                ["ollama", "pull", "llava"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            process.wait()
+            if process.returncode == 0:
+                self.log("✓ Modelo de visión (llava) instalado", "green")
+                return True
+        except Exception as e:
+            self.log(f"⚠️ No se pudo instalar llava: {e}. Análisis de imágenes no disponible.", "orange")
+        return False
+
     def run_collector_service(self):
         """Servicio Collector integrado"""
         try:
@@ -189,14 +221,17 @@ class AIdan:
         try:
             from src.common.config import Config
             from src.common.logging_setup import setup_logging
-            from src.common.db import init_db, get_unprocessed_news, mark_news_processed, add_alert
+            from src.common.db import (init_db, get_unprocessed_news, mark_news_processed,
+                                       add_alert, add_auto_strategy, get_news_fetch_time)
             from src.analyzer.news_analyzer import NewsAnalyzer
+            from src.analyzer.technical import TechnicalAnalyzer
             
             logger = setup_logging("analyzer", Config.LOG_LEVEL)
             logger.info("Initializing analyzer...")
             init_db()
             
             analyzer = NewsAnalyzer(logger)
+            tech = TechnicalAnalyzer(logger)
             logger.info("Analyzer ready")
             
             iteration = 0
@@ -206,9 +241,10 @@ class AIdan:
                     news_items = get_unprocessed_news()
                     
                     alerts_sent = 0
+                    strategies_created = 0
                     for news_id, url, title, summary, entities, tags in news_items:
                         result = analyzer.analyze(news_id, title, summary, entities, tags)
-                        
+
                         if result and result['should_alert']:
                             add_alert(news_id, result['impact_score'], result['level'],
                                     result['explanation'], result['eur_usd_impact'],
@@ -218,11 +254,58 @@ class AIdan:
                                     result.get('direction', 'NEUTRAL'),
                                     result.get('confidence', 50))
                             alerts_sent += 1
-                        
+
+                            # Auto-strategy: only for operable + fresh news (<10 min)
+                            if result.get('should_operate') and result.get('direction', 'NEUTRAL') != 'NEUTRAL':
+                                try:
+                                    from datetime import datetime as dt
+                                    fetch_ts = get_news_fetch_time(news_id)
+                                    is_fresh = True
+                                    if fetch_ts:
+                                        fetch_time = dt.strptime(str(fetch_ts).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                                        age_min = (dt.utcnow() - fetch_time).total_seconds() / 60
+                                        is_fresh = age_min <= 10
+                                        if not is_fresh:
+                                            logger.info(f"Skip auto-strategy: news {age_min:.0f}min old (max 10)")
+
+                                    if is_fresh:
+                                        market = tech.get_market_state()
+                                        price = market.get('price', 0)
+                                        if price > 0:
+                                            direction = result['direction']
+                                            pip = 0.0001
+                                            if direction == 'CALL':
+                                                sl = round(price - 5 * pip, 5)
+                                                tp = round(price + 10 * pip, 5)
+                                            else:  # PUT
+                                                sl = round(price + 5 * pip, 5)
+                                                tp = round(price - 10 * pip, 5)
+
+                                            # Get alert_id from DB (last inserted)
+                                            import sqlite3
+                                            from src.common.db import DB_PATH
+                                            conn = sqlite3.connect(DB_PATH)
+                                            c = conn.cursor()
+                                            c.execute("SELECT id FROM alerts WHERE news_id=? ORDER BY id DESC LIMIT 1", (news_id,))
+                                            row = c.fetchone()
+                                            conn.close()
+                                            if row:
+                                                sid = add_auto_strategy(
+                                                    alert_id=row[0], news_title=title,
+                                                    direction=direction, entry_price=price,
+                                                    stop_loss=sl, take_profit=tp,
+                                                    confidence=result.get('confidence', 50),
+                                                    impact_score=result['impact_score'])
+                                                if sid:
+                                                    strategies_created += 1
+                                                    logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f}")
+                                except Exception as e:
+                                    logger.error(f"Auto-strategy error: {e}")
+
                         mark_news_processed(news_id)
                     
-                    if alerts_sent > 0:
-                        logger.info(f"[{iteration}] Sent {alerts_sent} alerts")
+                    if alerts_sent > 0 or strategies_created > 0:
+                        logger.info(f"[{iteration}] Alerts: {alerts_sent} | Strategies: {strategies_created}")
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")
                 
@@ -371,9 +454,17 @@ class AIdan:
             else:
                 self.log(f"✓ Modelo {OLLAMA_MODEL} listo", "green")
             
-            # 3. Iniciar servicios
+            # 3. Verificar modelo de visión (llava) para análisis de gráficos
+            self.log("🔍 Verificando modelo de visión (llava)...", "blue")
+            if not self.check_vision_model():
+                self.log("📦 Descargando llava (análisis de gráficos)...", "blue")
+                self.install_vision_model()
+            else:
+                self.log("✓ Modelo de visión listo", "green")
+
+            # 4. Iniciar servicios
             if self.start_services():
-                # 4. Abrir dashboard
+                # 5. Abrir dashboard
                 self.open_dashboard()
         
         # Ejecutar init en background
