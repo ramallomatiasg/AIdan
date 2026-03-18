@@ -250,6 +250,43 @@ Resultado: `AIdan_Portable.rar` (~25MB)
 
 ---
 
+## Historial de versiones
+
+### v1.3 (18 Mar 2026)
+- Pestana "Estrategias" con graficos de velas auto-generados (Entry/SL/TP visual)
+- Estrategias automaticas al detectar noticias de alto impacto (<10 min)
+- Analisis tecnico integrado (tendencia, RSI, volumen) cruza con noticias
+- Chat con IA acepta imagenes de graficos (modelo llava)
+- Prompt de analisis mejorado: scores variados y descripciones cortas
+- Header y tabs sticky al scrollear
+- Alertas solo del dia actual
+- Timestamps en hora local (ya no UTC)
+- Perfiles de configuracion guardables (Conservador, Agresivo, etc.)
+- Calendario economico filtrado solo EUR/USD
+- Descarga automatica de llava al primer inicio
+- Win/Loss/Skip en estrategias para trackear efectividad
+
+### v1.2 (02 Mar 2026)
+- Dashboard con grafico TradingView en vivo
+- Alertas con filtros (direccion, confianza, periodo)
+- Chat con IA para consultas de scalping
+- Calendario economico de Investing.com
+- Ticker de noticias en barra inferior
+- Modo oscuro/claro
+- Ejecutable portable todo-en-uno (23MB)
+
+### v1.1
+- Analisis con Ollama/Llama 3.1
+- Alertas basicas de noticias
+- API + dashboard web
+
+### v1.0
+- Recolector RSS de noticias financieras
+- Analisis por keywords
+- Dashboard minimo
+
+---
+
 ## Licencia
 
 MIT - Uso libre.
