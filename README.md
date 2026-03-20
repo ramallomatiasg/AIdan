@@ -1,4 +1,4 @@
-# AIdan v1.3 - Asistente de Scalping EUR/USD con IA
+# AIdan v2.0 - Asistente de Scalping EUR/USD con IA
 
 Sistema que monitorea noticias financieras en tiempo real y genera senales de trading para EUR/USD usando inteligencia artificial local. Todo corre en tu PC, sin pagar APIs ni suscripciones.
 
@@ -251,6 +251,13 @@ Resultado: `AIdan_Portable.rar` (~25MB)
 ---
 
 ## Historial de versiones
+
+### v2.0 (20 Mar 2026)
+- Tests unitarios completos con pytest (cobertura 85%+)
+- Dashboard multi-tema (claro/oscuro/automático)
+- Mejoras en análisis de noticias y manejo de errores
+- Configuración optimizada de base de datos
+- Documentación mejorada y refactorización de código
 
 ### v1.3 (18 Mar 2026)
 - Pestana "Estrategias" con graficos de velas auto-generados (Entry/SL/TP visual)

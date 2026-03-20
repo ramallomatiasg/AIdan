@@ -865,7 +865,8 @@
     <!-- Performance bar -->
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
         <span style="font-size:14px;font-weight:700;color:var(--text-primary);">&#x1F3AF; Estrategias Auto-Generadas</span>
-        <span style="font-size:10px;color:var(--text-muted);">Max 6 · Se generan al detectar noticias operables (&lt;10 min)</span>
+        <span style="font-size:10px;color:var(--text-muted);">Max 6 · Noticias + Estructura de mercado</span>
+        <span id="structureStatus" style="font-size:10px;color:var(--accent-cyan);"></span>
         <div style="margin-left:auto;display:flex;gap:8px;" id="stratPerfBar">
             <span class="stat-chip">Win Rate <span id="stratWR">0%</span></span>
             <span class="stat-chip">W/L <span id="stratWL">0/0</span></span>
@@ -876,7 +877,7 @@
     <div id="autoStrategiesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(760px,1fr));gap:14px;">
         <div class="empty-state" style="grid-column:1/-1;">
             <div class="icon">&#x1F4C8;</div>
-            <div class="text">Sin estrategias auto-generadas aun. Se crean automaticamente cuando llegan noticias de alto impacto.</div>
+            <div class="text">Sin estrategias aún. Se generan desde noticias de alto impacto y estructura de mercado (breakouts, S/R, RSI, cruces de MA).</div>
         </div>
     </div>
 
@@ -1498,7 +1499,19 @@
         return chart;
     }
 
+    async function loadStructureStatus() {
+        try {
+            const res = await fetch(`${API_BASE}/structure-status`);
+            const data = await res.json();
+            const el = document.getElementById('structureStatus');
+            if (el && data.status === 'success' && data.data.active) {
+                el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:6px;height:6px;background:#00e676;border-radius:50%;display:inline-block;animation:pulse 1.5s infinite;"></span> Escáner: ${data.data.watching}</span>`;
+            }
+        } catch(e) {}
+    }
+
     async function loadAutoStrategies() {
+        loadStructureStatus();
         try {
             // Fetch candles if not cached or stale
             if (!cachedCandles) {
@@ -1531,7 +1544,7 @@
                 if (lwChartInstances.length > 0) { lwChartInstances.forEach(c => { try { c.remove(); } catch(e) {} }); lwChartInstances = []; }
                 grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;">
                     <div class="icon">&#x1F4C8;</div>
-                    <div class="text">Sin estrategias auto-generadas aun. Se crean cuando llegan noticias de alto impacto (&lt;10 min).</div>
+                    <div class="text">Sin estrategias aún. Se generan desde noticias de alto impacto y estructura de mercado (breakouts, S/R, RSI, cruces de MA).</div>
                 </div>`;
                 lastStratFingerprint = '';
                 return;
@@ -1582,7 +1595,11 @@
                     </div>
                     <div style="padding:4px 12px;font-size:10px;color:var(--text-secondary);border-top:1px solid var(--border-color);display:flex;align-items:center;gap:6px;">
                         <span style="white-space:nowrap;color:var(--accent-yellow);font-weight:700;">&#x23F0; ${timeStr}</span>
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">&#x1F4F0; ${escapeHtml(s.news_title)}</span>
+                        ${s.trigger_type === 'structure'
+                            ? '<span style="background:var(--accent-purple,#9b59b6);color:#fff;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;">ESTRUCTURA</span>'
+                            : '<span style="background:var(--accent-blue);color:#fff;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;">NOTICIA</span>'
+                        }
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">${s.trigger_type === 'structure' ? '&#x1F4CA;' : '&#x1F4F0;'} ${escapeHtml(s.news_title)}</span>
                     </div>
                     <div style="padding:8px 12px;display:flex;gap:6px;">
                         <button class="result-btn win ${btnState('win')}" onclick="voteStrategy(${s.id},'win')" ${s.result ? 'disabled' : ''}>&#x2705; Win</button>

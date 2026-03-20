@@ -504,6 +504,41 @@ async def get_market_state():
 
 # ── Auto-Strategy Endpoints ──
 
+@app.get("/structure-status")
+async def structure_status():
+    """Report what the structure scanner is monitoring"""
+    try:
+        tech = get_tech()
+        market = tech.get_market_state()
+        if market.get('source') == 'fallback':
+            return JSONResponse({"status": "success", "data": {"watching": "Sin datos de mercado", "active": False}})
+        structures = market.get('chart_structures', {})
+        supports = structures.get('supports', [])
+        resistances = structures.get('resistances', [])
+        price = market['price']
+        watching_parts = []
+        if resistances:
+            nearest_res = min(resistances, key=lambda r: abs(price - r))
+            dist_r = (nearest_res - price) * 10000
+            watching_parts.append(f"Res {nearest_res:.5f} ({dist_r:+.1f}p)")
+        if supports:
+            nearest_sup = min(supports, key=lambda s: abs(price - s))
+            dist_s = (nearest_sup - price) * 10000
+            watching_parts.append(f"Sop {nearest_sup:.5f} ({dist_s:+.1f}p)")
+        watching_parts.append(f"RSI {market['rsi']:.0f}")
+        watching_parts.append(f"Tend {market['trend']}")
+        return JSONResponse({"status": "success", "data": {
+            "watching": " | ".join(watching_parts),
+            "active": True,
+            "price": market['price'],
+            "rsi": market['rsi'],
+            "trend": market['trend'],
+            "supports": supports,
+            "resistances": resistances
+        }})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
 @app.get("/auto-strategies")
 async def list_auto_strategies():
     """Get active auto-generated strategies (max 6)"""
@@ -519,7 +554,8 @@ async def list_auto_strategies():
                 "expiry_minutes": r[9], "status": r[10],
                 "created_at": _utc_iso(str(r[11])) if r[11] else None,
                 "expires_at": _utc_iso(str(r[12])) if r[12] else None,
-                "result": r[13]
+                "result": r[13],
+                "trigger_type": r[14] if len(r) > 14 else "news"
             })
         return JSONResponse({"status": "success", "data": strategies, "count": len(strategies)})
     except Exception as e:

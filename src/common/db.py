@@ -89,11 +89,11 @@ def init_db():
         )
     """)
 
-    # Auto-generated strategies from high-impact news
+    # Auto-generated strategies from high-impact news or market structure
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS auto_strategies (
             id INTEGER PRIMARY KEY,
-            alert_id INTEGER UNIQUE,
+            alert_id INTEGER,
             news_title TEXT,
             direction TEXT,
             entry_price REAL,
@@ -105,6 +105,7 @@ def init_db():
             status TEXT DEFAULT 'active',
             created_at TIMESTAMP,
             expires_at TIMESTAMP,
+            trigger_type TEXT DEFAULT 'news',
             FOREIGN KEY(alert_id) REFERENCES alerts(id)
         )
     """)
@@ -123,6 +124,12 @@ def init_db():
     # Migrations: add columns that may not exist in older DBs
     try:
         cursor.execute("ALTER TABLE strategies ADD COLUMN is_active INTEGER DEFAULT 0")
+    except:
+        pass  # column already exists
+
+    # Migration: add trigger_type to auto_strategies (news vs structure)
+    try:
+        cursor.execute("ALTER TABLE auto_strategies ADD COLUMN trigger_type TEXT DEFAULT 'news'")
     except:
         pass  # column already exists
 
@@ -298,8 +305,9 @@ def cleanup_old_data(hours=72):
 
 # ── Auto-Strategy functions ──
 
-def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, take_profit, confidence, impact_score, expiry_minutes=5):
-    """Add auto-generated strategy, enforcing max 6 cap"""
+def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, take_profit, confidence, impact_score, expiry_minutes=5, trigger_type='news'):
+    """Add auto-generated strategy, enforcing max 6 cap.
+    alert_id can be None for structure-triggered strategies."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -321,16 +329,31 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
 
         now = now_ar()
         expires_at = now + timedelta(minutes=expiry_minutes)
-        cursor.execute("""
-            INSERT INTO auto_strategies
-            (alert_id, news_title, direction, entry_price, stop_loss, take_profit,
-             confidence, impact_score, expiry_minutes, status, created_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
-        """, (alert_id, news_title, direction, entry_price, stop_loss, take_profit,
-              confidence, impact_score, expiry_minutes, now, expires_at))
+        # Check if trigger_type column exists (migration may not have run)
+        cursor.execute("PRAGMA table_info(auto_strategies)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'trigger_type' in columns:
+            cursor.execute("""
+                INSERT INTO auto_strategies
+                (alert_id, news_title, direction, entry_price, stop_loss, take_profit,
+                 confidence, impact_score, expiry_minutes, status, created_at, expires_at, trigger_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            """, (alert_id, news_title, direction, entry_price, stop_loss, take_profit,
+                  confidence, impact_score, expiry_minutes, now, expires_at, trigger_type))
+        else:
+            cursor.execute("""
+                INSERT INTO auto_strategies
+                (alert_id, news_title, direction, entry_price, stop_loss, take_profit,
+                 confidence, impact_score, expiry_minutes, status, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+            """, (alert_id, news_title, direction, entry_price, stop_loss, take_profit,
+                  confidence, impact_score, expiry_minutes, now, expires_at))
         conn.commit()
         return cursor.lastrowid
-    except Exception:
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[DB] add_auto_strategy FAILED: {e}")
         return None
     finally:
         conn.close()
@@ -347,17 +370,35 @@ def get_active_strategies(limit=6):
     """, (now_ar(),))
     conn.commit()
 
-    cursor.execute("""
-        SELECT s.id, s.alert_id, s.news_title, s.direction, s.entry_price,
-               s.stop_loss, s.take_profit, s.confidence, s.impact_score,
-               s.expiry_minutes, s.status, s.created_at, s.expires_at,
-               sr.result
-        FROM auto_strategies s
-        LEFT JOIN strategy_results sr ON s.id = sr.strategy_id
-        WHERE date(s.created_at) = date(?)
-        ORDER BY s.created_at DESC
-        LIMIT ?
-    """, (today_ar(), limit,))
+    # Check if trigger_type column exists
+    cursor.execute("PRAGMA table_info(auto_strategies)")
+    columns = [row[1] for row in cursor.fetchall()]
+    has_trigger_type = 'trigger_type' in columns
+
+    if has_trigger_type:
+        cursor.execute("""
+            SELECT s.id, s.alert_id, s.news_title, s.direction, s.entry_price,
+                   s.stop_loss, s.take_profit, s.confidence, s.impact_score,
+                   s.expiry_minutes, s.status, s.created_at, s.expires_at,
+                   sr.result, s.trigger_type
+            FROM auto_strategies s
+            LEFT JOIN strategy_results sr ON s.id = sr.strategy_id
+            WHERE date(s.created_at) = date(?)
+            ORDER BY s.created_at DESC
+            LIMIT ?
+        """, (today_ar(), limit,))
+    else:
+        cursor.execute("""
+            SELECT s.id, s.alert_id, s.news_title, s.direction, s.entry_price,
+                   s.stop_loss, s.take_profit, s.confidence, s.impact_score,
+                   s.expiry_minutes, s.status, s.created_at, s.expires_at,
+                   sr.result, 'news' as trigger_type
+            FROM auto_strategies s
+            LEFT JOIN strategy_results sr ON s.id = sr.strategy_id
+            WHERE date(s.created_at) = date(?)
+            ORDER BY s.created_at DESC
+            LIMIT ?
+        """, (today_ar(), limit,))
 
     results = cursor.fetchall()
     conn.close()

@@ -317,12 +317,49 @@ class AIdan:
                                     logger.error(f"Auto-strategy error: {e}")
 
                         mark_news_processed(news_id)
-                    
+
                     if alerts_sent > 0 or strategies_created > 0:
                         logger.info(f"[{iteration}] Alerts: {alerts_sent} | Strategies: {strategies_created}")
+
+                    # ── Structure scanner: generate strategies from market structure alone ──
+                    try:
+                        from src.common.db import get_active_profile
+                        profile = get_active_profile()
+                        structure_signals = tech.detect_structure_signals(
+                            min_confidence=profile.get('min_confidence', 60))
+                        prof_sl = profile.get('stop_loss_pips', 5)
+                        prof_tp = profile.get('take_profit_pips', 10)
+
+                        for sig in structure_signals:
+                            direction = sig['direction']
+                            conf = sig['confidence']
+                            price = tech.get_market_state().get('price', 0)
+                            if price <= 0:
+                                break
+                            pip = 0.0001
+                            if direction == 'CALL':
+                                sl = round(price - prof_sl * pip, 5)
+                                tp = round(price + prof_tp * pip, 5)
+                            else:
+                                sl = round(price + prof_sl * pip, 5)
+                                tp = round(price - prof_tp * pip, 5)
+
+                            sid = add_auto_strategy(
+                                alert_id=None,
+                                news_title=f"[ESTRUCTURA] {sig['reason'][:80]}",
+                                direction=direction, entry_price=price,
+                                stop_loss=sl, take_profit=tp,
+                                confidence=conf, impact_score=int(conf),
+                                trigger_type='structure')
+                            if sid:
+                                strategies_created += 1
+                                logger.info(f"Structure strategy #{sid}: {direction} @ {price:.5f} | {sig['setup_type']} | {sig['reason'][:60]}")
+                    except Exception as e:
+                        logger.error(f"Structure scanner error: {e}")
+
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")
-                
+
                 time.sleep(Config.ANALYZER_INTERVAL)
         except Exception as e:
             print(f"FATAL Analyzer: {e}")

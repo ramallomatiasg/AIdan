@@ -14,6 +14,8 @@ class TechnicalAnalyzer:
         self.logger = logger
         self._cache = {}
         self._cache_ttl = 30  # seconds
+        self._triggered_levels = {}  # {level_key: timestamp} — avoid duplicate signals
+        self._last_trigger_cleanup = 0
 
     def get_market_state(self):
         """
@@ -331,6 +333,241 @@ class TechnicalAnalyzer:
             'timestamp': datetime.now().isoformat(),
             'source': 'live'
         }
+
+    def detect_structure_signals(self, min_confidence=50):
+        """
+        Scan market structure for actionable setups (no news needed).
+        min_confidence comes from the user's active profile.
+        Returns list of signal dicts or empty list.
+        Each signal: {direction, confidence, reason, setup_type, key_level}
+        """
+        market = self.get_market_state()
+        if market.get('source') == 'fallback':
+            return []
+
+        candles = self._fetch_candles()
+        if not candles or len(candles) < 25:
+            return []
+
+        # Cleanup old triggered levels (every 30 min)
+        now = time.time()
+        if now - self._last_trigger_cleanup > 1800:
+            cutoff = now - 3600  # forget levels older than 1h
+            self._triggered_levels = {k: v for k, v in self._triggered_levels.items() if v > cutoff}
+            self._last_trigger_cleanup = now
+
+        price = market['price']
+        trend = market['trend']
+        trend_strength = market['trend_strength']
+        rsi = market['rsi']
+        rsi_zone = market['rsi_zone']
+        momentum = market['momentum']
+        ma_fast = market.get('ma_fast', 0)
+        ma_slow = market.get('ma_slow', 0)
+        structures = market.get('chart_structures', {})
+        supports = structures.get('supports', [])
+        resistances = structures.get('resistances', [])
+        bb_upper = structures.get('bb_upper', 0)
+        bb_lower = structures.get('bb_lower', 0)
+
+        signals = []
+        pip = 0.0001
+
+        # Helper: check if we already triggered this level recently
+        def already_triggered(level, direction):
+            key = f"{round(level, 5)}_{direction}"
+            return key in self._triggered_levels
+
+        def mark_triggered(level, direction):
+            key = f"{round(level, 5)}_{direction}"
+            self._triggered_levels[key] = time.time()
+
+        # Last 2 closed candles (not current incomplete one)
+        prev1 = candles[-2]
+        prev2 = candles[-3]
+
+        # ── 1. BREAKOUT above resistance ──
+        for res in resistances:
+            dist = (price - res) * 10000  # in pips
+            if 0.3 < dist < 12 and prev2['close'] < res and prev1['close'] > res:
+                if not already_triggered(res, 'CALL'):
+                    conf = 70
+                    if trend == 'bullish':
+                        conf += 10
+                    if momentum == 'up':
+                        conf += 5
+                    if rsi_zone == 'overbought':
+                        conf -= 10
+                    if conf >= min_confidence:
+                        signals.append({
+                            'direction': 'CALL',
+                            'confidence': min(conf, 90),
+                            'reason': f"Breakout sobre resistencia {res:.5f} (precio {price:.5f}, +{dist:.1f}p). Tendencia {trend} {trend_strength}.",
+                            'setup_type': 'breakout_resistance',
+                            'key_level': res
+                        })
+                        mark_triggered(res, 'CALL')
+
+        # ── 2. BREAKDOWN below support ──
+        for sup in supports:
+            dist = (sup - price) * 10000  # in pips
+            if 0.3 < dist < 12 and prev2['close'] > sup and prev1['close'] < sup:
+                if not already_triggered(sup, 'PUT'):
+                    conf = 70
+                    if trend == 'bearish':
+                        conf += 10
+                    if momentum == 'down':
+                        conf += 5
+                    if rsi_zone == 'oversold':
+                        conf -= 10
+                    if conf >= min_confidence:
+                        signals.append({
+                            'direction': 'PUT',
+                            'confidence': min(conf, 90),
+                            'reason': f"Ruptura bajo soporte {sup:.5f} (precio {price:.5f}, -{dist:.1f}p). Tendencia {trend} {trend_strength}.",
+                            'setup_type': 'breakdown_support',
+                            'key_level': sup
+                        })
+                        mark_triggered(sup, 'PUT')
+
+        # ── 3. RSI extreme + key level = REVERSAL ──
+        if rsi_zone == 'oversold' and supports:
+            nearest_sup = min(supports, key=lambda s: abs(price - s))
+            if abs(price - nearest_sup) * 10000 < 8:  # within 8 pips of support
+                if not already_triggered(nearest_sup, 'RSI_CALL'):
+                    conf = 72
+                    if trend == 'bullish':
+                        conf += 8
+                    if prev1['close'] > prev1['open']:  # green candle bonus
+                        conf += 5
+                    if conf >= min_confidence:
+                        signals.append({
+                            'direction': 'CALL',
+                            'confidence': min(conf, 88),
+                            'reason': f"RSI sobrevendido ({rsi:.0f}) en soporte {nearest_sup:.5f}. Posible rebote alcista.",
+                            'setup_type': 'rsi_reversal_support',
+                            'key_level': nearest_sup
+                        })
+                        mark_triggered(nearest_sup, 'RSI_CALL')
+
+        if rsi_zone == 'overbought' and resistances:
+            nearest_res = min(resistances, key=lambda r: abs(price - r))
+            if abs(price - nearest_res) * 10000 < 8:
+                if not already_triggered(nearest_res, 'RSI_PUT'):
+                    conf = 72
+                    if trend == 'bearish':
+                        conf += 8
+                    if prev1['close'] < prev1['open']:  # red candle bonus
+                        conf += 5
+                    if conf >= min_confidence:
+                        signals.append({
+                            'direction': 'PUT',
+                            'confidence': min(conf, 88),
+                            'reason': f"RSI sobrecomprado ({rsi:.0f}) en resistencia {nearest_res:.5f}. Posible rechazo bajista.",
+                            'setup_type': 'rsi_reversal_resistance',
+                            'key_level': nearest_res
+                        })
+                        mark_triggered(nearest_res, 'RSI_PUT')
+
+        # ── 4. Bollinger Band rejection at S/R ──
+        if bb_upper > 0 and abs(price - bb_upper) * 10000 < 5:
+            if prev1['close'] < prev1['open'] and resistances:
+                nearest_res = min(resistances, key=lambda r: abs(price - r))
+                if abs(price - nearest_res) * 10000 < 10:
+                    if not already_triggered(bb_upper, 'BB_PUT'):
+                        conf = 68
+                        if conf >= min_confidence:
+                            signals.append({
+                                'direction': 'PUT',
+                                'confidence': conf,
+                                'reason': f"Rechazo en Bollinger superior ({bb_upper:.5f}) + resistencia {nearest_res:.5f}. Vela bajista.",
+                                'setup_type': 'bb_rejection_upper',
+                                'key_level': bb_upper
+                            })
+                            mark_triggered(bb_upper, 'BB_PUT')
+
+        if bb_lower > 0 and abs(price - bb_lower) * 10000 < 5:
+            if prev1['close'] > prev1['open'] and supports:
+                nearest_sup = min(supports, key=lambda s: abs(price - s))
+                if abs(price - nearest_sup) * 10000 < 10:
+                    if not already_triggered(bb_lower, 'BB_CALL'):
+                        conf = 68
+                        if conf >= min_confidence:
+                            signals.append({
+                                'direction': 'CALL',
+                                'confidence': conf,
+                                'reason': f"Rebote en Bollinger inferior ({bb_lower:.5f}) + soporte {nearest_sup:.5f}. Vela alcista.",
+                                'setup_type': 'bb_rejection_lower',
+                                'key_level': bb_lower
+                            })
+                            mark_triggered(bb_lower, 'BB_CALL')
+
+        # ── 5. Strong momentum after consolidation ──
+        if len(candles) >= 8:
+            consol_candles = candles[-8:-2]
+            consol_ranges = [(c['high'] - c['low']) * 10000 for c in consol_candles]
+            avg_consol = sum(consol_ranges) / len(consol_ranges)
+            last_range = (prev1['high'] - prev1['low']) * 10000
+
+            if avg_consol < 6 and last_range > avg_consol * 2.0:  # expansion > 2x consolidation
+                body = prev1['close'] - prev1['open']
+                if abs(body) * 10000 > 2:  # decent body (>2 pips)
+                    direction = 'CALL' if body > 0 else 'PUT'
+                    key = round(prev1['close'], 5)
+                    if not already_triggered(key, f'MOMENTUM_{direction}'):
+                        conf = 72
+                        if conf >= min_confidence:
+                            signals.append({
+                                'direction': direction,
+                                'confidence': conf,
+                                'reason': f"Expansión de volatilidad ({last_range:.1f}p) tras consolidación ({avg_consol:.1f}p). Momentum {direction}.",
+                                'setup_type': 'momentum_expansion',
+                                'key_level': prev1['close']
+                            })
+                            mark_triggered(key, f'MOMENTUM_{direction}')
+
+        # ── 6. MA9/MA21 crossover ──
+        if ma_fast > 0 and ma_slow > 0 and len(candles) >= 22:
+            # Compute MA9 and MA21 for previous candle to detect crossover
+            prev_closes = [c['close'] for c in candles[:-1]]
+            prev_ma_fast = sum(prev_closes[-9:]) / 9
+            prev_ma_slow = sum(prev_closes[-21:]) / 21
+
+            # Golden cross: MA9 crosses above MA21
+            if prev_ma_fast <= prev_ma_slow and ma_fast > ma_slow:
+                if not already_triggered(ma_fast, 'MA_CALL'):
+                    conf = 65
+                    if momentum == 'up':
+                        conf += 5
+                    if conf >= min_confidence:
+                        signals.append({
+                            'direction': 'CALL',
+                            'confidence': min(conf, 85),
+                            'reason': f"Cruce alcista MA9 ({ma_fast:.5f}) sobre MA21 ({ma_slow:.5f}). Momentum {momentum}.",
+                            'setup_type': 'ma_crossover_bull',
+                            'key_level': price
+                        })
+                        mark_triggered(ma_fast, 'MA_CALL')
+
+            # Death cross: MA9 crosses below MA21
+            elif prev_ma_fast >= prev_ma_slow and ma_fast < ma_slow:
+                if not already_triggered(ma_fast, 'MA_PUT'):
+                    conf = 65
+                    if momentum == 'down':
+                        conf += 5
+                    if conf >= min_confidence:
+                        signals.append({
+                            'direction': 'PUT',
+                            'confidence': min(conf, 85),
+                            'reason': f"Cruce bajista MA9 ({ma_fast:.5f}) bajo MA21 ({ma_slow:.5f}). Momentum {momentum}.",
+                            'setup_type': 'ma_crossover_bear',
+                            'key_level': price
+                        })
+                        mark_triggered(ma_fast, 'MA_PUT')
+
+        if signals:
+            self.logger.info(f"Structure scanner: {len(signals)} signals detected")
+        return signals
 
     def get_candles_text(self, n=15):
         """Return last N candles as text for AI context, with pattern detection."""
