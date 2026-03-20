@@ -17,17 +17,49 @@ from src.common.db import (init_db, get_stats, get_recent_alerts, record_signal_
                            get_performance_stats, get_active_strategies, record_strategy_result,
                            get_strategy_performance)
 from src.analyzer.technical import TechnicalAnalyzer
+from src.common.db import today_ar
 
 logger = setup_logging(__name__, Config.LOG_LEVEL)
+
+
+# Groq API helper (free, Llama 70B)
+def _call_groq(messages, temperature=0.75, max_tokens=600):
+    """Call Groq API (OpenAI-compatible). Returns response text or None."""
+    api_key = Config.GROQ_API_KEY
+    if not api_key:
+        return None
+    try:
+        resp = requests.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            json={
+                'model': Config.GROQ_MODEL,
+                'messages': messages,
+                'temperature': temperature,
+                'max_tokens': max_tokens,
+                'stream': False
+            },
+            timeout=30
+        )
+        if resp.status_code == 200:
+            content = resp.json()['choices'][0]['message']['content']
+            logger.info(f"Groq response OK ({len(content)} chars)")
+            return content
+        else:
+            logger.warning(f"Groq error {resp.status_code}: {resp.text[:200]}")
+            return None
+    except Exception as e:
+        logger.warning(f"Groq unavailable: {e}")
+        return None
 
 app = FastAPI(title="Financial News Monitor API", version="1.0.0")
 
 # UTC ISO helper — SQLite stores "2026-03-17 13:44:18.439" without timezone
 def _utc_iso(ts_str):
-    """Convert SQLite timestamp to UTC ISO 8601 for correct JS Date() parsing."""
+    """Convert SQLite timestamp (stored as Buenos Aires UTC-3) to ISO 8601 for JS Date() parsing."""
     if not ts_str:
         return ts_str
-    return ts_str.replace(' ', 'T').rstrip('Z') + 'Z'
+    return ts_str.replace(' ', 'T').split('.')[0] + '-03:00'
 
 # Vision model detection
 _vision_model_cache = {'model': None, 'checked': 0}
@@ -103,6 +135,24 @@ async def root():
     logger.error("❌ No se encontró ningún dashboard")
     return {"message": "Dashboard not found"}
 
+@app.get("/ai-status")
+async def ai_status():
+    """Report which AI backend is active"""
+    has_groq = bool(Config.GROQ_API_KEY)
+    has_ollama = False
+    try:
+        r = requests.get('http://localhost:11434/api/tags', timeout=3)
+        has_ollama = r.status_code == 200
+    except:
+        pass
+    primary = "groq" if has_groq else ("ollama" if has_ollama else "keywords")
+    return JSONResponse({
+        "primary": primary,
+        "groq_available": has_groq,
+        "ollama_available": has_ollama,
+        "model": Config.GROQ_MODEL if has_groq else "llama3.1:8b"
+    })
+
 # Servir página About
 @app.get("/about")
 async def about():
@@ -124,7 +174,7 @@ async def health():
     from datetime import datetime
     return JSONResponse({
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now().isoformat()
     })
 
 @app.get("/stats")
@@ -384,7 +434,7 @@ async def save_strategy(strategy: StrategyDefinition):
         cursor.execute("""
             INSERT OR REPLACE INTO strategies (name, config, created_at)
             VALUES (?, ?, ?)
-        """, (strategy.name, json.dumps(strategy.dict()), datetime.utcnow()))
+        """, (strategy.name, json.dumps(strategy.dict()), datetime.now()))
         conn.commit()
         conn.close()
         return JSONResponse({"status": "success"})
@@ -399,11 +449,27 @@ async def list_strategies():
         from src.common.db import DB_PATH
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, config, created_at FROM strategies ORDER BY created_at DESC")
+        cursor.execute("SELECT id, name, config, created_at, COALESCE(is_active, 0) FROM strategies ORDER BY created_at DESC")
         rows = cursor.fetchall()
         conn.close()
-        strategies = [{"id": r[0], "name": r[1], "config": json.loads(r[2]), "created_at": _utc_iso(r[3])} for r in rows]
+        strategies = [{"id": r[0], "name": r[1], "config": json.loads(r[2]), "created_at": _utc_iso(r[3]), "is_active": bool(r[4])} for r in rows]
         return JSONResponse({"status": "success", "data": strategies})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+@app.post("/strategy/{strategy_id}/activate")
+async def activate_strategy(strategy_id: int):
+    """Set a strategy as active (deactivate others)"""
+    try:
+        import sqlite3
+        from src.common.db import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE strategies SET is_active = 0")  # deactivate all
+        cursor.execute("UPDATE strategies SET is_active = 1 WHERE id = ?", (strategy_id,))
+        conn.commit()
+        conn.close()
+        return JSONResponse({"status": "success"})
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
@@ -631,7 +697,31 @@ async def chat_with_ollama(request: ChatRequest):
                 patterns_text += f"  Losses ({len(loss_p)}): Conf promedio {avg_conf_l:.0f}%, Impact promedio {avg_imp_l:.0f}, Dirs: {','.join(dirs_l)}\n"
             patterns_text += "  Usá estos patrones para calibrar tus recomendaciones.\n"
 
+        # Auto-strategies del día
+        cursor.execute("""
+            SELECT s.direction, s.entry_price, s.stop_loss, s.take_profit,
+                   s.confidence, s.impact_score, s.status, s.news_title,
+                   s.created_at, sr.result
+            FROM auto_strategies s
+            LEFT JOIN strategy_results sr ON s.id = sr.strategy_id
+            WHERE date(s.created_at) = date(?)
+            ORDER BY s.created_at DESC LIMIT 6
+        """, (today_ar(),))
+        strategy_rows = cursor.fetchall()
+
         conn.close()
+
+        # Formatear estrategias
+        strategies_text = ""
+        if strategy_rows:
+            strategies_text = "\n\n🎯 AUTO-ESTRATEGIAS DEL DÍA:\n"
+            for direction, entry, sl, tp, conf, impact, status, title, created, result in strategy_rows:
+                result_str = f" → Resultado: {result.upper()}" if result else ""
+                strategies_text += f"  → {direction} @ {entry:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Conf: {conf:.0f}%{result_str}\n"
+                strategies_text += f"    Status: {status} | Noticia: {title[:60]}\n"
+            strat_perf = get_strategy_performance()
+            if strat_perf.get('total', 0) > 0:
+                strategies_text += f"  📊 Estrategias: {strat_perf['wins']}W/{strat_perf['losses']}L | WR: {strat_perf['win_rate']}%\n"
 
         # Formatear alertas para el contexto
         alerts_text = ""
@@ -677,8 +767,25 @@ async def chat_with_ollama(request: ChatRequest):
 - Precio vs MA: {market['price_vs_ma']}
 - Momentum: {market['momentum']}
 - Volatilidad: {market['volatility']}
-- Rango promedio: {market.get('avg_range_pips', 0):.1f} pips
-IMPORTANTE: Usá estos datos técnicos para CONTRASTAR con las noticias. Si las noticias dicen CALL pero la tendencia es bajista fuerte, mencionalo."""
+- Rango promedio: {market.get('avg_range_pips', 0):.1f} pips"""
+                structures = market.get('chart_structures', {})
+                if structures:
+                    sups = ', '.join(f'{s:.5f}' for s in structures.get('supports', []))
+                    ress = ', '.join(f'{r:.5f}' for r in structures.get('resistances', []))
+                    tech_text += f"""
+- Soportes: {sups or 'N/A'}
+- Resistencias: {ress or 'N/A'}
+- Bollinger: Upper {structures.get('bb_upper', 0):.5f} | Middle {structures.get('bb_middle', 0):.5f} | Lower {structures.get('bb_lower', 0):.5f}
+- Posición: {structures.get('price_position', 'N/A')}"""
+                tech_text += """
+IMPORTANTE: Usá estos datos técnicos para CONTRASTAR con las noticias. Si las noticias dicen CALL pero la tendencia es bajista fuerte, mencionalo. Analizá soportes/resistencias cercanos."""
+                # Add raw candles for pattern detection
+                try:
+                    candles_text = get_tech().get_candles_text(15)
+                    if candles_text:
+                        tech_text += candles_text
+                except Exception as ce:
+                    logger.warning(f"Candles text for chat failed: {ce}")
         except Exception as e:
             logger.warning(f"Tech context for chat failed: {e}")
 
@@ -709,7 +816,7 @@ PERFIL DE EXPERTISE:
 
 DATOS EN TIEMPO REAL DEL SISTEMA:
 - Noticias monitoreadas: {total_news}
-- Alertas generadas: {total_alerts}{perf_text}{patterns_text}{tech_text}{alerts_text}{news_text}
+- Alertas generadas: {total_alerts}{perf_text}{patterns_text}{tech_text}{alerts_text}{news_text}{strategies_text}
 
 CÓMO RESPONDÉS:
 1. Español rioplatense, directo, sin rodeos
@@ -721,10 +828,12 @@ CÓMO RESPONDÉS:
 7. Respuestas de 3-8 líneas. Más solo si piden detalle
 8. Si el usuario comparte un gráfico/imagen: analizá patrones visibles, tendencia, indicadores, y dá tu recomendación
 9. SIEMPRE contraponé lo que dicen las noticias con lo que muestra el gráfico. Si hay contradicción, mencionalo
+10. Tenés los datos OHLCV de las últimas 15 velas 5min de EUR/USD. Mencioná patrones detectados (engulfing, pin bar, doji, hammer) y si confirman o contradicen la señal fundamental. Citá precios concretos.
 10. Si el usuario tiene mal win-rate, sugerí ajustes de estrategia
 11. Números concretos siempre: pips, %, probabilidades, minutos
 12. NO saludar si ya hay conversación previa
 13. Terminá apenas des la info. Sin despedidas ni "¿algo más?"
+14. Si hay auto-estrategias activas, mencioná si tu análisis confirma o contradice la estrategia
 
 ESTRATEGIA SCALPING QUE RECOMENDÁS:
 - Entrada: Confirmación con 2+ señales (ej: pin bar + RSI sobrecompra + resistencia)
@@ -739,55 +848,73 @@ CONVERSACIÓN:
 
 AIdan:"""
 
-        # Construir payload para Ollama
-        ollama_payload = {
-            'model': 'llama3.1:8b',
-            'prompt': system_context,
-            'stream': False,
-            'options': {
-                'temperature': 0.6,
-                'top_p': 0.9,
-                'num_predict': 500
-            }
-        }
-
-        # Si hay imagen, usar modelo con visión
+        # Split system prompt for DeepSeek messages format
+        system_message = system_context.split("CONVERSACIÓN:")[0].strip()
+        user_message = request.message
         if request.image_base64:
-            vision_model = _get_vision_model()
-            if not vision_model:
+            user_message += "\n[El usuario adjuntó un GRÁFICO de trading. Analizá patrones, tendencia, indicadores visibles y dá tu recomendación.]"
+
+        # Build messages array for DeepSeek
+        ds_messages = [{"role": "system", "content": system_message}]
+        if request.context:
+            for msg in request.context[-8:]:
+                ds_messages.append({"role": msg.role, "content": msg.content})
+        ds_messages.append({"role": "user", "content": user_message})
+
+        assistant_message = None
+        model_used = None
+
+        # Try DeepSeek first (no image support on free tier)
+        if not request.image_base64:
+            result = _call_groq(ds_messages, temperature=0.75, max_tokens=600)
+            if result:
+                assistant_message = result
+                model_used = f"groq-{Config.GROQ_MODEL}"
+
+        # Fallback to Ollama
+        if not assistant_message:
+            import random
+            ollama_payload = {
+                'model': 'llama3.1:8b',
+                'prompt': system_context,
+                'stream': False,
+                'options': {
+                    'temperature': 0.75, 'top_p': 0.9,
+                    'num_predict': 500, 'num_ctx': 4096,
+                    'seed': random.randint(1, 999999)
+                }
+            }
+
+            # Image → vision model
+            if request.image_base64:
+                vision_model = _get_vision_model()
+                if not vision_model:
+                    return JSONResponse({
+                        "status": "error",
+                        "message": "No hay modelo de visión instalado. Ejecutá: ollama pull llava"
+                    }, status_code=503)
+                ollama_payload['model'] = vision_model
+                ollama_payload['images'] = [request.image_base64]
+                ollama_payload['options']['num_predict'] = 800
+                logger.info(f"Using {vision_model} for image analysis")
+
+            response = requests.post('http://localhost:11434/api/generate',
+                json=ollama_payload, timeout=90)
+
+            if response.status_code != 200:
+                logger.error(f"Ollama error: {response.status_code}")
                 return JSONResponse({
                     "status": "error",
-                    "message": "No hay modelo de visión instalado. Ejecutá en terminal:\n  ollama pull llava\nY volvé a intentar."
+                    "message": "IA no disponible. Verificá Ollama o configurá DEEPSEEK_API_KEY."
                 }, status_code=503)
-            ollama_payload['model'] = vision_model
-            ollama_payload['images'] = [request.image_base64]
-            ollama_payload['options']['num_predict'] = 800
-            logger.info(f"Using {vision_model} for image analysis")
 
-        # Llamar a Ollama
-        response = requests.post(
-            'http://localhost:11434/api/generate',
-            json=ollama_payload,
-            timeout=90
-        )
-
-        if response.status_code != 200:
-            logger.error(f"Ollama error: {response.status_code}")
-            error_msg = "Ollama no disponible. Asegurate de que esté corriendo."
-            if request.image_base64:
-                error_msg = f"El modelo de visión no pudo procesar la imagen. Probá sin imagen o instalá otro modelo con: ollama pull llava"
-            return JSONResponse({
-                "status": "error",
-                "message": error_msg
-            }, status_code=503)
-
-        result = response.json()
-        assistant_message = result.get('response', '').strip()
+            assistant_message = response.json().get('response', '').strip()
+            model_used = ollama_payload['model']
 
         return JSONResponse({
             "status": "success",
             "message": assistant_message,
-            "model": ollama_payload['model']
+            "model": model_used
         })
 
     except requests.exceptions.ConnectionError:

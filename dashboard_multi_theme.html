@@ -1,0 +1,1765 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIdan - Trading Intelligence</title>
+    <style>
+        /* ===== CSS VARIABLES - DARK THEME ===== */
+        :root {
+            --bg-primary: #080c14;
+            --bg-secondary: #0f1520;
+            --bg-card: #141c2b;
+            --bg-card-hover: #1a2436;
+            --bg-input: #0b1018;
+            --border: #1a2535;
+            --border-light: #243045;
+            --text-primary: #e8ecf2;
+            --text-secondary: #8a95a8;
+            --text-muted: #4a5568;
+            --accent-blue: #4f8ff7;
+            --accent-blue-dim: #1a3a6e;
+            --accent-green: #22c55e;
+            --accent-green-dim: rgba(34, 197, 94, 0.12);
+            --accent-red: #ef4444;
+            --accent-red-dim: rgba(239, 68, 68, 0.12);
+            --accent-yellow: #eab308;
+            --accent-yellow-dim: rgba(234, 179, 8, 0.12);
+            --accent-purple: #a78bfa;
+            --accent-cyan: #22d3ee;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            --shadow-glow: 0 0 20px rgba(79, 143, 247, 0.08);
+            --radius: 12px;
+            --radius-sm: 8px;
+            --transition: all 0.2s ease;
+        }
+
+        /* ===== LIGHT THEME ===== */
+        [data-theme="light"] {
+            --bg-primary: #f1f5f9;
+            --bg-secondary: #ffffff;
+            --bg-card: #ffffff;
+            --bg-card-hover: #f8fafc;
+            --bg-input: #f1f5f9;
+            --border: #e2e8f0;
+            --border-light: #cbd5e1;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #94a3b8;
+            --accent-blue-dim: #dbeafe;
+            --accent-green-dim: rgba(34, 197, 94, 0.1);
+            --accent-red-dim: rgba(239, 68, 68, 0.1);
+            --accent-yellow-dim: rgba(234, 179, 8, 0.1);
+            --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.04);
+            --shadow-glow: none;
+        }
+
+        /* ===== RESET & BASE ===== */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* ===== HEADER ===== */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 0 28px;
+            height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(12px);
+        }
+
+        .header-left { display: flex; align-items: center; gap: 14px; }
+
+        .logo {
+            font-size: 20px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-sub {
+            font-size: 10px;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .header-right { display: flex; align-items: center; gap: 10px; }
+
+        .theme-toggle {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 5px 10px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 14px;
+            transition: var(--transition);
+            line-height: 1;
+        }
+        .theme-toggle:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+
+        .status-indicator {
+            display: flex; align-items: center; gap: 6px;
+            background: var(--accent-green-dim);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            border-radius: 20px;
+            padding: 4px 12px 4px 8px;
+        }
+        .status-indicator.offline {
+            background: var(--accent-red-dim);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+        .status-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--accent-green);
+            animation: pulse 2s ease-in-out infinite;
+        }
+        .status-indicator.offline .status-dot {
+            background: var(--accent-red);
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+            50% { opacity: 0.7; box-shadow: 0 0 0 5px rgba(34, 197, 94, 0); }
+        }
+
+        .status-text { font-size: 11px; font-weight: 600; color: var(--accent-green); }
+        .status-indicator.offline .status-text { color: var(--accent-red); }
+
+        .clock {
+            font-size: 12px; color: var(--text-muted);
+            font-variant-numeric: tabular-nums;
+            font-family: 'JetBrains Mono', 'Consolas', 'SF Mono', monospace;
+            background: var(--bg-input);
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+
+        /* ===== STATS BAR ===== */
+        .stats-bar {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 8px 28px;
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: wrap;
+            position: sticky; top: 52px; z-index: 99;
+        }
+
+        .stat-chip {
+            display: flex; align-items: center; gap: 6px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 5px 12px;
+        }
+        .stat-label {
+            font-size: 10px; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+        }
+        .stat-value { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .stat-value.blue { color: var(--accent-blue); }
+        .stat-value.green { color: var(--accent-green); }
+        .stat-value.yellow { color: var(--accent-yellow); }
+        .stat-value.red { color: var(--accent-red); }
+        .stat-value.cyan { color: var(--accent-cyan); }
+
+        /* ===== MAIN LAYOUT ===== */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            grid-template-rows: auto auto auto;
+            gap: 14px;
+            padding: 14px 28px 56px;
+            max-width: 1700px;
+            margin: 0 auto;
+        }
+
+        /* ===== CARDS ===== */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            transition: var(--transition);
+            box-shadow: var(--shadow-glow);
+        }
+        .card:hover { border-color: var(--border-light); }
+
+        .card-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-title {
+            font-size: 12px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 1px;
+            color: var(--text-secondary);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .card-title .icon { font-size: 15px; }
+
+        .card-badge {
+            font-size: 10px; padding: 2px 8px;
+            border-radius: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .badge-live { background: var(--accent-green-dim); color: var(--accent-green); border: 1px solid rgba(34,197,94,0.2); }
+        .badge-count { background: rgba(79, 143, 247, 0.12); color: var(--accent-blue); border: 1px solid rgba(79,143,247,0.2); }
+
+        .card-body { padding: 14px 16px; }
+
+        /* ===== CHART ===== */
+        .chart-section { grid-column: 1; grid-row: 1; }
+        .chart-container { height: 500px; position: relative; }
+        .chart-container iframe { width: 100%; height: 100%; border: none; }
+
+        /* ===== CHAT ===== */
+        .chat-section {
+            grid-column: 2; grid-row: 1 / 4;
+            display: flex; flex-direction: column;
+            max-height: calc(100vh - 120px);
+            position: sticky;
+            top: 66px;
+        }
+
+        .chat-messages {
+            flex: 1; overflow-y: auto;
+            padding: 14px;
+            display: flex; flex-direction: column; gap: 10px;
+            min-height: 300px;
+        }
+
+        .chat-msg { display: flex; gap: 8px; max-width: 95%; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .chat-msg.user { align-self: flex-end; flex-direction: row-reverse; }
+
+        .chat-avatar {
+            width: 30px; height: 30px; border-radius: 10px;
+            flex-shrink: 0; display: flex;
+            align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 800;
+        }
+        .chat-msg.assistant .chat-avatar {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            color: white;
+        }
+        .chat-msg.user .chat-avatar { background: var(--border-light); color: var(--text-secondary); }
+
+        .chat-bubble {
+            padding: 10px 14px; border-radius: 14px; font-size: 13px; line-height: 1.55;
+            max-width: calc(100% - 40px);
+        }
+        .chat-msg.assistant .chat-bubble {
+            background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary);
+            border-top-left-radius: 4px;
+        }
+        .chat-msg.user .chat-bubble {
+            background: var(--accent-blue-dim); border: 1px solid rgba(79, 143, 247, 0.25); color: var(--text-primary);
+            border-top-right-radius: 4px;
+        }
+        .chat-bubble strong, .chat-bubble b { color: var(--accent-green); font-weight: 700; }
+        .chat-bubble em, .chat-bubble i { color: var(--accent-yellow); font-style: italic; }
+
+        .chat-img-preview {
+            max-width: 200px; max-height: 150px; border-radius: 8px;
+            margin-top: 6px; border: 1px solid var(--border);
+        }
+
+        .chat-input-area {
+            padding: 10px 14px; border-top: 1px solid var(--border);
+            display: flex; gap: 6px; align-items: flex-end;
+            background: var(--bg-card);
+        }
+
+        .chat-attach-btn {
+            background: none; border: 1px solid var(--border);
+            border-radius: 8px; width: 38px; height: 38px;
+            cursor: pointer; display: flex;
+            align-items: center; justify-content: center;
+            transition: var(--transition); flex-shrink: 0;
+            color: var(--text-muted);
+        }
+        .chat-attach-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+        .chat-attach-btn svg { width: 16px; height: 16px; }
+
+        .chat-input-wrapper {
+            flex: 1; display: flex; flex-direction: column; gap: 4px;
+        }
+        .chat-image-preview-bar {
+            display: none; align-items: center; gap: 6px;
+            padding: 4px 8px; background: var(--bg-input);
+            border-radius: 6px; border: 1px solid var(--border);
+        }
+        .chat-image-preview-bar.active { display: flex; }
+        .chat-image-preview-bar img { height: 32px; border-radius: 4px; }
+        .chat-image-preview-bar .remove-img {
+            background: none; border: none; color: var(--accent-red);
+            cursor: pointer; font-size: 14px; padding: 2px 4px;
+        }
+        .chat-image-preview-bar span { font-size: 11px; color: var(--text-muted); flex: 1; }
+
+        .chat-input {
+            flex: 1; background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 10px; padding: 9px 14px;
+            color: var(--text-primary); font-size: 13px; font-family: inherit;
+            resize: none; outline: none; transition: var(--transition);
+        }
+        .chat-input:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(79, 143, 247, 0.08); }
+        .chat-input::placeholder { color: var(--text-muted); }
+
+        .chat-send-btn {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            border: none; border-radius: 10px; width: 38px; height: 38px;
+            cursor: pointer; display: flex;
+            align-items: center; justify-content: center;
+            transition: var(--transition); flex-shrink: 0;
+        }
+        .chat-send-btn:hover { transform: scale(1.05); opacity: 0.9; }
+        .chat-send-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
+        .chat-send-btn svg { width: 16px; height: 16px; fill: white; }
+
+        .chat-quick-actions {
+            display: flex; gap: 6px; padding: 6px 12px 0;
+            flex-wrap: wrap;
+        }
+        .chat-quick-btn {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            color: var(--text-secondary); border-radius: 12px;
+            padding: 4px 10px; font-size: 11px; cursor: pointer;
+            transition: all 0.15s; white-space: nowrap;
+        }
+        .chat-quick-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); background: var(--bg-primary); }
+
+        .chat-typing {
+            display: flex; align-items: center; gap: 6px;
+            padding: 8px 14px; color: var(--text-muted); font-size: 11px;
+        }
+        .typing-dots span {
+            display: inline-block; width: 5px; height: 5px;
+            border-radius: 50%; background: var(--accent-blue);
+            animation: typing 1.4s ease-in-out infinite; margin: 0 1px;
+        }
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
+            30% { transform: translateY(-5px); opacity: 1; }
+        }
+
+        /* ===== ALERTS ===== */
+        .alerts-section { grid-column: 1; grid-row: 2; }
+
+        .alert-filters {
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+        }
+        .filter-group {
+            display: flex; align-items: center; gap: 6px;
+        }
+        .filter-label-text {
+            font-size: 10px; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+        }
+        .filter-select, .filter-range {
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 6px; padding: 4px 8px;
+            color: var(--text-primary); font-size: 11px;
+            outline: none; cursor: pointer;
+        }
+        .filter-select:focus { border-color: var(--accent-blue); }
+        .filter-range { width: 70px; padding: 0; accent-color: var(--accent-blue); }
+
+        .alerts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 10px;
+        }
+
+        .alert-card {
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); padding: 12px 14px;
+            transition: var(--transition); border-left: 3px solid transparent;
+            position: relative;
+        }
+        .alert-card:hover { background: var(--bg-card-hover); border-color: var(--border-light); }
+        .alert-card.call { border-left-color: var(--accent-green); }
+        .alert-card.put { border-left-color: var(--accent-red); }
+        .alert-card.neutral { border-left-color: var(--accent-yellow); }
+
+        .alert-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+        .alert-direction {
+            font-size: 10px; font-weight: 800; padding: 2px 10px;
+            border-radius: 6px; text-transform: uppercase; letter-spacing: 1px;
+        }
+        .direction-call { background: var(--accent-green-dim); color: var(--accent-green); border: 1px solid rgba(34,197,94,0.2); }
+        .direction-put { background: var(--accent-red-dim); color: var(--accent-red); border: 1px solid rgba(239,68,68,0.2); }
+        .direction-neutral { background: var(--accent-yellow-dim); color: var(--accent-yellow); border: 1px solid rgba(234,179,8,0.2); }
+
+        .alert-meta { display: flex; align-items: center; gap: 8px; }
+        .alert-confidence {
+            font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+            font-weight: 600;
+        }
+
+        .alert-title {
+            font-size: 12px; font-weight: 600; color: var(--text-primary);
+            margin-bottom: 4px; line-height: 1.4;
+            display: -webkit-box; -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .alert-title a { color: inherit; text-decoration: none; }
+        .alert-title a:hover { color: var(--accent-blue); }
+
+        .alert-impact {
+            font-size: 11px; color: var(--text-secondary); line-height: 1.4;
+            margin-bottom: 4px;
+        }
+        .alert-action-line {
+            font-size: 11px; font-weight: 700; line-height: 1.4;
+            padding: 4px 8px; border-radius: 6px; margin-bottom: 4px;
+        }
+        .alert-action-line.op { background: var(--accent-green-dim); color: var(--accent-green); }
+        .alert-action-line.noop { background: var(--bg-input); color: var(--text-muted); }
+
+        .alert-footer {
+            display: flex; align-items: center; justify-content: space-between;
+            padding-top: 6px; border-top: 1px solid var(--border);
+        }
+        .alert-time { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+        .alert-score-display { display: flex; align-items: center; gap: 6px; }
+        .score-bar-outer {
+            width: 60px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+        }
+        .score-bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+        .score-bar-fill.s-high { background: linear-gradient(90deg, var(--accent-red), #f97316); }
+        .score-bar-fill.s-medium { background: linear-gradient(90deg, var(--accent-yellow), #f59e0b); }
+        .score-bar-fill.s-low { background: var(--accent-green); }
+        .score-number {
+            font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+            min-width: 24px; text-align: right;
+        }
+
+        /* ===== RESULT BUTTONS ===== */
+        .alert-actions { display: flex; gap: 4px; margin-top: 6px; }
+        .result-btn {
+            background: none; border: 1px solid var(--border);
+            border-radius: 6px; padding: 2px 8px;
+            cursor: pointer; font-size: 11px;
+            transition: var(--transition); color: var(--text-muted);
+            font-weight: 600;
+        }
+        .result-btn:hover { transform: scale(1.05); }
+        .result-btn.win:hover { border-color: var(--accent-green); color: var(--accent-green); background: var(--accent-green-dim); }
+        .result-btn.loss:hover { border-color: var(--accent-red); color: var(--accent-red); background: var(--accent-red-dim); }
+        .result-btn.skip:hover { border-color: var(--text-muted); color: var(--text-secondary); }
+        .result-btn.recorded { opacity: 0.4; cursor: default; pointer-events: none; }
+        .result-btn.recorded.active-win { border-color: var(--accent-green); color: var(--accent-green); background: var(--accent-green-dim); opacity: 1; }
+        .result-btn.recorded.active-loss { border-color: var(--accent-red); color: var(--accent-red); background: var(--accent-red-dim); opacity: 1; }
+        .result-btn.recorded.active-skip { border-color: var(--text-muted); color: var(--text-secondary); opacity: 1; }
+
+        /* ===== CALENDAR ===== */
+        .calendar-section { grid-column: 1; grid-row: 3; }
+        .calendar-container {
+            padding: 0; overflow: hidden; border-radius: 0 0 var(--radius) var(--radius);
+        }
+        .calendar-container iframe {
+            width: 100%; border: none; min-height: 420px;
+            filter: none;
+        }
+        [data-theme="dark"] .calendar-container iframe {
+            filter: invert(0.88) hue-rotate(180deg) saturate(0.8) brightness(0.95);
+        }
+        .calendar-info {
+            display: flex; gap: 12px; padding: 8px 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 11px; color: var(--text-muted);
+            flex-wrap: wrap; align-items: center;
+        }
+        .calendar-info .cal-tag {
+            display: flex; align-items: center; gap: 4px;
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 4px; padding: 2px 8px; font-weight: 600;
+        }
+
+        /* ===== NEWS TICKER ===== */
+        .news-ticker {
+            background: var(--bg-secondary); border-top: 1px solid var(--border);
+            padding: 8px 28px; position: fixed;
+            bottom: 0; left: 0; right: 0; z-index: 100; overflow: hidden;
+        }
+        .ticker-content { display: flex; animation: ticker 80s linear infinite; white-space: nowrap; }
+        .ticker-content:hover { animation-play-state: paused; }
+        @keyframes ticker {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .ticker-item {
+            display: inline-flex; align-items: center; gap: 6px;
+            margin-right: 36px; font-size: 11px; color: var(--text-secondary);
+        }
+        .ticker-item a { color: var(--text-secondary); text-decoration: none; transition: var(--transition); }
+        .ticker-item a:hover { color: var(--accent-blue); }
+        .ticker-sep { color: var(--border-light); font-size: 8px; }
+        .ticker-time { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+
+        /* ===== EMPTY STATE ===== */
+        .empty-state {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: 36px 20px; color: var(--text-muted); text-align: center;
+        }
+        .empty-state .icon { font-size: 32px; margin-bottom: 10px; opacity: 0.4; }
+        .empty-state .text { font-size: 12px; }
+
+        /* ===== REFRESH BUTTON ===== */
+        .refresh-btn {
+            background: none; border: 1px solid var(--border);
+            border-radius: 6px; padding: 3px 8px; cursor: pointer;
+            color: var(--text-muted); font-size: 11px;
+            transition: var(--transition); display: flex; align-items: center; gap: 4px;
+            font-weight: 600;
+        }
+        .refresh-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+        .refresh-btn.spinning svg { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 1100px) {
+            .main-grid { grid-template-columns: 1fr; padding: 12px 16px 56px; }
+            .chat-section { grid-column: 1; grid-row: auto; max-height: 500px; position: static; }
+            .calendar-section { grid-column: 1; }
+            .chart-container { height: 380px; }
+        }
+        @media (max-width: 640px) {
+            .header { padding: 0 14px; }
+            .stats-bar { padding: 8px 14px; gap: 4px; }
+            .main-grid { padding: 10px 10px 56px; }
+            .alerts-grid { grid-template-columns: 1fr; }
+            .chart-container { height: 300px; }
+        }
+
+        /* ===== TAB NAVIGATION ===== */
+        .tab-nav {
+            display: flex; gap: 0; background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border); padding: 0 28px;
+            position: sticky; top: 88px; z-index: 98;
+        }
+        .tab-btn {
+            background: none; border: none; border-bottom: 2px solid transparent;
+            padding: 10px 20px; cursor: pointer; font-size: 12px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted);
+            transition: var(--transition); font-family: 'Inter', sans-serif;
+        }
+        .tab-btn:hover { color: var(--text-secondary); }
+        .tab-btn.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* ===== ALERTS FOOTER INFO ===== */
+        .alerts-footer-info {
+            padding: 8px 16px; border-top: 1px solid var(--border);
+            font-size: 10px; color: var(--text-muted); text-align: center; font-style: italic;
+        }
+
+        /* ===== STRATEGY CREATOR ===== */
+        .strategy-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+            padding: 14px 28px 80px; max-width: 1700px; margin: 0 auto;
+        }
+        .strat-section-title {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1px; color: var(--accent-blue);
+            margin: 12px 0 6px; padding-top: 8px; border-top: 1px solid var(--border);
+        }
+        .strat-row {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;
+        }
+        .strat-row label { font-size: 11px; color: var(--text-secondary); }
+        .strat-row select, .strat-row input[type="number"] {
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 6px; padding: 5px 8px; color: var(--text-primary);
+            font-size: 11px; width: 140px; font-family: 'Inter', sans-serif;
+        }
+        .strat-field { margin-bottom: 10px; }
+        .strat-field label { font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 4px; }
+        .strat-field input {
+            width: 100%; background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 6px; padding: 6px 10px; color: var(--text-primary);
+            font-size: 12px; box-sizing: border-box; font-family: 'Inter', sans-serif;
+        }
+        .strat-actions {
+            display: flex; gap: 8px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border);
+        }
+        .strat-actions button {
+            flex: 1; padding: 8px; border-radius: 8px; font-size: 12px;
+            font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px;
+            border: 1px solid var(--border); transition: var(--transition); font-family: 'Inter', sans-serif;
+        }
+        .strat-actions button:first-child { background: var(--accent-blue-dim); color: var(--accent-blue); border-color: rgba(79,143,247,0.3); }
+        .strat-actions button:first-child:hover { filter: brightness(1.2); }
+        .strat-actions button:last-child { background: var(--accent-green-dim); color: var(--accent-green); border-color: rgba(34,197,94,0.3); }
+        .strat-actions button:last-child:hover { filter: brightness(1.2); }
+        .backtest-stat { padding: 10px; background: var(--bg-input); border-radius: 8px; text-align: center; }
+        .backtest-stat .label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .backtest-stat .value { font-size: 18px; font-weight: 800; margin-top: 2px; }
+        .strat-saved-card {
+            padding: 10px 12px; background: var(--bg-input); border-radius: 8px;
+            border: 1px solid var(--border); margin-bottom: 8px;
+        }
+        .strat-saved-header { display: flex; justify-content: space-between; align-items: center; }
+        .strat-saved-name { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+        .strat-saved-meta { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+        .strat-saved-actions { display: flex; gap: 4px; }
+        .strat-saved-actions button {
+            padding: 3px 8px; font-size: 10px; border-radius: 4px; cursor: pointer;
+            border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+        }
+        .strat-saved-actions button:hover { background: var(--bg-secondary); }
+        .strat-saved-actions button.del { color: var(--accent-red); }
+        @media (max-width: 768px) {
+            .strategy-grid { grid-template-columns: 1fr; padding: 10px; }
+            .tab-nav { padding: 0 10px; }
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<header class="header">
+    <div class="header-left">
+        <div>
+            <div class="logo">AIdan</div>
+            <div class="logo-sub">Scalping EUR/USD</div>
+        </div>
+    </div>
+    <div class="header-right">
+        <span class="clock" id="clock">--:--:--</span>
+        <div class="status-indicator" id="statusIndicator">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-text" id="statusText">Conectando...</span>
+        </div>
+        <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Cambiar tema">&#x1F319;</button>
+    </div>
+</header>
+
+<!-- ===== STATS BAR ===== -->
+<div class="stats-bar">
+    <div class="stat-chip">
+        <span class="stat-label">Noticias</span>
+        <span class="stat-value blue" id="statNews">--</span>
+    </div>
+    <div class="stat-chip">
+        <span class="stat-label">Alertas</span>
+        <span class="stat-value yellow" id="statAlerts">--</span>
+    </div>
+    <div class="stat-chip">
+        <span class="stat-label">Ultima Hora</span>
+        <span class="stat-value cyan" id="statHour">--</span>
+    </div>
+    <div class="stat-chip" title="Noticias: Win/Loss de alertas">
+        <span class="stat-label">Noticias</span>
+        <span class="stat-value green" id="statNewsWR">--%</span>
+    </div>
+    <div class="stat-chip" title="Estrategias: Win/Loss de estrategias auto-generadas">
+        <span class="stat-label">Estrategias</span>
+        <span class="stat-value cyan" id="statStratWR">--%</span>
+    </div>
+</div>
+
+<!-- ===== TAB NAVIGATION ===== -->
+<nav class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('dashboard', this)">Dashboard</button>
+    <button class="tab-btn" onclick="switchTab('estrategias', this)">Estrategias</button>
+</nav>
+
+<!-- ===== TAB: DASHBOARD ===== -->
+<div class="tab-content active" id="tab-dashboard">
+<div class="main-grid">
+
+    <!-- CHART -->
+    <div class="card chart-section">
+        <div class="card-header">
+            <span class="card-title">
+                <span class="icon">&#x1F4C8;</span>
+                EUR/USD - 5 Min
+            </span>
+            <span class="card-badge badge-live">&#x25CF; LIVE</span>
+        </div>
+        <div class="chart-container" id="tradingview-widget">
+            <div class="tradingview-widget-container" style="height:100%;width:100%">
+                <div id="tradingview_chart" style="height:100%;width:100%"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHAT -->
+    <div class="card chat-section">
+        <div class="card-header">
+            <span class="card-title">
+                <span class="icon">&#x1F916;</span>
+                AIdan Chat
+            </span>
+            <span class="card-badge badge-live">AI</span>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            <div class="chat-msg assistant">
+                <div class="chat-avatar">A</div>
+                <div class="chat-bubble">
+                    Soy <strong>AIdan</strong>, tu asistente de scalping EUR/USD.<br><br>
+                    Preguntame si operar, compartime un grafico, o consulta sobre las alertas activas.<br><br>
+                    <em>Podes adjuntar imagenes de graficos con el boton de clip.</em>
+                </div>
+            </div>
+        </div>
+        <div class="chat-quick-actions">
+            <button class="chat-quick-btn" onclick="quickChat('Analizá las últimas velas EUR/USD y dame tu señal actual: ¿CALL, PUT o no operar? Identificá patrones de velas y confirmá con RSI y tendencia.')">📊 Analizar gráfico</button>
+            <button class="chat-quick-btn" onclick="quickChat('¿Cuál es el contexto de mercado ahora? Noticias + técnico.')">📰 Contexto ahora</button>
+            <button class="chat-quick-btn" onclick="quickChat('¿Conviene operar en este momento o esperar? Dame una razón concreta.')">⏱ ¿Opero ahora?</button>
+        </div>
+        <div class="chat-input-area">
+            <button class="chat-attach-btn" onclick="document.getElementById('imageInput').click()" title="Adjuntar imagen/grafico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+            </button>
+            <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="handleImageSelect(event)">
+            <div class="chat-input-wrapper">
+                <div class="chat-image-preview-bar" id="imagePreviewBar">
+                    <img id="imagePreviewThumb" src="" alt="preview">
+                    <span>Imagen adjunta</span>
+                    <button class="remove-img" onclick="removeImage()" title="Quitar imagen">&times;</button>
+                </div>
+                <textarea class="chat-input" id="chatInput" placeholder="Preguntale a AIdan... (adjunta graficos con el clip)" rows="1"></textarea>
+            </div>
+            <button class="chat-send-btn" id="chatSendBtn" onclick="sendChat()">
+                <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- ALERTS -->
+    <div class="card alerts-section">
+        <div class="card-header">
+            <span class="card-title">
+                <span class="icon">&#x26A0;</span>
+                Alertas de Trading
+            </span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="card-badge badge-count" id="alertCount">0</span>
+                <button class="refresh-btn" onclick="loadAlerts()" id="refreshAlertsBtn">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                    Actualizar
+                </button>
+            </div>
+        </div>
+        <!-- FILTERS -->
+        <div class="alert-filters">
+            <div class="filter-group">
+                <span class="filter-label-text">Dir:</span>
+                <select class="filter-select" id="filterDirection" onchange="applyFilters()">
+                    <option value="ALL">Todas</option>
+                    <option value="CALL">CALL</option>
+                    <option value="PUT">PUT</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <span class="filter-label-text">Conf:</span>
+                <input type="range" class="filter-range" id="filterConfidence" min="0" max="100" value="0" oninput="document.getElementById('confVal').textContent=this.value+'%';applyFilters()">
+                <span id="confVal" style="font-size:10px;font-variant-numeric:tabular-nums;min-width:26px;color:var(--text-muted);">0%</span>
+            </div>
+            <div class="filter-group">
+                <span class="filter-label-text">Periodo:</span>
+                <select class="filter-select" id="filterTime" onchange="applyFilters()">
+                    <option value="all">Todo</option>
+                    <option value="1h">1h</option>
+                    <option value="6h">6h</option>
+                    <option value="24h">24h</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="alerts-grid" id="alertsGrid">
+                <div class="empty-state">
+                    <div class="icon">&#x1F4E1;</div>
+                    <div class="text">Esperando alertas del analizador...</div>
+                </div>
+            </div>
+            <div class="alerts-footer-info">
+                &#x2705; Win = la senal acerto &nbsp;|&nbsp; &#x274C; Loss = fallo &nbsp;|&nbsp; &#x23ED; Skip = no operaste &middot; Esto mejora las recomendaciones de AIdan
+            </div>
+        </div>
+    </div>
+
+    <!-- ECONOMIC CALENDAR -->
+    <div class="card calendar-section">
+        <div class="card-header">
+            <span class="card-title">
+                <span class="icon">&#x1F4C5;</span>
+                Calendario Economico
+            </span>
+            <span class="card-badge badge-count">EUR/USD</span>
+        </div>
+        <div class="calendar-info">
+            <span class="cal-tag">&#x1F1FA;&#x1F1F8; USD</span>
+            <span class="cal-tag">&#x1F1EA;&#x1F1FA; EUR</span>
+            <span>Solo eventos de impacto medio y alto que afectan EUR/USD</span>
+        </div>
+        <div class="calendar-container">
+            <iframe src="https://sslecal2.investing.com?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&importance=2,3&features=datepicker,timezone,filters&countries=5,72&calType=week&timeZone=20&lang=4"
+                width="100%" height="420" frameborder="0"
+                allowtransparency="true"></iframe>
+        </div>
+    </div>
+</div>
+
+<!-- ===== NEWS TICKER ===== -->
+<div class="news-ticker">
+    <div class="ticker-content" id="tickerContent">
+        <span class="ticker-item">Cargando noticias...</span>
+    </div>
+</div>
+</div><!-- /tab-dashboard -->
+
+<!-- ===== TAB: ESTRATEGIAS AUTO ===== -->
+<div class="tab-content" id="tab-estrategias">
+<div style="padding:12px;">
+    <!-- Performance bar -->
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+        <span style="font-size:14px;font-weight:700;color:var(--text-primary);">&#x1F3AF; Estrategias Auto-Generadas</span>
+        <span style="font-size:10px;color:var(--text-muted);">Max 6 · Se generan al detectar noticias operables (&lt;10 min)</span>
+        <div style="margin-left:auto;display:flex;gap:8px;" id="stratPerfBar">
+            <span class="stat-chip">Win Rate <span id="stratWR">0%</span></span>
+            <span class="stat-chip">W/L <span id="stratWL">0/0</span></span>
+        </div>
+    </div>
+
+    <!-- Strategy cards grid -->
+    <div id="autoStrategiesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(760px,1fr));gap:14px;">
+        <div class="empty-state" style="grid-column:1/-1;">
+            <div class="icon">&#x1F4C8;</div>
+            <div class="text">Sin estrategias auto-generadas aun. Se crean automaticamente cuando llegan noticias de alto impacto.</div>
+        </div>
+    </div>
+
+    <!-- Footer info -->
+    <div style="margin-top:14px;padding:8px 12px;border-top:1px solid var(--border-color);font-size:10px;color:var(--text-muted);text-align:center;">
+        &#x2705; <strong>Win</strong> = la estrategia acerto &nbsp;|&nbsp; &#x274C; <strong>Loss</strong> = fallo &nbsp;|&nbsp; &#x23ED; <strong>Skip</strong> = no operaste &middot; Esto calibra las recomendaciones de AIdan
+    </div>
+
+    <!-- Parametros de estrategias automaticas -->
+    <details style="margin-top:14px;">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--accent-blue);padding:8px;">&#x2699; Parametros de estrategias automaticas</summary>
+        <div class="strategy-grid" style="margin-top:8px;">
+            <div class="card">
+                <div class="card-body" style="padding:14px;">
+                    <div class="strat-field"><label>Nombre del perfil</label><input type="text" id="stratName" placeholder="Ej: Conservador, Agresivo, Solo CALL..."></div>
+                    <h4 class="strat-section-title">Filtros de entrada</h4>
+                    <div class="strat-row"><label>Impact score minimo</label><input type="number" id="stratMinImpact" min="0" max="100" value="75"></div>
+                    <div class="strat-row"><label>Confianza minima %</label><input type="number" id="stratMinConf" min="0" max="100" value="65"></div>
+                    <div class="strat-row"><label>Direccion permitida</label><select id="stratDirection"><option value="any">CALL y PUT</option><option value="CALL">Solo CALL</option><option value="PUT">Solo PUT</option></select></div>
+                    <h4 class="strat-section-title">Gestion de riesgo</h4>
+                    <div class="strat-row"><label>Stop loss (pips)</label><input type="number" id="stratSL" min="1" max="50" value="5" step="0.5"></div>
+                    <div class="strat-row"><label>Take profit (pips)</label><input type="number" id="stratTP" min="1" max="50" value="10" step="0.5"></div>
+                    <div class="strat-row"><label>Expiracion (min)</label><input type="number" id="stratExpiry" min="1" max="30" value="5"></div>
+                    <div class="strat-actions"><button onclick="saveStrategy()">&#x1F4BE; Guardar perfil</button></div>
+                </div>
+            </div>
+            <div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title"><span class="icon">&#x1F4BE;</span> Perfiles guardados</span></div>
+                    <div class="card-body" id="savedStrategies" style="padding:14px;">
+                        <div class="empty-state"><div class="text">Guarda perfiles para cambiar rapido entre configuraciones</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </details>
+</div>
+</div><!-- /tab-estrategias -->
+
+<!-- ===== TRADINGVIEW WIDGET ===== -->
+<script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+<script type="text/javascript">
+    function initChart() {
+        if (typeof TradingView === 'undefined') { setTimeout(initChart, 1000); return; }
+        const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+        new TradingView.widget({
+            "autosize": true,
+            "symbol": "FX:EURUSD",
+            "interval": "5",
+            "timezone": "America/Argentina/Buenos_Aires",
+            "theme": isDark ? "dark" : "light",
+            "style": "1",
+            "locale": "es",
+            "toolbar_bg": isDark ? "#141c2b" : "#ffffff",
+            "enable_publishing": false,
+            "hide_top_toolbar": false,
+            "hide_legend": false,
+            "save_image": false,
+            "container_id": "tradingview_chart",
+            "backgroundColor": isDark ? "#080c14" : "#ffffff",
+            "gridColor": isDark ? "#1a2535" : "#f0f0f0",
+            "studies": [
+                "RSI@tv-basicstudies",
+                "MASimple@tv-basicstudies",
+                "BB@tv-basicstudies"
+            ],
+            "show_popup_button": false,
+            "withdateranges": true
+        });
+    }
+</script>
+
+<!-- ===== APP LOGIC ===== -->
+<script>
+    const API_BASE = window.location.origin;
+    let chatContext = [];
+    let allAlerts = [];
+    let knownAlertIds = new Set();
+    let isFirstLoad = true;
+    let recordedResults = {};
+    let pendingImage = null; // base64 de imagen pendiente
+
+    // ===== THEME =====
+    function toggleTheme() {
+        const html = document.documentElement;
+        const next = html.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        html.setAttribute('data-theme', next);
+        localStorage.setItem('aidan-theme', next);
+        document.getElementById('themeToggle').textContent = next === 'light' ? '\u2600\uFE0F' : '\uD83C\uDF19';
+        // Recrear chart con nuevo tema
+        document.getElementById('tradingview_chart').innerHTML = '';
+        initChart();
+    }
+    (function() {
+        const saved = localStorage.getItem('aidan-theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', saved);
+        if (saved === 'light') document.getElementById('themeToggle').textContent = '\u2600\uFE0F';
+    })();
+
+    // ===== CLOCK =====
+    function updateClock() {
+        document.getElementById('clock').textContent = new Date().toLocaleTimeString('es-AR', { hour12: false });
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ===== SOUND ALERT =====
+    function playAlertSound() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = 880;
+            osc.type = 'sine';
+            gain.gain.value = 0.25;
+            osc.start();
+            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+            gain.gain.setValueAtTime(0.25, ctx.currentTime + 0.2);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+            osc.stop(ctx.currentTime + 0.45);
+        } catch(e) {}
+    }
+
+    // ===== BROWSER NOTIFICATIONS =====
+    function showNotification(alert) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('AIdan - ' + (alert.direction || 'ALERTA'), {
+                body: `${alert.direction} | Conf: ${alert.confidence}% | Score: ${alert.impact_score}/100\n${(alert.title || '').substring(0, 80)}`,
+                icon: '/static/vaultboy_avatar.png',
+                tag: 'aidan-alert-' + alert.id
+            });
+        }
+    }
+
+    // ===== STATS =====
+    async function loadStats() {
+        try {
+            const res = await fetch(`${API_BASE}/stats`);
+            const data = await res.json();
+            if (data.status === 'success') {
+                document.getElementById('statNews').textContent = data.data.total_news.toLocaleString();
+                document.getElementById('statAlerts').textContent = data.data.total_alerts.toLocaleString();
+                document.getElementById('statHour').textContent = data.data.news_last_hour.toLocaleString();
+                document.getElementById('statusIndicator').classList.remove('offline');
+                document.getElementById('statusText').textContent = 'Activo';
+            }
+        } catch (e) {
+            document.getElementById('statusIndicator').classList.add('offline');
+            document.getElementById('statusText').textContent = 'Offline';
+        }
+    }
+
+    // ===== PERFORMANCE (separated: news vs strategies) =====
+    async function loadPerformance() {
+        try {
+            // News performance (signal_results)
+            const res = await fetch(`${API_BASE}/performance`);
+            const data = await res.json();
+            if (data.status === 'success') {
+                const d = data.data;
+                const newsEl = document.getElementById('statNewsWR');
+                if (newsEl) {
+                    newsEl.textContent = d.total > 0 ? d.win_rate + '% (' + d.wins + 'W/' + d.losses + 'L)' : '0%';
+                    if (d.total > 0) newsEl.className = 'stat-value ' + (d.win_rate >= 55 ? 'green' : d.win_rate >= 45 ? 'yellow' : 'red');
+                }
+            }
+            // Strategy performance (strategy_results)
+            const res2 = await fetch(`${API_BASE}/strategy-performance`);
+            const data2 = await res2.json();
+            if (data2.status === 'success') {
+                const d = data2.data;
+                const stratEl = document.getElementById('statStratWR');
+                if (stratEl) {
+                    stratEl.textContent = d.total > 0 ? d.win_rate + '% (' + d.wins + 'W/' + d.losses + 'L)' : '0%';
+                    if (d.total > 0) stratEl.className = 'stat-value ' + (d.win_rate >= 55 ? 'green' : d.win_rate >= 45 ? 'yellow' : 'red');
+                }
+            }
+        } catch(e) {}
+    }
+
+    async function recordResult(alertId, result) {
+        try {
+            await fetch(`${API_BASE}/signal-result`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({alert_id: alertId, result: result})
+            });
+            recordedResults[alertId] = result;
+            applyFilters();
+            loadPerformance();
+        } catch(e) { console.error('Error recording result:', e); }
+    }
+
+    // ===== ALERTS =====
+    async function loadAlerts() {
+        const btn = document.getElementById('refreshAlertsBtn');
+        btn.classList.add('spinning');
+
+        try {
+            const res = await fetch(`${API_BASE}/recent-alerts?limit=20`);
+            const data = await res.json();
+
+            if (data.status === 'success' && data.data.length > 0) {
+                document.getElementById('alertCount').textContent = data.count;
+
+                if (!isFirstLoad) {
+                    for (const alert of data.data) {
+                        if (!knownAlertIds.has(alert.id) && alert.should_operate) {
+                            playAlertSound();
+                            showNotification(alert);
+                            break;
+                        }
+                    }
+                }
+                data.data.forEach(a => knownAlertIds.add(a.id));
+                isFirstLoad = false;
+                allAlerts = data.data;
+                applyFilters();
+            } else {
+                allAlerts = [];
+                document.getElementById('alertCount').textContent = '0';
+                renderAlerts([]);
+            }
+        } catch (e) {
+            console.error('Error loading alerts:', e);
+        }
+
+        setTimeout(() => btn.classList.remove('spinning'), 500);
+    }
+
+    // ===== FILTERS =====
+    function applyFilters() {
+        const direction = document.getElementById('filterDirection').value;
+        const minConfidence = parseInt(document.getElementById('filterConfidence').value);
+        const timePeriod = document.getElementById('filterTime').value;
+
+        let filtered = allAlerts;
+
+        if (direction !== 'ALL') {
+            filtered = filtered.filter(a => a.direction === direction);
+        }
+        if (minConfidence > 0) {
+            filtered = filtered.filter(a => a.confidence >= minConfidence);
+        }
+        if (timePeriod !== 'all') {
+            const hours = timePeriod === '1h' ? 1 : timePeriod === '6h' ? 6 : 24;
+            const cutoff = new Date(Date.now() - hours * 3600000);
+            filtered = filtered.filter(a => {
+                try { return new Date(a.sent_at) >= cutoff; } catch { return true; }
+            });
+        }
+
+        renderAlerts(filtered);
+    }
+
+    function renderAlerts(alerts) {
+        const grid = document.getElementById('alertsGrid');
+
+        if (alerts.length === 0) {
+            grid.innerHTML = `
+                <div class="empty-state">
+                    <div class="icon">&#x1F4E1;</div>
+                    <div class="text">No hay alertas que coincidan con los filtros</div>
+                </div>`;
+            return;
+        }
+
+        grid.innerHTML = alerts.map(alert => {
+            const dirClass = alert.direction === 'CALL' ? 'call' : alert.direction === 'PUT' ? 'put' : 'neutral';
+            const dirBadge = alert.direction === 'CALL' ? 'direction-call' : alert.direction === 'PUT' ? 'direction-put' : 'direction-neutral';
+            const score = alert.impact_score;
+            const scorePct = Math.min(score, 100);
+            const scoreClass = score >= 75 ? 's-high' : score >= 50 ? 's-medium' : 's-low';
+            const scoreColor = score >= 75 ? 'var(--accent-red)' : score >= 50 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+            const time = formatTime(alert.sent_at);
+            const recorded = recordedResults[alert.id];
+            const btnState = (type) => recorded ? (recorded === type ? `recorded active-${type}` : 'recorded') : '';
+            const confColor = alert.confidence >= 80 ? 'var(--accent-green)' : alert.confidence >= 60 ? 'var(--accent-yellow)' : 'var(--text-muted)';
+
+            const isOperate = alert.should_operate;
+            let actionText = escapeHtml(alert.market_implications || '');
+            if (!actionText && isOperate) actionText = `OPERAR ${alert.direction} - Ver grafico para confirmar entrada`;
+            if (!actionText && !isOperate) actionText = `NO OPERAR - Sin senal clara para scalping`;
+            const impactText = escapeHtml(alert.eur_usd_impact || alert.explanation || '');
+
+            return `
+                <div class="alert-card ${dirClass}">
+                    <div class="alert-header">
+                        <span class="alert-direction ${dirBadge}">${alert.direction || 'NEUTRAL'}</span>
+                        <div class="alert-meta">
+                            <span class="alert-confidence" style="color:${confColor}">Conf: ${alert.confidence.toFixed(1)}%</span>
+                            <span class="score-number" style="color:${scoreColor};font-size:10px;">Score: ${score}</span>
+                        </div>
+                    </div>
+                    <div class="alert-title">
+                        <a href="${alert.url}" target="_blank" rel="noopener">${escapeHtml(alert.title)}</a>
+                    </div>
+                    <div class="alert-action-line ${isOperate ? 'op' : 'noop'}">${actionText || (isOperate ? 'OPERAR' : 'NO OPERAR')}</div>
+                    <div class="alert-impact">${impactText || explainText}</div>
+                    <div class="alert-footer">
+                        <span class="alert-time">${time}</span>
+                        <div class="alert-score-display">
+                            <div class="score-bar-outer">
+                                <div class="score-bar-fill ${scoreClass}" style="width:${scorePct}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="alert-actions">
+                        <button class="result-btn win ${btnState('win')}" onclick="recordResult(${alert.id},'win')">&#x2705; Win</button>
+                        <button class="result-btn loss ${btnState('loss')}" onclick="recordResult(${alert.id},'loss')">&#x274C; Loss</button>
+                        <button class="result-btn skip ${btnState('skip')}" onclick="recordResult(${alert.id},'skip')">&#x23ED; Skip</button>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    // ===== NEWS TICKER =====
+    async function loadNewsTicker() {
+        try {
+            const res = await fetch(`${API_BASE}/recent-news?limit=30`);
+            const data = await res.json();
+            const ticker = document.getElementById('tickerContent');
+
+            if (data.status === 'success' && data.data.length > 0) {
+                const items = data.data.map(n => {
+                    const time = formatTime(n.fetched_at);
+                    return `<span class="ticker-item">
+                        <span class="ticker-sep">&#x25C6;</span>
+                        <a href="${n.url}" target="_blank" rel="noopener">${escapeHtml(n.title)}</a>
+                        <span class="ticker-time">${time}</span>
+                    </span>`;
+                }).join('');
+                ticker.innerHTML = items + items;
+            }
+        } catch (e) { console.error('Error loading news:', e); }
+    }
+
+    // ===== IMAGE HANDLING =====
+    let pendingImageBase64 = null;
+
+    function handleImageSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            alert('Solo se permiten imagenes');
+            return;
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            alert('La imagen es muy grande (max 5MB)');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const base64 = e.target.result.split(',')[1]; // Remove data:image/...;base64, prefix
+            pendingImageBase64 = base64;
+
+            // Show preview
+            document.getElementById('imagePreviewThumb').src = e.target.result;
+            document.getElementById('imagePreviewBar').classList.add('active');
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function removeImage() {
+        pendingImageBase64 = null;
+        document.getElementById('imagePreviewBar').classList.remove('active');
+        document.getElementById('imageInput').value = '';
+    }
+
+    function quickChat(text) {
+        const input = document.getElementById('chatInput');
+        input.value = text;
+        input.dispatchEvent(new Event('input'));
+        sendChat();
+    }
+
+    // ===== CHAT =====
+    async function sendChat() {
+        const input = document.getElementById('chatInput');
+        const message = input.value.trim();
+        if (!message && !pendingImageBase64) return;
+
+        const btn = document.getElementById('chatSendBtn');
+        btn.disabled = true;
+        input.value = '';
+        input.style.height = 'auto';
+
+        // Show message with image if attached
+        let displayMsg = message || '(imagen adjunta)';
+        if (pendingImageBase64) {
+            displayMsg += '\n[Imagen adjunta para analisis]';
+        }
+        appendChatMessage('user', displayMsg, pendingImageBase64 ? `data:image/png;base64,${pendingImageBase64}` : null);
+        chatContext.push({ role: 'user', content: message || 'Analiza esta imagen de trading' });
+
+        const typingEl = showTyping();
+
+        // Build request
+        const payload = {
+            message: message || 'Analiza esta imagen/grafico de trading y dame tu recomendacion de scalping',
+            context: chatContext.slice(-10)
+        };
+        if (pendingImageBase64) {
+            payload.image_base64 = pendingImageBase64;
+        }
+
+        // Clear image
+        removeImage();
+
+        try {
+            const res = await fetch(`${API_BASE}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            removeTyping(typingEl);
+
+            if (data.status === 'success') {
+                appendChatMessage('assistant', data.message);
+                chatContext.push({ role: 'assistant', content: data.message });
+            } else {
+                appendChatMessage('assistant', `*Error: ${data.message}*`);
+            }
+        } catch (e) {
+            removeTyping(typingEl);
+            appendChatMessage('assistant', '*No se pudo conectar con Ollama. Verifica que este corriendo.*');
+        }
+
+        btn.disabled = false;
+        input.focus();
+    }
+
+    function appendChatMessage(role, content, imageUrl = null) {
+        const container = document.getElementById('chatMessages');
+        const div = document.createElement('div');
+        div.className = `chat-msg ${role}`;
+        let imgHtml = imageUrl ? `<img class="chat-img-preview" src="${imageUrl}" alt="grafico">` : '';
+        div.innerHTML = `
+            <div class="chat-avatar">${role === 'assistant' ? 'A' : 'U'}</div>
+            <div class="chat-bubble">${formatChatContent(content)}${imgHtml}</div>`;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function formatChatContent(text) {
+        return escapeHtml(text)
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            .replace(/\n/g, '<br>');
+    }
+
+    function showTyping() {
+        const container = document.getElementById('chatMessages');
+        const div = document.createElement('div');
+        div.className = 'chat-typing';
+        div.innerHTML = `<div class="typing-dots"><span></span><span></span><span></span></div><span>AIdan analizando...</span>`;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+        return div;
+    }
+
+    function removeTyping(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
+
+    // ===== UTILS =====
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function formatTime(dateStr) {
+        if (!dateStr) return '--';
+        try {
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return dateStr.slice(11, 16) || '--';
+            const diff = Date.now() - d;
+            if (diff < 60000) return 'ahora';
+            if (diff < 3600000) return Math.floor(diff/60000) + 'm';
+            if (diff < 86400000) return Math.floor(diff/3600000) + 'h';
+            return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' });
+        } catch { return '--'; }
+    }
+
+    // ===== INPUT HANDLING =====
+    document.getElementById('chatInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+    });
+    document.getElementById('chatInput').addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+    });
+
+    // Drag & drop images on chat
+    const chatArea = document.getElementById('chatMessages');
+    chatArea.addEventListener('dragover', (e) => { e.preventDefault(); chatArea.style.opacity = '0.7'; });
+    chatArea.addEventListener('dragleave', () => { chatArea.style.opacity = '1'; });
+    chatArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        chatArea.style.opacity = '1';
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            document.getElementById('imageInput').files = dt.files;
+            handleImageSelect({ target: { files: [file] } });
+        }
+    });
+
+    // ===== TAB NAVIGATION =====
+    function switchTab(tabName, btn) {
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('tab-' + tabName).classList.add('active');
+        if (btn) btn.classList.add('active');
+        if (tabName === 'dashboard') window.dispatchEvent(new Event('resize'));
+        if (tabName === 'estrategias') { lastStratFingerprint = ''; loadAutoStrategies(); loadStrategies(); }
+    }
+
+    // ===== STRATEGY CREATOR =====
+    // ===== AUTO-STRATEGIES =====
+    let knownStrategyIds = new Set();
+    let cachedCandles = null;
+    let lwChartInstances = [];
+    let lastStratFingerprint = '';
+
+    function playStrategySound() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const g = ctx.createGain();
+            g.connect(ctx.destination);
+            // Two-tone ascending: 440Hz then 660Hz
+            const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 440;
+            o1.connect(g); o1.start(ctx.currentTime); o1.stop(ctx.currentTime + 0.2);
+            const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = 660;
+            o2.connect(g); o2.start(ctx.currentTime + 0.25); o2.stop(ctx.currentTime + 0.5);
+            g.gain.setValueAtTime(0.3, ctx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.6);
+        } catch(e) {}
+    }
+
+    function showStrategyNotification(s) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('AIdan - ESTRATEGIA ' + s.direction, {
+                body: `Entry: ${s.entry_price.toFixed(5)} | TP: ${s.take_profit.toFixed(5)} | SL: ${s.stop_loss.toFixed(5)}\n${s.news_title}`,
+                icon: '/static/vaultboy_avatar.png',
+                tag: 'aidan-strat-' + s.id
+            });
+        }
+    }
+
+    function renderStrategyChart(containerId, candles, strategy) {
+        if (!candles || !candles.length || typeof LightweightCharts === 'undefined') return;
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+        const chart = LightweightCharts.createChart(container, {
+            width: container.clientWidth, height: 450,
+            layout: { background: { type: 'solid', color: isDark ? '#0a0f18' : '#fafafa' }, textColor: isDark ? '#8a95a8' : '#475569', fontSize: 10 },
+            grid: { vertLines: { color: isDark ? '#141e2e' : '#eee' }, horzLines: { color: isDark ? '#141e2e' : '#eee' } },
+            localization: { timeFormatter: (ts) => { const d = new Date(ts * 1000); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); } },
+            timeScale: { timeVisible: true, secondsVisible: false, borderColor: isDark ? '#1a2535' : '#ddd',
+                tickMarkFormatter: (time) => { const d = new Date(time * 1000); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); } },
+            rightPriceScale: { borderColor: isDark ? '#1a2535' : '#ddd' },
+            crosshair: { mode: 0 }
+        });
+        const series = chart.addCandlestickSeries({
+            upColor: '#22c55e', downColor: '#ef4444', borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+            wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+            priceFormat: { type: 'price', precision: 5, minMove: 0.00001 }
+        });
+        series.setData(candles);
+
+        // Entry line — visible on axis with full price
+        series.createPriceLine({ price: strategy.entry_price, color: '#4f8ff7', lineWidth: 2, lineStyle: 2, title: 'Entry ' + strategy.entry_price.toFixed(5), axisLabelVisible: true });
+        // SL line — hide axis label to avoid clutter, title is enough
+        series.createPriceLine({ price: strategy.stop_loss, color: '#ef4444', lineWidth: 1, lineStyle: 1, title: 'SL ' + strategy.stop_loss.toFixed(5), axisLabelVisible: false });
+        // TP line — hide axis label
+        series.createPriceLine({ price: strategy.take_profit, color: '#22c55e', lineWidth: 1, lineStyle: 1, title: 'TP ' + strategy.take_profit.toFixed(5), axisLabelVisible: false });
+
+        // Marker on last candle
+        const last = candles[candles.length - 1];
+        if (last) {
+            series.setMarkers([{
+                time: last.time,
+                position: strategy.direction === 'CALL' ? 'belowBar' : 'aboveBar',
+                shape: strategy.direction === 'CALL' ? 'arrowUp' : 'arrowDown',
+                color: strategy.direction === 'CALL' ? '#22c55e' : '#ef4444',
+                text: strategy.direction
+            }]);
+        }
+        // Auto-scale to operation zone: center on SL-TP range
+        const margin = Math.abs(strategy.take_profit - strategy.stop_loss) * 0.5;
+        series.applyOptions({
+            autoscaleInfoProvider: () => ({
+                priceRange: {
+                    minValue: Math.min(strategy.stop_loss, strategy.take_profit) - margin,
+                    maxValue: Math.max(strategy.stop_loss, strategy.take_profit) + margin,
+                }
+            })
+        });
+
+        // Zoom to last 12 candles for bigger candle bodies
+        if (candles.length > 12) {
+            const from = candles[candles.length - 12].time;
+            const to = candles[candles.length - 1].time + 300;
+            chart.timeScale().setVisibleRange({ from, to });
+        } else {
+            chart.timeScale().fitContent();
+        }
+        lwChartInstances.push(chart);
+        return chart;
+    }
+
+    async function loadAutoStrategies() {
+        try {
+            // Fetch candles if not cached or stale
+            if (!cachedCandles) {
+                try {
+                    const cRes = await fetch(`${API_BASE}/candles`);
+                    const cData = await cRes.json();
+                    if (cData.status === 'success') cachedCandles = cData.data;
+                } catch(e) { console.warn('Candles fetch failed:', e); }
+            }
+
+            const res = await fetch(`${API_BASE}/auto-strategies`);
+            const data = await res.json();
+            if (data.status !== 'success') return;
+
+            const grid = document.getElementById('autoStrategiesGrid');
+            if (!grid) return;
+
+            // Check for new strategies
+            for (const s of data.data) {
+                if (!knownStrategyIds.has(s.id)) {
+                    knownStrategyIds.add(s.id);
+                    if (data.data.indexOf(s) < 2) { // only sound for recent ones
+                        playStrategySound();
+                        showStrategyNotification(s);
+                    }
+                }
+            }
+
+            if (data.data.length === 0) {
+                if (lwChartInstances.length > 0) { lwChartInstances.forEach(c => { try { c.remove(); } catch(e) {} }); lwChartInstances = []; }
+                grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;">
+                    <div class="icon">&#x1F4C8;</div>
+                    <div class="text">Sin estrategias auto-generadas aun. Se crean cuando llegan noticias de alto impacto (&lt;10 min).</div>
+                </div>`;
+                lastStratFingerprint = '';
+                return;
+            }
+
+            // Only rebuild DOM if data changed (prevents chart flicker)
+            const fingerprint = data.data.map(s => `${s.id}:${s.status}:${s.result || ''}`).join('|');
+            if (fingerprint === lastStratFingerprint) {
+                // Data unchanged, skip re-render
+                loadStrategyPerformance();
+                return;
+            }
+            lastStratFingerprint = fingerprint;
+
+            // Cleanup old charts
+            lwChartInstances.forEach(c => { try { c.remove(); } catch(e) {} });
+            lwChartInstances = [];
+
+            grid.innerHTML = data.data.map(s => {
+                const dirColor = s.direction === 'CALL' ? 'var(--accent-green)' : 'var(--accent-red)';
+                const dirBg = s.direction === 'CALL' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)';
+                const isExpired = s.status === 'expired' || (s.expires_at && new Date(s.expires_at) < new Date());
+                const statusBadge = s.result ? (s.result === 'win' ? '<span style="color:var(--accent-green);font-weight:700;">&#x2705; WIN</span>' : s.result === 'loss' ? '<span style="color:var(--accent-red);font-weight:700;">&#x274C; LOSS</span>' : '<span style="color:var(--text-muted);">&#x23ED; SKIP</span>') : isExpired ? '<span style="color:var(--text-muted);font-size:9px;">EXPIRADA</span>' : '<span style="color:var(--accent-green);font-size:9px;">&#x25CF; ACTIVA</span>';
+                const timeStr = s.created_at ? new Date(s.created_at).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
+                const opacity = isExpired && !s.result ? '0.6' : '1';
+                const chartId = 'strat-chart-' + s.id;
+
+                // Vote button states
+                const btnState = (r) => s.result === r ? 'active' : (s.result ? 'disabled' : '');
+
+                return `<div class="card" style="opacity:${opacity};border-left:3px solid ${dirColor};min-width:700px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px 6px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="background:${dirBg};color:${dirColor};padding:3px 10px;border-radius:6px;font-weight:800;font-size:14px;">${s.direction}</span>
+                            <span style="font-size:11px;color:var(--text-muted);">${timeStr}</span>
+                            ${statusBadge}
+                        </div>
+                        <div style="text-align:right;">
+                            <span style="font-size:11px;color:var(--accent-cyan);">Conf: ${s.confidence.toFixed(1)}%</span>
+                            <span style="font-size:11px;color:var(--text-muted);margin-left:6px;">Score: ${s.impact_score}</span>
+                        </div>
+                    </div>
+                    <div id="${chartId}" style="width:100%;height:450px;"></div>
+                    <div style="padding:6px 12px;display:flex;justify-content:space-between;font-size:10px;">
+                        <span>&#x1F7E6; Entry: <strong>${s.entry_price.toFixed(5)}</strong></span>
+                        <span style="color:var(--accent-green);">&#x1F7E9; TP: <strong>${s.take_profit.toFixed(5)}</strong></span>
+                        <span style="color:var(--accent-red);">&#x1F7E5; SL: <strong>${s.stop_loss.toFixed(5)}</strong></span>
+                    </div>
+                    <div style="padding:4px 12px;font-size:10px;color:var(--text-secondary);border-top:1px solid var(--border-color);display:flex;align-items:center;gap:6px;">
+                        <span style="white-space:nowrap;color:var(--accent-yellow);font-weight:700;">&#x23F0; ${timeStr}</span>
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">&#x1F4F0; ${escapeHtml(s.news_title)}</span>
+                    </div>
+                    <div style="padding:8px 12px;display:flex;gap:6px;">
+                        <button class="result-btn win ${btnState('win')}" onclick="voteStrategy(${s.id},'win')" ${s.result ? 'disabled' : ''}>&#x2705; Win</button>
+                        <button class="result-btn loss ${btnState('loss')}" onclick="voteStrategy(${s.id},'loss')" ${s.result ? 'disabled' : ''}>&#x274C; Loss</button>
+                        <button class="result-btn skip ${btnState('skip')}" onclick="voteStrategy(${s.id},'skip')" ${s.result ? 'disabled' : ''}>&#x23ED; Skip</button>
+                    </div>
+                </div>`;
+            }).join('');
+
+            // Render charts after DOM update
+            requestAnimationFrame(() => {
+                for (const s of data.data) {
+                    if (cachedCandles && cachedCandles.length > 0) {
+                        renderStrategyChart('strat-chart-' + s.id, cachedCandles, s);
+                    }
+                }
+            });
+
+            // Update perf stats
+            loadStrategyPerformance();
+        } catch(e) { console.error('Auto-strategies error:', e); }
+    }
+
+    async function voteStrategy(id, result) {
+        try {
+            await fetch(`${API_BASE}/strategy-result`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ strategy_id: id, result: result })
+            });
+            loadAutoStrategies();
+        } catch(e) {}
+    }
+
+    async function loadStrategyPerformance() {
+        try {
+            const res = await fetch(`${API_BASE}/strategy-performance`);
+            const data = await res.json();
+            if (data.status === 'success') {
+                const d = data.data;
+                const wrEl = document.getElementById('stratWR');
+                const wlEl = document.getElementById('stratWL');
+                if (wrEl) wrEl.textContent = d.win_rate + '%';
+                if (wlEl) wlEl.textContent = d.wins + 'W / ' + d.losses + 'L';
+                // Also update header strategy stat
+                const hEl = document.getElementById('statStratWR');
+                if (hEl) {
+                    hEl.textContent = d.total > 0 ? d.win_rate + '% (' + d.wins + 'W/' + d.losses + 'L)' : '0%';
+                    if (d.total > 0) hEl.className = 'stat-value ' + (d.win_rate >= 55 ? 'green' : d.win_rate >= 45 ? 'yellow' : 'red');
+                }
+            }
+        } catch(e) {}
+    }
+
+    function getStrategyFromForm() {
+        return {
+            name: document.getElementById('stratName')?.value || 'Sin nombre',
+            trend: 'any', trend_strength: 'any', rsi_zone: 'any', momentum: 'any', price_vs_ma: 'any',
+            min_impact: parseInt(document.getElementById('stratMinImpact')?.value) || 75,
+            min_confidence: parseInt(document.getElementById('stratMinConf')?.value) || 65,
+            direction: document.getElementById('stratDirection')?.value || 'any',
+            max_trades_per_hour: 3,
+            stop_loss_pips: parseFloat(document.getElementById('stratSL')?.value) || 5,
+            take_profit_pips: parseFloat(document.getElementById('stratTP')?.value) || 10,
+            expiry_minutes: parseInt(document.getElementById('stratExpiry')?.value) || 5
+        };
+    }
+
+    async function saveStrategy() {
+        const strat = getStrategyFromForm();
+        if (!strat.name || strat.name === 'Sin nombre') { alert('Pone un nombre al perfil'); return; }
+        try {
+            await fetch(`${API_BASE}/strategy/save`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(strat)
+            });
+            loadStrategies();
+        } catch(e) { console.error('Error saving strategy:', e); }
+    }
+
+    async function loadStrategies() {
+        try {
+            const res = await fetch(`${API_BASE}/strategies`);
+            const data = await res.json();
+            const container = document.getElementById('savedStrategies');
+            if (data.status === 'success' && data.data.length > 0) {
+                container.innerHTML = data.data.map(s => {
+                    const c = s.config;
+                    const dirLabel = c.direction === 'any' ? 'CALL+PUT' : c.direction;
+                    const isActive = s.is_active;
+                    const cardStyle = isActive
+                        ? 'border:2px solid var(--accent-green);background:rgba(34,197,94,0.08);'
+                        : 'opacity:0.7;';
+                    const activeBadge = isActive
+                        ? '<span style="background:var(--accent-green);color:#000;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:800;margin-left:8px;">● ACTIVO</span>'
+                        : '';
+                    const activateBtn = !isActive
+                        ? `<button onclick="activateStrategy(${s.id})" style="background:var(--accent-green);color:#000;font-weight:700;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;">Activar</button>`
+                        : '<span style="color:var(--accent-green);font-size:11px;font-weight:700;">En uso</span>';
+                    return `<div class="strat-saved-card" style="${cardStyle}">
+                        <div class="strat-saved-header">
+                            <span class="strat-saved-name">${escapeHtml(s.name)}${activeBadge}</span>
+                            <div class="strat-saved-actions">
+                                ${activateBtn}
+                                <button onclick="loadStrategyIntoForm(${s.id})">Editar</button>
+                                <button class="del" onclick="deleteStrategy(${s.id})">Borrar</button>
+                            </div>
+                        </div>
+                        <div class="strat-saved-meta">
+                            Score &ge;${c.min_impact} | Conf &ge;${c.min_confidence}% | ${dirLabel} | SL:${c.stop_loss_pips} TP:${c.take_profit_pips} | Exp:${c.expiry_minutes || 5}min
+                        </div>
+                    </div>`;
+                }).join('');
+            } else {
+                container.innerHTML = '<div class="empty-state"><div class="text">Guarda perfiles para cambiar rapido entre configuraciones</div></div>';
+            }
+        } catch(e) {}
+    }
+
+    let _strategiesCache = [];
+    async function loadStrategyIntoForm(id) {
+        try {
+            const res = await fetch(`${API_BASE}/strategies`);
+            const data = await res.json();
+            const s = data.data.find(x => x.id === id);
+            if (!s) return;
+            const c = s.config;
+            document.getElementById('stratName').value = c.name || '';
+            document.getElementById('stratMinImpact').value = c.min_impact || 75;
+            document.getElementById('stratMinConf').value = c.min_confidence || 65;
+            document.getElementById('stratDirection').value = c.direction || 'any';
+            document.getElementById('stratSL').value = c.stop_loss_pips || 5;
+            document.getElementById('stratTP').value = c.take_profit_pips || 10;
+            if (document.getElementById('stratExpiry')) document.getElementById('stratExpiry').value = c.expiry_minutes || 5;
+        } catch(e) {}
+    }
+
+    async function activateStrategy(id) {
+        try {
+            await fetch(`${API_BASE}/strategy/${id}/activate`, { method: 'POST' });
+            loadStrategies();
+        } catch(e) {}
+    }
+
+    async function deleteStrategy(id) {
+        try {
+            await fetch(`${API_BASE}/strategy/${id}`, { method: 'DELETE' });
+            loadStrategies();
+        } catch(e) {}
+    }
+
+    // ===== INIT =====
+    function init() {
+        initChart();
+        loadStats();
+        loadAlerts();
+        loadNewsTicker();
+        loadPerformance();
+        loadAutoStrategies();
+        loadStrategyPerformance();
+
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            loadStats(); loadAlerts(); loadPerformance();
+            loadAutoStrategies();
+        }, 30000);
+        // Refresh candle cache every 2 minutes (not every 30s)
+        setInterval(() => { cachedCandles = null; }, 120000);
+        // Refresh news every 2 minutes
+        setInterval(loadNewsTicker, 120000);
+    }
+
+    init();
+</script>
+
+</body>
+</html>

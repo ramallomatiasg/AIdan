@@ -255,15 +255,30 @@ class AIdan:
                                     result.get('confidence', 50))
                             alerts_sent += 1
 
-                            # Auto-strategy: only for operable + fresh news (<10 min)
-                            if result.get('should_operate') and result.get('direction', 'NEUTRAL') != 'NEUTRAL':
+                            # Auto-strategy: use active profile params + fresh news (<10 min)
+                            from src.common.db import get_active_profile
+                            profile = get_active_profile()
+                            prof_min_impact = profile.get('min_impact', 75)
+                            prof_min_conf = profile.get('min_confidence', 65)
+                            prof_direction = profile.get('direction', 'any')
+                            prof_sl = profile.get('stop_loss_pips', 5)
+                            prof_tp = profile.get('take_profit_pips', 10)
+
+                            score_ok = result['impact_score'] >= prof_min_impact
+                            conf_ok = result.get('confidence', 0) >= prof_min_conf
+                            dir_ok = prof_direction == 'any' or result.get('direction') == prof_direction
+                            direction = result.get('direction', 'NEUTRAL')
+
+                            if score_ok and conf_ok and dir_ok and direction != 'NEUTRAL':
                                 try:
                                     from datetime import datetime as dt
                                     fetch_ts = get_news_fetch_time(news_id)
                                     is_fresh = True
                                     if fetch_ts:
                                         fetch_time = dt.strptime(str(fetch_ts).split('.')[0], '%Y-%m-%d %H:%M:%S')
-                                        age_min = (dt.utcnow() - fetch_time).total_seconds() / 60
+                                        from datetime import timezone, timedelta as td
+                                        ar_tz = timezone(td(hours=-3))
+                                        age_min = (dt.now(ar_tz).replace(tzinfo=None) - fetch_time).total_seconds() / 60
                                         is_fresh = age_min <= 10
                                         if not is_fresh:
                                             logger.info(f"Skip auto-strategy: news {age_min:.0f}min old (max 10)")
@@ -272,14 +287,13 @@ class AIdan:
                                         market = tech.get_market_state()
                                         price = market.get('price', 0)
                                         if price > 0:
-                                            direction = result['direction']
                                             pip = 0.0001
                                             if direction == 'CALL':
-                                                sl = round(price - 5 * pip, 5)
-                                                tp = round(price + 10 * pip, 5)
+                                                sl = round(price - prof_sl * pip, 5)
+                                                tp = round(price + prof_tp * pip, 5)
                                             else:  # PUT
-                                                sl = round(price + 5 * pip, 5)
-                                                tp = round(price - 10 * pip, 5)
+                                                sl = round(price + prof_sl * pip, 5)
+                                                tp = round(price - prof_tp * pip, 5)
 
                                             # Get alert_id from DB (last inserted)
                                             import sqlite3

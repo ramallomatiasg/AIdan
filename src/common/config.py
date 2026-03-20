@@ -11,6 +11,8 @@ class Config:
     ANALYZER_INTERVAL = int(os.getenv("ANALYZER_INTERVAL", "120"))    # 2 min
     DATA_RETENTION_HOURS = int(os.getenv("DATA_RETENTION_HOURS", "72"))
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     
     @staticmethod
     def get_sources():

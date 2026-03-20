@@ -1,6 +1,17 @@
 import sqlite3
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+# Buenos Aires timezone (UTC-3)
+TZ_AR = timezone(timedelta(hours=-3))
+
+def now_ar():
+    """Current time in Buenos Aires (UTC-3)"""
+    return datetime.now(TZ_AR).replace(tzinfo=None)
+
+def today_ar():
+    """Today's date string in Buenos Aires"""
+    return datetime.now(TZ_AR).strftime('%Y-%m-%d')
 
 DB_PATH = "state/financial_news.db"
 
@@ -73,6 +84,7 @@ def init_db():
             id INTEGER PRIMARY KEY,
             name TEXT UNIQUE,
             config TEXT,
+            is_active INTEGER DEFAULT 0,
             created_at TIMESTAMP
         )
     """)
@@ -108,6 +120,12 @@ def init_db():
         )
     """)
 
+    # Migrations: add columns that may not exist in older DBs
+    try:
+        cursor.execute("ALTER TABLE strategies ADD COLUMN is_active INTEGER DEFAULT 0")
+    except:
+        pass  # column already exists
+
     conn.commit()
     conn.close()
 
@@ -120,7 +138,7 @@ def add_news(url, title, summary, language, entities, tags):
         cursor.execute("""
             INSERT INTO news (url, title, summary, language, entities, tags, fetched_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (url, title, summary, language, entities, tags, datetime.utcnow()))
+        """, (url, title, summary, language, entities, tags, now_ar()))
         conn.commit()
         return cursor.lastrowid
     except sqlite3.IntegrityError:
@@ -149,7 +167,7 @@ def mark_news_processed(news_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("UPDATE news SET processed_at = ? WHERE id = ?", 
-                   (datetime.utcnow(), news_id))
+                   (now_ar(), news_id))
     conn.commit()
     conn.close()
 
@@ -160,27 +178,25 @@ def add_alert(news_id, impact_score, alert_level, explanation, eur_usd_impact, m
     cursor.execute("""
         INSERT INTO alerts (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, should_operate, direction, confidence, alert_sent_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, 1 if should_operate else 0, direction, confidence, datetime.utcnow()))
+    """, (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, 1 if should_operate else 0, direction, confidence, now_ar()))
     conn.commit()
     conn.close()
 
 def get_recent_alerts(limit=50):
-    """Get recent alerts - only AI-analyzed with ALTA level"""
+    """Get ALL alerts from today — no score filter, user sees everything"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
-    # Traer alertas MEDIA y ALTA (score >= 50)
+
     cursor.execute("""
         SELECT a.id, a.impact_score, a.alert_level, a.alert_sent_at,
                n.title, n.url, a.explanation, a.eur_usd_impact, a.market_implications,
                a.analysis_method, a.should_operate, a.direction, a.confidence
         FROM alerts a
         JOIN news n ON a.news_id = n.id
-        WHERE a.impact_score >= 50
-          AND date(a.alert_sent_at) = date('now')
+        WHERE date(a.alert_sent_at) = date(?)
         ORDER BY a.alert_sent_at DESC
         LIMIT ?
-    """, (min(limit, 20),))  # Max 20
+    """, (today_ar(), min(limit, 50),))
     
     results = cursor.fetchall()
     conn.close()
@@ -219,7 +235,7 @@ def record_signal_result(alert_id, result):
         cursor.execute("""
             INSERT OR REPLACE INTO signal_results (alert_id, result, recorded_at)
             VALUES (?, ?, ?)
-        """, (alert_id, result, datetime.utcnow()))
+        """, (alert_id, result, now_ar()))
         conn.commit()
     finally:
         conn.close()
@@ -245,12 +261,32 @@ def get_performance_stats():
         'win_rate': round(win_rate, 1)
     }
 
+def get_active_profile():
+    """Get the active strategy profile config, or defaults"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT config FROM strategies WHERE is_active = 1 LIMIT 1")
+        row = cursor.fetchone()
+        if row:
+            import json
+            return json.loads(row[0])
+    except:
+        pass
+    finally:
+        conn.close()
+    # Defaults = Test Scalping values
+    return {
+        'min_impact': 50, 'min_confidence': 55, 'direction': 'any',
+        'stop_loss_pips': 5, 'take_profit_pips': 20, 'expiry_minutes': 5
+    }
+
 def cleanup_old_data(hours=72):
     """Remove data older than specified hours"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    cutoff_date = datetime.utcnow() - timedelta(hours=hours)
+    cutoff_date = now_ar() - timedelta(hours=hours)
 
     cursor.execute("DELETE FROM alerts WHERE alert_sent_at < ?", (cutoff_date,))
     cursor.execute("DELETE FROM news WHERE fetched_at < ?", (cutoff_date,))
@@ -283,7 +319,7 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
                 )
             """, (count - 5,))
 
-        now = datetime.utcnow()
+        now = now_ar()
         expires_at = now + timedelta(minutes=expiry_minutes)
         cursor.execute("""
             INSERT INTO auto_strategies
@@ -308,7 +344,7 @@ def get_active_strategies(limit=6):
     cursor.execute("""
         UPDATE auto_strategies SET status = 'expired'
         WHERE expires_at < ? AND status = 'active'
-    """, (datetime.utcnow(),))
+    """, (now_ar(),))
     conn.commit()
 
     cursor.execute("""
@@ -318,9 +354,10 @@ def get_active_strategies(limit=6):
                sr.result
         FROM auto_strategies s
         LEFT JOIN strategy_results sr ON s.id = sr.strategy_id
+        WHERE date(s.created_at) = date(?)
         ORDER BY s.created_at DESC
         LIMIT ?
-    """, (limit,))
+    """, (today_ar(), limit,))
 
     results = cursor.fetchall()
     conn.close()
@@ -334,7 +371,7 @@ def record_strategy_result(strategy_id, result):
         cursor.execute("""
             INSERT OR REPLACE INTO strategy_results (strategy_id, result, recorded_at)
             VALUES (?, ?, ?)
-        """, (strategy_id, result, datetime.utcnow()))
+        """, (strategy_id, result, now_ar()))
         # Update strategy status
         cursor.execute("UPDATE auto_strategies SET status = 'voted' WHERE id = ?", (strategy_id,))
         conn.commit()

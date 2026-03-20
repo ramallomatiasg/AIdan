@@ -1,10 +1,8 @@
 import feedparser
-import httpx
 import json
 from datetime import datetime
 from bs4 import BeautifulSoup
 from langdetect import detect, LangDetectException
-import re
 import os
 
 class FeedFetcher:
@@ -62,7 +60,7 @@ class FeedFetcher:
                 'source': source_name,
                 'entities': entities,
                 'tags': tags,
-                'fetched_at': datetime.utcnow().isoformat()
+                'fetched_at': datetime.now().isoformat()
             }
         except Exception as e:
             self.logger.error(f"Error extracting news: {str(e)}")
@@ -127,7 +125,7 @@ class FeedFetcher:
         if not news_items:
             return
         
-        now = datetime.utcnow()
+        now = datetime.now()
         data_dir = f"data/{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}"
         os.makedirs(data_dir, exist_ok=True)
         

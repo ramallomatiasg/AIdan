@@ -70,7 +70,8 @@ check_db.py
 
 # Archivos obsoletos
 about.html
-dashboard_*.html
+dashboard_retro.html
+dashboard_old.html
 AIdan_Launcher.*
 AIdan_Analyzer.*
 AIdan_Collector.*

@@ -1,7 +1,5 @@
-import re
 import json
 import os
-from datetime import datetime
 
 
 class NewsAnalyzer:
@@ -83,8 +81,10 @@ class NewsAnalyzer:
         ]
 
     def _detect_ai_mode(self):
-        """Detecta qué modo de IA usar: ollama > claude > keywords"""
-        if self._check_ollama():
+        """Detecta qué modo de IA usar: deepseek > ollama > claude > keywords"""
+        if os.getenv('GROQ_API_KEY'):
+            return 'groq'
+        elif self._check_ollama():
             return 'ollama'
         elif os.getenv('ANTHROPIC_API_KEY'):
             return 'claude'
@@ -131,15 +131,17 @@ class NewsAnalyzer:
                     'should_operate': False,
                     'direction': 'NEUTRAL',
                     'confidence': pre_score * 0.3,
-                    'should_alert': False,
+                    'should_alert': True,
                 }
 
             # STEP 3: Keyword-based direction hint
             kw_direction = self._detect_direction_keywords(text)
 
-            # STEP 4: Use Ollama for direction + short explanation (simpler task)
+            # STEP 4: Use AI for direction + short explanation
             ai_result = None
-            if self.ai_mode == 'ollama':
+            if self.ai_mode == 'groq':
+                ai_result = self._ask_groq_direction(news_id, title, summary, category, pre_score)
+            elif self.ai_mode == 'ollama':
                 ai_result = self._ask_ollama_direction(news_id, title, summary, category, pre_score)
 
             # Merge: use AI direction if available, else keyword direction
@@ -188,7 +190,7 @@ class NewsAnalyzer:
             )
 
             level = 'ALTA' if pre_score >= 75 else ('MEDIA' if pre_score >= 50 else 'BAJA')
-            should_alert = pre_score >= 50  # Show all medium+ alerts
+            should_alert = True  # Show ALL analyzed news as alerts
 
             # Build market implications
             if should_operate:
@@ -282,6 +284,72 @@ class NewsAnalyzer:
         elif bear_score > bull_score:
             return 'PUT'
         return 'NEUTRAL'
+
+    def _ask_groq_direction(self, news_id, title, summary, category, pre_score):
+        """Ask Groq API (Llama 70B) for direction + explanation. Much better than local 8B."""
+        try:
+            import requests
+            api_key = os.getenv('GROQ_API_KEY', '')
+            if not api_key:
+                return None
+
+            prompt = f"""Analista forex EUR/USD. Lee esta noticia y respondé SOLO con JSON.
+
+NOTICIA: {title}
+{(summary or '')[:400]}
+
+Categoría detectada: {category} (score pre-calculado: {pre_score}/100)
+
+Respondé JSON puro:
+{{"direction": "CALL o PUT o NEUTRAL", "confidence": <número 0-100>, "explanation": "<máximo 15 palabras>", "eur_usd_impact": "<máximo 10 palabras>"}}
+
+Reglas:
+- CALL = EUR/USD sube (USD débil o EUR fuerte)
+- PUT = EUR/USD baja (USD fuerte o EUR débil)
+- NEUTRAL = no se puede determinar
+- Si es noticia corporativa/IPO/acciones: SIEMPRE NEUTRAL, confidence < 30
+- Si es geopolítica sin dato económico: confidence < 50
+- explanation y eur_usd_impact deben ser CORTOS y DIRECTOS"""
+
+            self.logger.info(f"Asking Groq direction for #{news_id}...")
+
+            resp = requests.post('https://api.groq.com/openai/v1/chat/completions',
+                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                json={
+                    'model': os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile'),
+                    'messages': [{"role": "user", "content": prompt}],
+                    'temperature': 0.2,
+                    'max_tokens': 200,
+                    'stream': False
+                },
+                timeout=30
+            )
+
+            if resp.status_code != 200:
+                self.logger.warning(f"Groq error {resp.status_code}")
+                return None
+
+            result_text = resp.json()['choices'][0]['message']['content']
+            json_start = result_text.find('{')
+            json_end = result_text.rfind('}') + 1
+            if json_start >= 0 and json_end > json_start:
+                result = json.loads(result_text[json_start:json_end])
+                direction = result.get('direction', 'NEUTRAL')
+                if '/' in direction:
+                    direction = 'NEUTRAL'
+                if direction not in ('CALL', 'PUT', 'NEUTRAL'):
+                    direction = 'NEUTRAL'
+                return {
+                    'direction': direction,
+                    'confidence': min(float(result.get('confidence', 50)), 95),
+                    'explanation': (result.get('explanation', '') or '')[:120],
+                    'eur_usd_impact': (result.get('eur_usd_impact', '') or '')[:100],
+                }
+            return None
+
+        except Exception as e:
+            self.logger.warning(f"Groq direction failed: {e}")
+            return None
 
     def _ask_ollama_direction(self, news_id, title, summary, category, pre_score):
         """Ask Ollama ONLY for direction + short explanation. Simple task for small model."""
