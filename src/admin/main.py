@@ -15,8 +15,11 @@ from src.common.config import Config
 from src.common.logging_setup import setup_logging
 from src.common.db import (init_db, get_stats, get_recent_alerts, record_signal_result,
                            get_performance_stats, get_active_strategies, record_strategy_result,
-                           get_strategy_performance)
+                           get_strategy_performance, get_detailed_trade_history,
+                           get_setup_win_rates, get_learned_lessons)
 from src.analyzer.technical import TechnicalAnalyzer
+from src.analyzer.mtf_analyzer import MTFAnalyzer
+from src.analyzer.smc import SMCEngine
 from src.common.db import today_ar
 
 logger = setup_logging(__name__, Config.LOG_LEVEL)
@@ -52,7 +55,7 @@ def _call_groq(messages, temperature=0.75, max_tokens=600):
         logger.warning(f"Groq unavailable: {e}")
         return None
 
-app = FastAPI(title="Financial News Monitor API", version="1.0.0")
+app = FastAPI(title="Financial News Monitor API", version="3.0.0")
 
 # UTC ISO helper — SQLite stores "2026-03-17 13:44:18.439" without timezone
 def _utc_iso(ts_str):
@@ -93,6 +96,24 @@ def get_tech():
     if _tech_analyzer is None:
         _tech_analyzer = TechnicalAnalyzer(logger)
     return _tech_analyzer
+
+# Auto-tuner singleton
+_auto_tuner = None
+def get_tuner():
+    global _auto_tuner
+    if _auto_tuner is None:
+        from src.optimizer.auto_tuner import AutoTuner
+        _auto_tuner = AutoTuner(logger)
+    return _auto_tuner
+
+# SMC engine singleton
+_smc_engine = None
+def get_smc():
+    global _smc_engine
+    if _smc_engine is None:
+        mtf = MTFAnalyzer(logger)
+        _smc_engine = SMCEngine(logger, mtf)
+    return _smc_engine
 
 # Configurar CORS para permitir peticiones desde PyWebView y navegadores
 app.add_middleware(
@@ -200,12 +221,15 @@ async def get_recent_alerts_endpoint(limit: int = 50):
         alerts = get_recent_alerts(min(limit, 20))
 
         formatted_alerts = []
-        for alert_id, impact_score, alert_level, sent_at, title, url, explanation, eur_usd_impact, market_implications, analysis_method, should_operate, direction, confidence in alerts:
+        for row in alerts:
+            alert_id, impact_score, alert_level, sent_at, title, url, explanation, eur_usd_impact, market_implications, analysis_method, should_operate, direction, confidence = row[:13]
+            published_at = row[13] if len(row) > 13 else None
             formatted_alerts.append({
                 "id": alert_id,
                 "impact_score": impact_score,
                 "level": alert_level,
                 "sent_at": _utc_iso(sent_at),
+                "published_at": _utc_iso(published_at) if published_at else None,
                 "title": title,
                 "url": url,
                 "explanation": explanation,
@@ -240,19 +264,22 @@ async def get_recent_news_endpoint(limit: int = 200):
         cursor = conn.cursor()
 
         cursor.execute("""
-            SELECT id, title, url, fetched_at, language, tags
+            SELECT id, title, url, fetched_at, language, tags, published_at
             FROM news
             ORDER BY fetched_at DESC
             LIMIT ?
         """, (limit,))
 
         news_items = []
-        for news_id, title, url, fetched_at, language, tags in cursor.fetchall():
+        for row in cursor.fetchall():
+            news_id, title, url, fetched_at, language, tags = row[:6]
+            published_at = row[6] if len(row) > 6 else None
             news_items.append({
                 "id": news_id,
                 "title": title,
                 "url": url,
                 "fetched_at": _utc_iso(fetched_at),
+                "published_at": _utc_iso(published_at) if published_at else None,
                 "language": language,
                 "tags": tags
             })
@@ -275,14 +302,35 @@ async def get_recent_news_endpoint(limit: int = 200):
 class SignalResultRequest(BaseModel):
     alert_id: int
     result: str  # 'win', 'loss', 'skip'
+    market_context: Optional[dict] = None
 
 @app.post("/signal-result")
 async def post_signal_result(request: SignalResultRequest):
-    """Record whether a trading signal was correct"""
+    """Record whether a trading signal was correct, with market context for learning"""
     if request.result not in ('win', 'loss', 'skip'):
         return JSONResponse({"status": "error", "message": "Invalid result. Use: win, loss, skip"}, status_code=400)
     try:
-        record_signal_result(request.alert_id, request.result)
+        # Auto-capture current market state if not provided
+        ctx = request.market_context or {}
+        if not ctx.get('exit_price'):
+            try:
+                tech = get_tech()
+                market = tech.get_market_state()
+                if market.get('source') != 'fallback':
+                    ctx['exit_price'] = market['price']
+                    ctx['market_trend'] = market.get('trend', '')
+                    ctx['rsi_at_entry'] = market.get('rsi', 0)
+                    # Get HTF bias from SMC
+                    try:
+                        smc = get_smc()
+                        smc.update()
+                        status = smc.get_status()
+                        ctx['htf_bias'] = status.get('htf_bias', '')
+                    except:
+                        pass
+            except:
+                pass
+        record_signal_result(request.alert_id, request.result, ctx)
         return JSONResponse({"status": "success"})
     except Exception as e:
         logger.error(f"Error recording signal result: {str(e)}")
@@ -488,14 +536,78 @@ async def delete_strategy(strategy_id: int):
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
+@app.get("/data-source")
+async def get_data_source():
+    """Get current price data source info"""
+    try:
+        from src.common.price_feed import get_last_source, _get_twelve_data_key
+        has_key = bool(_get_twelve_data_key())
+        return JSONResponse({
+            "status": "success",
+            "data": {
+                "current_source": get_last_source(),
+                "twelvedata_configured": has_key,
+                "sources_available": ["twelvedata", "yahoo"] if has_key else ["yahoo"],
+                "note": "Twelve Data ofrece precios más precisos para forex" if not has_key else None
+            }
+        })
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+@app.get("/price-compare")
+async def price_compare():
+    """Compare prices from all available sources for debugging spread differences."""
+    from src.common.price_feed import _fetch_twelvedata, _fetch_yahoo, _get_twelve_data_key, _map_interval_to_yahoo
+    results = {}
+    try:
+        key = _get_twelve_data_key()
+        if key:
+            td = _fetch_twelvedata('5min', 5, key)
+            if td:
+                results['twelvedata'] = {'close': td[-1]['close'], 'high': td[-1]['high'], 'low': td[-1]['low'], 'datetime': td[-1]['datetime']}
+    except Exception as e:
+        results['twelvedata'] = {'error': str(e)}
+    try:
+        yh_int, yh_rng = _map_interval_to_yahoo('5min', 5)
+        yh = _fetch_yahoo(yh_int, yh_rng)
+        if yh:
+            results['yahoo'] = {'close': yh[-1]['close'], 'high': yh[-1]['high'], 'low': yh[-1]['low'], 'datetime': yh[-1]['datetime']}
+    except Exception as e:
+        results['yahoo'] = {'error': str(e)}
+
+    # Calculate spread between sources
+    closes = {k: v['close'] for k, v in results.items() if 'close' in v}
+    if len(closes) >= 2:
+        vals = list(closes.values())
+        spread_pips = abs(vals[0] - vals[1]) / 0.0001
+        results['spread_pips'] = round(spread_pips, 1)
+        results['note'] = f"Diferencia entre fuentes: {spread_pips:.1f} pips"
+
+    return JSONResponse({"status": "success", "data": results})
+
 @app.get("/market-state")
 async def get_market_state():
     """Get current EUR/USD technical analysis state"""
     try:
         tech = get_tech()
-        state = tech.get_market_state()
-        # Remove internal cache timestamp
+        state = dict(tech.get_market_state())  # copy to avoid mutating cache
         state.pop('_ts', None)
+        # Include data source info and last 60 candles for toast chart
+        try:
+            from src.common.price_feed import get_last_source
+            state['data_source'] = get_last_source()
+        except Exception:
+            state['data_source'] = 'unknown'
+        try:
+            candles = tech._fetch_candles()
+            if candles:
+                state['candles'] = [
+                    {'open': c['open'], 'close': c['close'],
+                     'high': c['high'], 'low': c['low']}
+                    for c in candles[-60:]
+                ]
+        except Exception:
+            pass
         return JSONResponse({"status": "success", "data": state})
     except Exception as e:
         logger.error(f"Error getting market state: {e}")
@@ -546,6 +658,17 @@ async def list_auto_strategies():
         rows = get_active_strategies(6)
         strategies = []
         for r in rows:
+            # Parse candles snapshot if available
+            snapshot = None
+            if len(r) > 15 and r[15]:
+                try:
+                    import json as _json
+                    raw = _json.loads(r[15])
+                    snapshot = [{"time": int(float(c['t'])) if c.get('t') else 0,
+                                 "open": c['o'], "high": c['h'],
+                                 "low": c['l'], "close": c['c']} for c in raw]
+                except Exception:
+                    pass
             strategies.append({
                 "id": r[0], "alert_id": r[1], "news_title": r[2],
                 "direction": r[3], "entry_price": r[4],
@@ -555,7 +678,9 @@ async def list_auto_strategies():
                 "created_at": _utc_iso(str(r[11])) if r[11] else None,
                 "expires_at": _utc_iso(str(r[12])) if r[12] else None,
                 "result": r[13],
-                "trigger_type": r[14] if len(r) > 14 else "news"
+                "trigger_type": r[14] if len(r) > 14 else "news",
+                "candles_snapshot": snapshot,
+                "profile_name": r[16] if len(r) > 16 else None
             })
         return JSONResponse({"status": "success", "data": strategies, "count": len(strategies)})
     except Exception as e:
@@ -565,14 +690,47 @@ async def list_auto_strategies():
 class StrategyResultRequest(BaseModel):
     strategy_id: int
     result: str  # 'win', 'loss', 'skip'
+    market_context: Optional[dict] = None
 
 @app.post("/strategy-result")
 async def post_strategy_result(req: StrategyResultRequest):
-    """Record win/loss/skip for an auto-strategy"""
+    """Record win/loss/skip for an auto-strategy with market context"""
     if req.result not in ('win', 'loss', 'skip'):
         return JSONResponse({"status": "error", "message": "Invalid result"}, status_code=400)
-    record_strategy_result(req.strategy_id, req.result)
+    # Auto-capture market state
+    ctx = req.market_context or {}
+    if not ctx.get('exit_price'):
+        try:
+            tech = get_tech()
+            market = tech.get_market_state()
+            if market.get('source') != 'fallback':
+                ctx['exit_price'] = market['price']
+                ctx['market_trend'] = market.get('trend', '')
+                ctx['rsi_at_entry'] = market.get('rsi', 0)
+                try:
+                    smc = get_smc()
+                    smc.update()
+                    status = smc.get_status()
+                    ctx['htf_bias'] = status.get('htf_bias', '')
+                except:
+                    pass
+        except:
+            pass
+    record_strategy_result(req.strategy_id, req.result, ctx)
     return JSONResponse({"status": "success"})
+
+@app.post("/generate-report")
+async def generate_report():
+    """Generate and upload daily report to Google Sheets"""
+    try:
+        from src.reports.daily_report import generate_daily_report
+        result = generate_daily_report()
+        return JSONResponse(result)
+    except ImportError:
+        return JSONResponse({"status": "error", "message": "gspread not installed"}, status_code=500)
+    except Exception as e:
+        logger.error(f"Report generation error: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/strategy-performance")
 async def strategy_perf():
@@ -584,7 +742,7 @@ async def get_candles():
     """Get EUR/USD candle data for Lightweight Charts"""
     try:
         tech = get_tech()
-        candles = tech._fetch_from_yahoo()
+        candles = tech._fetch_candles()
         if not candles:
             return JSONResponse({"status": "error", "message": "No candle data"}, status_code=503)
         # Convert to Lightweight Charts format: [{time (unix), open, high, low, close}]
@@ -603,6 +761,134 @@ async def get_candles():
         return JSONResponse({"status": "success", "data": lw_candles})
     except Exception as e:
         logger.error(f"Error fetching candles: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+# ── Auto-Tuner Endpoints ──
+
+@app.get("/tuner-status")
+async def tuner_status():
+    """Get current auto-tuner optimization status"""
+    try:
+        t = get_tuner()
+        status = t.get_status()
+        return JSONResponse({"status": "success", "data": status})
+    except Exception as e:
+        logger.error(f"Tuner status error: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+@app.post("/tuner-run")
+async def tuner_run():
+    """Force an auto-tuner optimization cycle"""
+    try:
+        t = get_tuner()
+        result = t.run_optimization(force=True)
+        return JSONResponse({"status": "success", "data": result})
+    except Exception as e:
+        logger.error(f"Tuner run error: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+@app.get("/blocked-setups")
+async def blocked_setups():
+    """Get list of setup types blocked by the auto-tuner"""
+    try:
+        t = get_tuner()
+        return JSONResponse({"status": "success", "data": t.get_blocked_setups()})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+# ── SMC Endpoints ──
+
+@app.get("/smc-state")
+async def smc_state():
+    """Get full SMC multi-timeframe state"""
+    try:
+        smc = get_smc()
+        smc.update()
+        status = smc.get_status()
+        mtf = smc.get_mtf_state() or {}
+
+        # Format for frontend
+        data = {
+            'status': status.get('status', 'no_data'),
+            'message': status.get('message', ''),
+            'htf_bias': status.get('htf_bias', 'neutral'),
+            'timeframes': {}
+        }
+
+        for tf in ['H1', 'M15', 'M5']:
+            s = mtf.get(tf, {})
+            struct = s.get('structure', [])
+            data['timeframes'][tf] = {
+                'trend': s.get('trend', 'unknown'),
+                'last_swing_high': s.get('last_swing_high'),
+                'last_swing_low': s.get('last_swing_low'),
+                'ma9': s.get('ma9', 0),
+                'ma21': s.get('ma21', 0),
+                'structure': [{'type': p['type'], 'price': p['price']} for p in struct[-4:]],
+                'bos': s.get('bos'),
+            }
+
+        # Zones
+        zones = smc.get_zones() or {}
+        data['zones'] = {
+            'demand': [],
+            'supply': []
+        }
+        for tf in ['H1', 'M15', 'M5']:
+            for z in zones.get(tf, []):
+                entry = {
+                    'top': z['top'], 'bottom': z['bottom'],
+                    'timeframe': tf, 'strength': z['strength'],
+                    'touches': z['touches']
+                }
+                if z['type'] == 'demand':
+                    data['zones']['demand'].append(entry)
+                else:
+                    data['zones']['supply'].append(entry)
+
+        # Confirmation details
+        data['nearest_demand'] = status.get('nearest_demand', [])
+        data['nearest_supply'] = status.get('nearest_supply', [])
+        data['active_zone'] = status.get('active_zone')
+        data['m5_bos'] = status.get('m5_bos')
+
+        return JSONResponse({"status": "success", "data": data})
+    except Exception as e:
+        logger.error(f"SMC state error: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.get("/smc-rules")
+async def get_smc_rules():
+    """Get current SMC rules"""
+    import json
+    rules_path = os.path.join('config', 'smc_rules.json')
+    try:
+        if os.path.exists(rules_path):
+            with open(rules_path, 'r', encoding='utf-8') as f:
+                return JSONResponse({"status": "success", "data": json.load(f)})
+        return JSONResponse({"status": "success", "data": {}})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.put("/smc-rules")
+async def update_smc_rules(request: Request):
+    """Update SMC rules"""
+    import json
+    rules_path = os.path.join('config', 'smc_rules.json')
+    try:
+        body = await request.json()
+        os.makedirs('config', exist_ok=True)
+        with open(rules_path, 'w', encoding='utf-8') as f:
+            json.dump(body, f, indent=2, ensure_ascii=False)
+        # Reload in SMC engine
+        global _smc_engine
+        _smc_engine = None
+        return JSONResponse({"status": "success", "message": "Reglas SMC actualizadas"})
+    except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
@@ -705,33 +991,30 @@ async def chat_with_ollama(request: ChatRequest):
         perf_total = perf_row[2] or 0 if perf_row else 0
         win_rate = round(wins / perf_total * 100, 1) if perf_total > 0 else 0
 
-        # Detailed win/loss patterns for AI learning
-        cursor.execute("""
-            SELECT sr.result, a.direction, a.confidence, a.impact_score, n.title
-            FROM signal_results sr
-            JOIN alerts a ON sr.alert_id = a.id
-            JOIN news n ON a.news_id = n.id
-            WHERE sr.result IN ('win', 'loss')
-            ORDER BY sr.recorded_at DESC
-            LIMIT 20
-        """)
-        pattern_rows = cursor.fetchall()
+        # Detailed trade history for AI learning (individual trades, not just averages)
         patterns_text = ""
-        if pattern_rows:
-            win_p = [r for r in pattern_rows if r[0] == 'win']
-            loss_p = [r for r in pattern_rows if r[0] == 'loss']
-            patterns_text = "\n📊 PATRONES DE OPERACIONES DEL TRADER:\n"
-            if win_p:
-                avg_conf_w = sum(r[2] for r in win_p) / len(win_p)
-                avg_imp_w = sum(r[3] for r in win_p) / len(win_p)
-                dirs_w = set(r[1] for r in win_p)
-                patterns_text += f"  Wins ({len(win_p)}): Conf promedio {avg_conf_w:.0f}%, Impact promedio {avg_imp_w:.0f}, Dirs: {','.join(dirs_w)}\n"
-            if loss_p:
-                avg_conf_l = sum(r[2] for r in loss_p) / len(loss_p)
-                avg_imp_l = sum(r[3] for r in loss_p) / len(loss_p)
-                dirs_l = set(r[1] for r in loss_p)
-                patterns_text += f"  Losses ({len(loss_p)}): Conf promedio {avg_conf_l:.0f}%, Impact promedio {avg_imp_l:.0f}, Dirs: {','.join(dirs_l)}\n"
-            patterns_text += "  Usá estos patrones para calibrar tus recomendaciones.\n"
+        try:
+            trade_history = get_detailed_trade_history(30)
+            if trade_history:
+                patterns_text = f"\n📊 HISTORIAL DE TRADES ({len(trade_history)} operaciones, más reciente primero):\n"
+                for i, t in enumerate(trade_history[:15]):  # Show 15 most recent individually
+                    result_icon = '✅' if t['result'] == 'win' else '❌'
+                    pips_str = f"{t['pips']:+.1f}p" if t['pips'] else ''
+                    htf_str = f"HTF:{t['htf_bias']}" if t['htf_bias'] else ''
+                    setup_str = t['setup_type'].replace('_', ' ') if t['setup_type'] else t['trigger_type']
+                    patterns_text += (
+                        f"  #{i+1} {result_icon} {t['result'].upper()} {t['direction']} | "
+                        f"Conf:{t['confidence']:.0f}% | {setup_str} | "
+                        f"RSI:{t['rsi']:.0f} | Trend:{t['market_trend']} | {htf_str} {pips_str}\n"
+                    )
+
+                # Computed patterns
+                lessons = get_learned_lessons()
+                if lessons:
+                    patterns_text += lessons + "\n"
+                patterns_text += "  IMPORTANTE: Usá estos datos concretos para calibrar recomendaciones. Si un setup tiene <40% WR, advertí al trader.\n"
+        except Exception as e:
+            logger.warning(f"Trade history for chat failed: {e}")
 
         # Auto-strategies del día
         cursor.execute("""
@@ -825,6 +1108,15 @@ IMPORTANTE: Usá estos datos técnicos para CONTRASTAR con las noticias. Si las 
         except Exception as e:
             logger.warning(f"Tech context for chat failed: {e}")
 
+        # SMC multi-timeframe context
+        smc_text = ""
+        try:
+            smc = get_smc()
+            smc.update()
+            smc_text = smc.get_chat_context()
+        except Exception as e:
+            logger.warning(f"SMC context for chat failed: {e}")
+
         # Construir historial de conversación
         conversation_history = ""
         if request.context:
@@ -852,7 +1144,7 @@ PERFIL DE EXPERTISE:
 
 DATOS EN TIEMPO REAL DEL SISTEMA:
 - Noticias monitoreadas: {total_news}
-- Alertas generadas: {total_alerts}{perf_text}{patterns_text}{tech_text}{alerts_text}{news_text}{strategies_text}
+- Alertas generadas: {total_alerts}{perf_text}{patterns_text}{tech_text}{smc_text}{alerts_text}{news_text}{strategies_text}
 
 CÓMO RESPONDÉS:
 1. Español rioplatense, directo, sin rodeos
@@ -871,8 +1163,21 @@ CÓMO RESPONDÉS:
 13. Terminá apenas des la info. Sin despedidas ni "¿algo más?"
 14. Si hay auto-estrategias activas, mencioná si tu análisis confirma o contradice la estrategia
 
+METODOLOGÍA SMC (Smart Money Concepts) - SOS UN COACH DE DISCIPLINA:
+Tu prioridad es que el trader RESPETE la metodología y NO se auto-sabotee:
+1. SIEMPRE mencioná la tendencia del timeframe mayor (H1/M15) ANTES de cualquier recomendación
+2. NUNCA recomendés entrada sin confirmación en temporalidad menor (M5)
+3. Si preguntan por un CALL pero H1 es bajista → ADVERTÍ primero, enfáticamente
+4. Mencioná la zona de demanda/oferta activa más cercana (si hay)
+5. Confirmación = nuevo HH en M5 (para CALL) o nuevo LL en M5 (para PUT) en zona relevante
+6. Sin confirmación → respondé "ESPERANDO CONFIRMACIÓN - NO ENTRAR"
+7. Frases de disciplina: "Disciplina > Cantidad", "Mejor perder oportunidad que capital"
+8. El precio puede irse y no volver a zona — eso NO es una operación perdida, es disciplina
+9. Recordá: TODO impulso tiene corrección. En tendencia alcista HTF, buscá zonas de demanda en retrocesos
+10. Solo operar A FAVOR de la tendencia HTF. Contra-tendencia = prohibido salvo confluencia extrema
+
 ESTRATEGIA SCALPING QUE RECOMENDÁS:
-- Entrada: Confirmación con 2+ señales (ej: pin bar + RSI sobrecompra + resistencia)
+- Entrada: Confirmación con HTF trend + zona demanda/oferta + BOS o HH/LL en M5
 - Expiración: 2-3 min para momentum fuerte, 5 min para confirmación
 - NO operar en los primeros 5 min de una noticia de alto impacto (spread se ensancha)
 - Esperar el pullback post-noticia, no entrar en el spike

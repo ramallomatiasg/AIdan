@@ -52,6 +52,23 @@ class FeedFetcher:
             # Extract tags
             tags = self._extract_tags(title + ' ' + summary)
             
+            # Extract publication date from feed entry
+            published_at = None
+            if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                try:
+                    from calendar import timegm
+                    published_at = datetime.utcfromtimestamp(timegm(entry.published_parsed)).isoformat()
+                except Exception:
+                    pass
+            if not published_at and entry.get('published'):
+                published_at = str(entry.get('published'))[:25]
+            if not published_at and hasattr(entry, 'updated_parsed') and entry.updated_parsed:
+                try:
+                    from calendar import timegm
+                    published_at = datetime.utcfromtimestamp(timegm(entry.updated_parsed)).isoformat()
+                except Exception:
+                    pass
+
             return {
                 'url': link,
                 'title': title,
@@ -60,7 +77,8 @@ class FeedFetcher:
                 'source': source_name,
                 'entities': entities,
                 'tags': tags,
-                'fetched_at': datetime.now().isoformat()
+                'published_at': published_at,
+                'fetched_at': datetime.utcnow().isoformat()
             }
         except Exception as e:
             self.logger.error(f"Error extracting news: {str(e)}")
@@ -125,7 +143,7 @@ class FeedFetcher:
         if not news_items:
             return
         
-        now = datetime.now()
+        now = datetime.utcnow()
         data_dir = f"data/{now.year}/{now.month:02d}/{now.day:02d}/{now.hour:02d}"
         os.makedirs(data_dir, exist_ok=True)
         

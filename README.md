@@ -1,31 +1,34 @@
-# AIdan v2.0 - Asistente de Scalping EUR/USD con IA
+# AIdan v3.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
-Sistema que monitorea noticias financieras en tiempo real y genera senales de trading para EUR/USD usando inteligencia artificial local. Todo corre en tu PC, sin pagar APIs ni suscripciones.
+Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
-**Un solo ejecutable de 25MB - Portable, gratis y privado.**
+**Un solo ejecutable de ~25MB - Portable, gratis y privado.**
 
 ---
 
-## Como funciona (en simple)
+## Que hay de nuevo en v3.0
 
-AIdan hace 3 cosas en automatico cada 10 minutos:
-
-1. **Busca noticias** en Bloomberg, Reuters, Financial Times y otras fuentes financieras
-2. **Las analiza con IA** (Ollama corriendo en tu PC) y decide si afectan o no al EUR/USD
-3. **Te muestra todo** en un dashboard web con graficos, alertas y un chat para consultar
-
-Vos solo tenes que abrir AIdan.exe, esperar 30 segundos, y se abre el navegador con todo listo.
+- **AutoTuner**: optimizador autonomo que ajusta parametros cada 4 horas analizando el historial de trades
+- **Bloqueo automatico de setups perdedores**: si un tipo de senal tiene <35% win rate en 8+ trades, se desactiva solo
+- **Filtro de sesiones**: detecta si operar fuera de London/NY es rentable y bloquea esas horas si no lo es
+- **Minimo de pips para win**: no cuenta como win un trade que se movio <1.5 pips (evita falsos positivos)
+- **Snapshots estaticos de graficos**: las estrategias guardan las velas del momento de creacion, ya no se mueven
+- **Ventana estable en Windows**: no se cierra al cambiar de ventana, aparece en la barra de tareas
+- **Notificaciones toast**: popup tipo Windows con grafico y Entry/TP/SL cuando se genera una nueva estrategia
+- **Filtro HTF obligatorio**: bloquea senales contra la tendencia del timeframe mayor (no mas CALL en mercado bearish fuerte)
+- **Anti-contradiccion**: no genera CALL y PUT al mismo tiempo (consensus + dedup en DB)
+- **Datos persistentes**: la base de datos y configuracion se guardan en %APPDATA%/AIdan/ (sobrevive a cierres)
 
 ---
 
 ## Instalacion
 
-### Usuarios (lo mas facil)
+### Usuarios
 
 1. Descomprime `AIdan_Portable.rar`
-2. Ejecuta `AIdan.exe`
+2. Ejecuta `AIdan_TodoEnUno.exe`
 3. La primera vez descarga 2 modelos de IA (~8GB total) - tarda 10-15 min segun tu internet
-4. Listo. Se abre solo en el navegador
+4. Listo. Se abre solo en el navegador en `http://localhost:8000`
 
 **Requisitos:**
 - Windows 10/11
@@ -35,7 +38,7 @@ Vos solo tenes que abrir AIdan.exe, esperar 30 segundos, y se abre el navegador 
 
 ### Desarrolladores
 
-```
+```bash
 git clone https://github.com/ramallomatiasg/AIdan.git
 cd AIdan
 pip install -r requirements.txt
@@ -46,251 +49,211 @@ python AIdan_TodoEnUno.py
 
 ---
 
-## Que ves en el Dashboard
+## Como funciona
 
-Cuando abris AIdan se muestra un dashboard web con dos pestanas principales: **Dashboard** y **Estrategias**.
+AIdan corre 4 servicios en paralelo dentro de un solo proceso:
 
-### Barra superior (siempre visible)
+### 1. Collector (cada 10 min)
+Busca noticias en Bloomberg, Reuters, Financial Times y otras fuentes RSS financieras. Las guarda en una base de datos SQLite local.
 
-La barra de arriba se queda fija cuando scrolleas. Muestra:
+### 2. Analyzer (cada 2 min)
+Analiza todo lo que tiene disponible:
 
-- **AIdan / SCALPING EUR/USD** - nombre del sistema
-- **Reloj** - hora actual en tu zona horaria
-- **Activo** (verde) - indica que todos los servicios estan corriendo
-- **Luna/Sol** - cambia entre modo oscuro y claro
+- **NewsAnalyzer**: usa Groq (Llama 3.3 70B) u Ollama local para evaluar si una noticia afecta EUR/USD, con que direccion y confianza
+- **TechnicalAnalyzer**: calcula RSI, Medias Moviles, Bollinger Bands, soportes/resistencias. Detecta breakouts, reversiones RSI, cruces de MA, expansiones de momentum
+- **MTFAnalyzer**: analiza velas en H1, M15 y M5 simultaneamente. Detecta swings (HH, HL, LH, LL) y estructura de mercado
+- **SMCEngine**: Smart Money Concepts - identifica zonas de demanda/oferta y espera confirmacion del timeframe menor
+- **AutoTuner**: optimiza parametros cada 4 horas analizando el historial de trades
 
-Debajo hay chips con estadisticas rapidas:
+### 3. API (FastAPI en localhost:8000)
+Servidor web que sirve el dashboard y expone endpoints para datos en tiempo real.
 
-- **NOTICIAS** - cuantas noticias recolecto hoy
-- **ALERTAS** - cuantas alertas genero hoy la IA
-- **ULTIMA HORA** - alertas de los ultimos 60 minutos
-- **WIN RATE** - porcentaje de exito de las estrategias que marcaste
-- **HISTORIAL** - cuantas estrategias acertaron (W) y cuantas fallaron (L)
+### 4. Strategy Watcher
+Thread que monitorea nuevas estrategias y muestra notificaciones toast en Windows.
 
 ---
+
+## Dashboard
+
+### Barra superior
+- **AIdan / SCALPING EUR/USD** - nombre del sistema
+- **Reloj** - hora actual
+- **Activo** (verde) - servicios corriendo
+- Chips con estadisticas: NOTICIAS, ALERTAS, ULTIMA HORA, WIN RATE, HISTORIAL (W/L)
 
 ### Pestana DASHBOARD
 
-Esta es la pantalla principal con 4 secciones:
+**Grafico EUR/USD** - velas en tiempo real (TradingView) con MA 9, Bollinger Bands, RSI y Volumen. Timeframes: 1m, 5m, 15m, 1h.
 
-#### Grafico EUR/USD (arriba izquierda)
+**Chat AIdan** - chat con IA sobre trading. Acepta imagenes de graficos. Usa datos en tiempo real + analisis SMC para responder. Actua como coach de disciplina.
 
-Un grafico de velas en tiempo real de TradingView. Muestra el par EUR/USD en velas de 5 minutos con indicadores tecnicos:
+**Alertas de Trading** - noticias analizadas con direccion (CALL/PUT/NEUTRAL), confianza, score e instruccion de operar o no. Filtros por direccion, confianza y periodo.
 
-- **MA 9** (media movil) - linea que sigue el precio
-- **Bollinger Bands** - bandas que muestran volatilidad
-- **RSI** - indicador abajo que muestra si esta sobrecomprado (>70) o sobrevendido (<30)
-- **Volumen** - barras de volumen
-
-Podes cambiar el timeframe (1m, 5m, 15m, 1h) y agregar mas indicadores.
-
-#### Chat AIdan (arriba derecha)
-
-Un chat donde podes hablar con la IA sobre trading. Le podes preguntar:
-
-- "Deberia operar ahora?"
-- "Como ves el mercado?"
-- "Que dicen las noticias?"
-
-**Podes adjuntar imagenes** (capturas de graficos) con el boton de clip y la IA las analiza para darte su opinion sobre la estrategia que ves en el grafico.
-
-La IA usa datos del grafico actual + noticias recientes + alertas activas para darte respuestas contextualizadas para scalping.
-
-#### Alertas de Trading (centro)
-
-Aca aparecen las noticias que la IA analizo y considero relevantes para EUR/USD. Solo muestra alertas del dia actual.
-
-Cada alerta tiene:
-
-- **Direccion**: CALL (sube), PUT (baja), o NEUTRAL
-- **Confianza**: que tan segura esta la IA de la direccion (0-100%)
-- **Score**: que tan importante es la noticia para forex (0-100)
-- **Linea de accion**: dice claramente OPERAR o NO OPERAR con la razon
-- **Titulo de la noticia** (clickeable para leer la fuente original)
-
-**Filtros disponibles:**
-- Direccion (Todas / CALL / PUT)
-- Confianza minima (slider 0-100%)
-- Periodo (Todo / 1h / 6h / 24h)
-
-**Botones Win / Loss / Skip:**
-- **Win** = la senal acerto (el precio fue en la direccion indicada)
-- **Loss** = la senal fallo (el precio fue en la direccion contraria)
-- **Skip** = no operaste esa senal
-- Estos datos se usan para calcular el Win Rate y mejorar las recomendaciones
-
-#### Calendario Economico (abajo)
-
-Muestra los eventos economicos de la semana que afectan a EUR/USD (datos de Investing.com). Solo muestra eventos de impacto medio y alto para USD y EUR.
-
-Cada evento tiene:
-- Hora del evento
-- Divisa afectada (USD o EUR)
-- Importancia (iconos de toro)
-- Dato actual vs prevision vs anterior
-
-Los eventos con datos que sorprenden al mercado (muy diferentes a la prevision) suelen generar movimientos fuertes en el precio.
-
-#### Ticker de noticias (barra inferior)
-
-Una barra que scrollea con las ultimas noticias recolectadas. Clickea cualquiera para leer la fuente.
-
----
+**Calendario Economico** - eventos de la semana para EUR y USD (impacto medio y alto).
 
 ### Pestana ESTRATEGIAS
 
-Aca se generan y muestran las estrategias de trading automaticas.
+**Panel Multi-Temporalidad SMC** - estado de H1, M15 y M5 con tendencia, swings, estructura y badge de confirmacion:
+- Verde "CONFIRMADO": setup valido, se puede operar
+- Amarillo "ESPERANDO": en zona pero sin confirmacion de M5
+- Azul "BUSCANDO ZONA": hay tendencia pero precio no esta en zona
+- Gris "SIN SETUP": sin tendencia clara
 
-#### Estrategias Auto-Generadas (arriba)
+**Estrategias Auto-Generadas** - se generan de 3 formas:
+1. **NOTICIA** (azul): noticia de alto impacto con direccion clara
+2. **ESTRUCTURA** (violeta): breakouts, RSI extremo, cruces MA, momentum
+3. **SMC** (rosa): confirmacion completa HTF + zona + LTF
 
-Cuando llega una noticia de alto impacto (score >= 75, confianza >= 65, con direccion clara), AIdan genera automaticamente una estrategia con:
+Cada estrategia muestra grafico de velas estatico (snapshot del momento de creacion), Entry/TP/SL, confianza, y se auto-evalua al expirar.
 
-- **Grafico de velas** mostrando la zona de operacion con Entry, Take Profit (TP) y Stop Loss (SL) marcados
-- **Direccion** (CALL o PUT) con flecha visual
-- **Precio de entrada, TP y SL** exactos
-- **Hora de la senal** y titulo de la noticia que la genero
-- **Estado**: ACTIVA (dentro de los 5 min de expiración) o EXPIRADA
-
-**Reglas de las estrategias:**
-- Solo se generan con noticias frescas (menos de 10 minutos)
-- Se guardan maximo 6 - las mas viejas se descartan automaticamente
-- Expiran a los 5 minutos (scalping de corto plazo)
-
-**Botones Win / Loss / Skip** (en cada estrategia):
-- Marca si la estrategia acerto o fallo
-- Esto alimenta el Win Rate y el historial W/L de la barra superior
-- AIdan aprende de estos resultados para calibrar sus futuras recomendaciones
-
-#### Parametros de estrategias automaticas (abajo, colapsable)
-
-Aca configuras los filtros que AIdan usa para decidir cuando generar una estrategia. Podes crear "perfiles" con distintas configuraciones:
-
-**Filtros de entrada:**
-- Impact score minimo (0-100) - que tan relevante tiene que ser la noticia
-- Confianza minima % (0-100) - que tan segura tiene que estar la IA
-- Direccion permitida (CALL y PUT / Solo CALL / Solo PUT)
-
-**Gestion de riesgo:**
-- Stop Loss en pips (distancia del SL al entry)
-- Take Profit en pips (distancia del TP al entry)
-- Expiracion en minutos
-
-**Perfiles guardados:**
-Podes guardar varias configuraciones con nombres descriptivos (ej: "Conservador", "Agresivo", "Solo CALL") y switchear entre ellas.
+**Parametros** - configura filtros (score minimo, confianza minima, direccion, SL/TP en pips, expiracion). Podes guardar perfiles con distintas configuraciones.
 
 ---
 
-## Como interpretar las senales
+## AutoTuner - Optimizacion Autonoma
+
+El AutoTuner es el cerebro de autoaprendizaje de AIdan. Corre automaticamente cada 4 horas.
+
+### Que hace
+1. **Lee los ultimos 200 trades** evaluados (win/loss) de la base de datos
+2. **Evalua el rendimiento actual** con los parametros vigentes
+3. **Prueba variaciones** de cada parametro (RSI thresholds, distancias, confianzas base, etc.)
+4. **Adopta las mejoras** si una variacion sube el win rate en >1%
+5. **Bloquea setups malos** con <35% win rate en 8+ trades
+6. **Analiza sesiones** y bloquea horarios no rentables
+
+### Parametros que optimiza
+| Categoria | Parametros |
+|-----------|-----------|
+| RSI | Oversold (25-35), Overbought (65-75), proximidad a S/R |
+| Bollinger | Proximidad a banda y a S/R |
+| Breakout | Distancia maxima al nivel |
+| Momentum | Rango de consolidacion, multiplicador de expansion |
+| Confianza base | Por cada tipo de setup |
+| Sesiones | Horarios London/NY, bloqueo fuera de sesion |
+| Auto-eval | Pips minimos para contar como win |
+
+### Endpoints
+- `GET /tuner-status` - estado actual, parametros, setups bloqueados
+- `POST /tuner-run` - forzar ciclo de optimizacion manual
+- `GET /blocked-setups` - tipos de setup bloqueados por bajo rendimiento
+
+### Requisitos
+Necesita **minimo 10 trades evaluados** para empezar a optimizar. A mas trades, mejor optimiza. No necesita intervencion manual.
+
+---
+
+## Metodologia de Trading
+
+### Smart Money Concepts (SMC)
+
+1. **Tendencia HTF (H1/M15)**: si H1 es alcista, solo CALL
+2. **Zona de demanda/oferta**: esperar que el precio llegue a una zona de reaccion previa
+3. **Confirmacion LTF (M5)**: en la zona, M5 forma HH (para CALL) o LL (para PUT)
+4. **Entrada**: solo con confirmacion completa
 
 ### Cuando OPERAR
-
-La IA recomienda operar solo cuando se dan estas condiciones juntas:
-
-1. Noticia de alto impacto (datos macro: NFP, CPI, tasas de interes, PIB)
-2. Score >= 75
-3. Confianza >= 65%
-4. Direccion clara (CALL o PUT, no NEUTRAL)
-5. El analisis tecnico no contradice la senal fundamental
+- Badge "CONFIRMADO" en el panel SMC
+- H1 y M15 alineados
+- Noticia de alto impacto + score y confianza sobre el umbral del perfil
+- Analisis tecnico no contradice
 
 ### Cuando NO OPERAR
-
-- Noticias corporativas (fusiones, IPOs, earnings) - no mueven forex
-- Geopolitica sin dato economico concreto - direccion ambigua
-- Confianza baja (<65%) - la IA no esta segura
-- Score bajo (<75) - la noticia no es relevante para EUR/USD
-- Momentum tecnico contradice la senal de noticias
-
-### Senales de la IA vs realidad
-
-Las noticias tienen un impacto INMEDIATO en el mercado (primeros 1-5 minutos). Por eso:
-
-- Las estrategias solo se generan con noticias de menos de 10 minutos
-- Las estrategias expiran a los 5 minutos
-- No sirve operar una noticia vieja - el mercado ya la precio
+- Badge "ESPERANDO CONFIRMACION" - sin confirmar en M5
+- Noticias corporativas (no mueven forex)
+- Contra la tendencia HTF
+- Precio ya salio de la zona - no perseguir
 
 ---
 
-## Arquitectura tecnica
+## Arquitectura
 
 ```
-AIdan.exe (25MB)
+AIdan_TodoEnUno.exe (~25MB)
   |
-  +-- Collector (thread) --> Busca noticias RSS cada 10 min
-  |     Bloomberg, Reuters, Financial Times, etc.
+  +-- Collector (thread) --> RSS cada 10 min
+  |     Bloomberg, Reuters, Financial Times
   |
-  +-- Analyzer (thread) --> Analiza con Ollama cada 60 seg
-  |     llama3.1:8b (texto) + llava (imagenes)
-  |     + TechnicalAnalyzer (datos de Yahoo Finance)
+  +-- Analyzer (thread) --> Analiza cada 2 min
+  |     +-- NewsAnalyzer: Groq/Ollama analiza noticias
+  |     +-- TechnicalAnalyzer: RSI, MA, BB, S/R (Yahoo Finance)
+  |     +-- MTFAnalyzer: velas H1/M15/M5, swings, estructura
+  |     +-- SMCEngine: zonas demanda/oferta + confirmacion LTF
+  |     +-- StructureScanner: breakouts, reversiones, cruces MA
+  |     +-- AutoTuner: optimiza parametros cada 4h
   |
-  +-- API (thread) --> Servidor web en localhost:8000
-        FastAPI + Dashboard HTML
-        Chat con IA + Graficos TradingView
+  +-- API (thread) --> FastAPI en localhost:8000
+  |     Dashboard HTML + Chat + Graficos TradingView
+  |
+  +-- Strategy Watcher (thread) --> Toast notifications
 ```
 
-**Modelos de IA usados:**
-- `llama3.1:8b` (~4GB) - analisis de noticias y chat de texto
-- `llava` (~4GB) - analisis de imagenes/graficos en el chat
+**Modelos de IA:**
+- **Groq API** (gratis) - `llama-3.3-70b-versatile` para chat y analisis (rapido, en la nube)
+- `llama3.1:8b` (~4GB) - analisis local con Ollama (fallback si no hay internet)
+- `llava` (~4GB) - analisis de imagenes/graficos en el chat (local)
 
-Ambos corren 100% local con Ollama. No se envia nada a la nube.
+**Datos persistentes** en `%APPDATA%/AIdan/`:
+- `state/financial_news.db` - base de datos SQLite con noticias, alertas, estrategias, resultados y parametros optimizados
+- `config/` - configuracion de fuentes y perfiles
 
 ---
 
-## Crear ejecutable
+## Build
 
-```
+```bash
 pyinstaller AIdan_TodoEnUno.spec --clean
 ```
 
-Para empaquetar:
-```
-crear_paquete.bat
-```
-
-Resultado: `AIdan_Portable.rar` (~25MB)
+El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 
 ---
 
 ## Historial de versiones
 
+### v3.0 (26 Mar 2026)
+- **AutoTuner**: optimizador autonomo de parametros basado en historial de trades
+- Bloqueo automatico de setups con win rate <35%
+- Filtro de sesiones (London/NY) con deteccion de horarios no rentables
+- Snapshots estaticos de graficos en estrategias (ya no se mueven)
+- Notificaciones toast tipo Windows con grafico + Entry/TP/SL
+- Filtro HTF obligatorio: bloquea senales contra tendencia mayor
+- Anti-contradiccion: consensus de direccion + dedup en DB (15 min)
+- Rate limit global: 5 min entre estrategias
+- Ventana tkinter estable (thread-safe, visible en taskbar)
+- Datos persistentes en %APPDATA%/AIdan/
+- Auto-evaluacion mejorada con minimo de pips para win
+- Logging mejorado con uvicorn compatible con exe congelado
+
+### v2.2 (20 Mar 2026)
+- Smart Money Concepts (SMC): analisis multi-temporalidad H1/M15/M5
+- Panel visual de tendencias con estructura HH/HL/LH/LL
+- Zonas de demanda y oferta automaticas
+- Confirmacion de entrada por M5
+- Chat con coaching de disciplina SMC
+- Groq API como modelo principal del chat
+
 ### v2.0 (20 Mar 2026)
-- Tests unitarios completos con pytest (cobertura 85%+)
-- Dashboard multi-tema (claro/oscuro/automático)
-- Mejoras en análisis de noticias y manejo de errores
-- Configuración optimizada de base de datos
-- Documentación mejorada y refactorización de código
+- Tests unitarios con pytest
+- Dashboard multi-tema (claro/oscuro)
+- Mejoras en analisis y manejo de errores
 
 ### v1.3 (18 Mar 2026)
-- Pestana "Estrategias" con graficos de velas auto-generados (Entry/SL/TP visual)
-- Estrategias automaticas al detectar noticias de alto impacto (<10 min)
-- Analisis tecnico integrado (tendencia, RSI, volumen) cruza con noticias
-- Chat con IA acepta imagenes de graficos (modelo llava)
-- Prompt de analisis mejorado: scores variados y descripciones cortas
-- Header y tabs sticky al scrollear
-- Alertas solo del dia actual
-- Timestamps en hora local (ya no UTC)
-- Perfiles de configuracion guardables (Conservador, Agresivo, etc.)
-- Calendario economico filtrado solo EUR/USD
-- Descarga automatica de llava al primer inicio
-- Win/Loss/Skip en estrategias para trackear efectividad
+- Pestana Estrategias con graficos de velas
+- Estrategias automaticas por noticias de alto impacto
+- Analisis tecnico integrado
+- Chat con imagenes (llava)
+- Perfiles de configuracion
 
 ### v1.2 (02 Mar 2026)
-- Dashboard con grafico TradingView en vivo
-- Alertas con filtros (direccion, confianza, periodo)
-- Chat con IA para consultas de scalping
-- Calendario economico de Investing.com
-- Ticker de noticias en barra inferior
-- Modo oscuro/claro
-- Ejecutable portable todo-en-uno (23MB)
-
-### v1.1
-- Analisis con Ollama/Llama 3.1
-- Alertas basicas de noticias
-- API + dashboard web
+- Dashboard con grafico TradingView
+- Alertas con filtros
+- Chat con IA
+- Calendario economico
+- Ejecutable portable
 
 ### v1.0
-- Recolector RSS de noticias financieras
-- Analisis por keywords
-- Dashboard minimo
+- Recolector RSS + analisis por keywords + dashboard minimo
 
 ---
 

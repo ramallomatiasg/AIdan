@@ -15,8 +15,27 @@ import winreg
 import urllib.request
 import tempfile
 
+# Ensure working directory and data paths are correct
+if getattr(sys, 'frozen', False):
+    _EXE_DIR = os.path.dirname(sys.executable)
+    # Use %APPDATA%/AIdan/ for persistent data (survives RAR temp folders)
+    _APP_DIR = os.path.join(os.environ.get('APPDATA', _EXE_DIR), 'AIdan')
+    os.makedirs(_APP_DIR, exist_ok=True)
+    # Copy config/ and templates/ to AppData if they don't exist there yet
+    # (they ship alongside the exe in the RAR)
+    import shutil
+    for folder in ('config', 'templates'):
+        src = os.path.join(_EXE_DIR, folder)
+        dst = os.path.join(_APP_DIR, folder)
+        if os.path.isdir(src) and not os.path.isdir(dst):
+            shutil.copytree(src, dst)
+    os.chdir(_APP_DIR)
+else:
+    _APP_DIR = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(_APP_DIR)
+
 # Add src to path ANTES de cualquier import local
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _APP_DIR)
 
 # Configuración
 OLLAMA_URL = "https://ollama.com/download/OllamaSetup.exe"
@@ -24,25 +43,449 @@ OLLAMA_API = "http://localhost:11434/api/tags"
 OLLAMA_MODEL = "llama3.1:8b"
 DASHBOARD_URL = "http://localhost:8000"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# STRATEGY TOAST NOTIFICATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _show_strategy_toast(strategy: dict, candles: list):
+    """
+    Show a Windows-style toast popup in the bottom-right corner.
+    Contains a mini candlestick chart + ENTRY / TP / SL.
+    Must be called from the main tkinter thread via root.after().
+    """
+    import math
+
+    direction  = strategy.get('direction', 'CALL')
+    entry      = strategy.get('entry_price', 0)
+    sl         = strategy.get('stop_loss', 0)
+    tp         = strategy.get('take_profit', 0)
+    conf       = strategy.get('confidence', 0)
+    title_raw  = strategy.get('news_title', '')
+    trigger    = strategy.get('trigger_type', 'news')
+
+    is_call  = direction == 'CALL'
+    clr_dir  = '#22c55e' if is_call else '#ef4444'   # green / red
+    clr_bg   = '#0a0e14'
+    clr_card = '#111822'
+    clr_bdr  = clr_dir
+    clr_text = '#e2e8f0'
+    clr_dim  = '#64748b'
+    clr_gold = '#f59e0b'
+
+    W, H = 400, 340
+
+    toast = tk.Toplevel()
+    toast.overrideredirect(True)
+    toast.attributes('-topmost', True)
+    toast.configure(bg=clr_bg)
+    toast.resizable(False, False)
+
+    # Position: bottom-right with 16px margin
+    sw = toast.winfo_screenwidth()
+    sh = toast.winfo_screenheight()
+    x_end = sw - W - 16
+    y_end = sh - H - 52      # above taskbar
+    y_start = sh + 10        # off-screen below
+
+    toast.geometry(f'{W}x{H}+{x_end}+{y_start}')
+
+    # Outer border in direction color
+    border = tk.Frame(toast, bg=clr_bdr, padx=2, pady=2)
+    border.pack(fill='both', expand=True)
+    inner = tk.Frame(border, bg=clr_bg)
+    inner.pack(fill='both', expand=True)
+
+    # ── Header bar ──
+    hdr = tk.Frame(inner, bg=clr_card, height=38)
+    hdr.pack(fill='x')
+    hdr.pack_propagate(False)
+
+    arrow = '▲ CALL' if is_call else '▼ PUT'
+    tk.Label(hdr, text=f'  {arrow}', font=('Segoe UI', 13, 'bold'),
+             fg=clr_dir, bg=clr_card).pack(side='left', padx=6, pady=6)
+
+    conf_lbl = f'{conf:.0f}% conf'
+    tk.Label(hdr, text=conf_lbl, font=('Segoe UI', 9),
+             fg=clr_gold, bg=clr_card).pack(side='left', padx=4)
+
+    badge_colors = {'news': ('#f97316', '#1a0a00'), 'structure': ('#818cf8', '#0a0a1a'), 'smc': ('#e040fb', '#140014')}
+    bc, bk = badge_colors.get(trigger, ('#64748b', '#111'))
+    tk.Label(hdr, text=f' {trigger.upper()} ', font=('Segoe UI', 8, 'bold'),
+             fg=bc, bg=bk).pack(side='left', padx=4)
+
+    # Close button
+    close_lbl = tk.Label(hdr, text='  ✕  ', font=('Segoe UI', 11),
+                         fg=clr_dim, bg=clr_card, cursor='hand2')
+    close_lbl.pack(side='right')
+    close_lbl.bind('<Button-1>', lambda e: toast.destroy())
+    close_lbl.bind('<Enter>', lambda e: close_lbl.config(fg='#ef4444', bg='#1a0008'))
+    close_lbl.bind('<Leave>', lambda e: close_lbl.config(fg=clr_dim, bg=clr_card))
+
+    # ── Candlestick chart ──
+    CHART_H = 160
+    cv = tk.Canvas(inner, bg='#0d1117', height=CHART_H,
+                   highlightthickness=0)
+    cv.pack(fill='x')
+
+    def draw_chart(event=None):
+        cw = cv.winfo_width() or (W - 4)
+        ch = CHART_H
+        cv.delete('all')
+
+        # Background grid lines
+        for i in range(1, 5):
+            y = int(ch * i / 5)
+            cv.create_line(0, y, cw, y, fill='#1e293b', width=1)
+
+        data = candles[-40:] if candles and len(candles) >= 5 else []
+        if not data:
+            cv.create_text(cw//2, ch//2, text='Sin datos de velas',
+                           fill=clr_dim, font=('Segoe UI', 9))
+            return
+
+        highs  = [c['high']  for c in data]
+        lows   = [c['low']   for c in data]
+        prices = [entry, sl, tp] + highs + lows
+        p_min  = min(prices) - 0.0002
+        p_max  = max(prices) + 0.0002
+        rng    = p_max - p_min or 0.001
+
+        def py(price):
+            return ch - int((price - p_min) / rng * ch)
+
+        n     = len(data)
+        pad   = 6
+        avail = cw - 2 * pad
+        step  = max(4, avail // max(n, 1))
+        cw_c  = max(2, step - 2)
+
+        for i, c in enumerate(data):
+            x = pad + i * step + step // 2
+            o, cl, h, l = c['open'], c['close'], c['high'], c['low']
+            color = '#22c55e' if cl >= o else '#ef4444'
+            # Wick
+            cv.create_line(x, py(h), x, py(l), fill=color, width=1)
+            # Body
+            y1, y2 = sorted([py(o), py(cl)])
+            cv.create_rectangle(x - cw_c//2, y1, x + cw_c//2, max(y2, y1+1),
+                                fill=color, outline='')
+
+        # ENTRY line (white dashed)
+        ye = py(entry)
+        for xi in range(0, cw, 8):
+            cv.create_line(xi, ye, xi+5, ye, fill='#ffffff', width=1)
+        cv.create_text(cw - 2, ye - 7, text=f'E {entry:.5f}',
+                       fill='#ffffff', font=('Segoe UI', 7, 'bold'), anchor='e')
+
+        # TP line (green)
+        yt = py(tp)
+        for xi in range(0, cw, 8):
+            cv.create_line(xi, yt, xi+5, yt, fill='#22c55e', width=1)
+        cv.create_text(cw - 2, yt - 7, text=f'TP {tp:.5f}',
+                       fill='#22c55e', font=('Segoe UI', 7, 'bold'), anchor='e')
+
+        # SL line (red)
+        ys = py(sl)
+        for xi in range(0, cw, 8):
+            cv.create_line(xi, ys, xi+5, ys, fill='#ef4444', width=1)
+        cv.create_text(cw - 2, ys - 7, text=f'SL {sl:.5f}',
+                       fill='#ef4444', font=('Segoe UI', 7, 'bold'), anchor='e')
+
+    cv.bind('<Configure>', draw_chart)
+    cv.after(50, draw_chart)
+
+    # ── ENTRY / TP / SL labels ──
+    lbl_frame = tk.Frame(inner, bg=clr_bg)
+    lbl_frame.pack(fill='x', padx=10, pady=(8, 4))
+
+    def make_stat(parent, label, value, color):
+        f = tk.Frame(parent, bg=clr_card, padx=10, pady=6)
+        f.pack(side='left', expand=True, fill='x', padx=4)
+        tk.Label(f, text=label, font=('Segoe UI', 8),
+                 fg=clr_dim, bg=clr_card).pack(anchor='w')
+        tk.Label(f, text=value, font=('Segoe UI', 12, 'bold'),
+                 fg=color, bg=clr_card).pack(anchor='w')
+
+    make_stat(lbl_frame, 'ENTRY', f'{entry:.5f}', clr_text)
+    make_stat(lbl_frame, 'TP', f'{tp:.5f}', '#22c55e')
+    make_stat(lbl_frame, 'SL', f'{sl:.5f}', '#ef4444')
+
+    # ── Reason (truncated) ──
+    reason_txt = title_raw.replace('[ESTRUCTURA] ', '').replace('[SMC] ', '')[:72]
+    tk.Label(inner, text=reason_txt, font=('Segoe UI', 8),
+             fg=clr_dim, bg=clr_bg, wraplength=W - 24, justify='left'
+             ).pack(anchor='w', padx=12, pady=(2, 8))
+
+    # ── Auto-dismiss progress bar ──
+    AUTO_DISMISS = 20  # seconds
+    pb_frame = tk.Frame(inner, bg='#1e293b', height=3)
+    pb_frame.pack(fill='x', side='bottom')
+    pb_fill = tk.Frame(pb_frame, bg=clr_dir, height=3)
+    pb_fill.place(x=0, y=0, relwidth=1, height=3)
+
+    start_ts = time.time()
+    def tick_dismiss():
+        elapsed = time.time() - start_ts
+        frac = max(0.0, 1.0 - elapsed / AUTO_DISMISS)
+        try:
+            pb_fill.place(x=0, y=0, relwidth=frac, height=3)
+            if elapsed >= AUTO_DISMISS:
+                _slide_out(toast, x_end, y_end, W, H)
+            else:
+                toast.after(100, tick_dismiss)
+        except tk.TclError:
+            pass
+
+    # ── Slide-in animation ──
+    def _slide_in(step=0):
+        steps = 18
+        if step > steps:
+            tick_dismiss()
+            return
+        t_val = step / steps
+        ease = 1 - (1 - t_val) ** 3   # cubic ease-out
+        y_pos = int(y_start + (y_end - y_start) * ease)
+        try:
+            toast.geometry(f'{W}x{H}+{x_end}+{y_pos}')
+            toast.after(14, lambda: _slide_in(step + 1))
+        except tk.TclError:
+            pass
+
+    def _slide_out(win, xe, ye, w, h):
+        steps = 14
+        y_tgt = ye + h + 20
+
+        def step_out(i=0):
+            if i >= steps:
+                try: win.destroy()
+                except: pass
+                return
+            t_val = i / steps
+            ease = t_val ** 2
+            y_pos = int(ye + (y_tgt - ye) * ease)
+            try:
+                win.geometry(f'{w}x{h}+{xe}+{y_pos}')
+                win.after(14, lambda: step_out(i + 1))
+            except tk.TclError:
+                pass
+        step_out()
+
+    _slide_in()
+
+
+def _launch_strategy_watcher(root: tk.Tk):
+    """
+    Background thread that polls for new strategies and schedules
+    a toast notification via root.after() (thread-safe).
+    """
+    seen_ids: set = set()
+    initialized = False
+
+    def _poll():
+        nonlocal seen_ids, initialized
+        try:
+            resp = requests.get('http://localhost:8000/auto-strategies', timeout=3)
+            if resp.status_code != 200:
+                return
+            data = resp.json().get('data', [])
+            current_ids = {s['id'] for s in data}
+
+            if not initialized:
+                # First run: populate seen without toasting
+                seen_ids = current_ids
+                initialized = True
+                return
+
+            for s in data:
+                if s['id'] not in seen_ids:
+                    seen_ids.add(s['id'])
+                    # Fetch candles for the chart
+                    candles = []
+                    try:
+                        cr = requests.get('http://localhost:8000/market-state', timeout=3)
+                        if cr.status_code == 200:
+                            mdata = cr.json().get('data', {})
+                            candles = mdata.get('candles', [])
+                    except Exception:
+                        pass
+                    # Schedule toast on main thread
+                    strategy_copy = dict(s)
+                    candles_copy  = list(candles)
+                    try:
+                        root.after(0, lambda sc=strategy_copy, cc=candles_copy:
+                                   _show_strategy_toast(sc, cc))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _loop():
+        while True:
+            try:
+                _poll()
+            except Exception:
+                pass
+            time.sleep(15)  # check every 15s
+
+    t = Thread(target=_loop, daemon=True)
+    t.start()
+
+
 class AIdan:
     def __init__(self):
         self.threads = []
         self.root = None
         self.status_label = None
         
-    def log(self, message, color="black"):
-        """Mostrar mensaje en la GUI"""
-        if self.status_label:
-            self.status_label.config(text=message, fg=color)
-            self.root.update()
+    # ── Color palette ──
+    BG = '#0a0e14'
+    BG_CARD = '#111822'
+    BG_CARD_ALT = '#151d2b'
+    ACCENT = '#00d4ff'
+    ACCENT_DIM = '#0088aa'
+    ACCENT_GLOW = '#003d4d'
+    GREEN = '#00e676'
+    RED = '#ff3d5a'
+    ORANGE = '#ffab40'
+    TEXT = '#e8edf4'
+    TEXT_DIM = '#5c6a7e'
+    BORDER = '#1e2a3a'
+
+    def log(self, message, color="white"):
+        """Mostrar mensaje en la GUI (thread-safe)."""
+        fg_map = {
+            'black': self.TEXT, 'green': self.GREEN, 'red': self.RED,
+            'blue': self.ACCENT, 'orange': self.ORANGE, 'white': self.TEXT
+        }
+        fg = fg_map.get(color, self.TEXT)
         print(message)
-    
-    def check_ollama_installed(self):
-        """Verificar si Ollama está instalado"""
+        if self.status_label and self.root:
+            def _update_gui():
+                try:
+                    self._current_status_text = message
+                    self.status_label.config(text=message, fg=fg)
+                    if hasattr(self, '_log_text'):
+                        tag = color if color in ('green', 'red', 'blue', 'orange', 'white') else 'white'
+                        self._log_text.config(state='normal')
+                        self._log_text.insert('end', message + '\n', tag)
+                        self._log_text.see('end')
+                        self._log_text.config(state='disabled')
+                except tk.TclError:
+                    pass
+            try:
+                self.root.after(0, _update_gui)
+            except Exception:
+                pass
+
+    def _advance_progress(self, step_index=None):
+        """Advance the progress bar and update step checklist (thread-safe)."""
+        if hasattr(self, '_progress_steps'):
+            self._progress_steps += 1
+            frac = min(self._progress_steps / self._progress_total, 1.0)
+            if hasattr(self, '_progress_target'):
+                self._progress_target = frac
+        if step_index is not None and hasattr(self, '_step_icons'):
+            if 0 <= step_index < len(self._step_icons):
+                icon = self._step_icons[step_index]
+                green = self.GREEN
+                try:
+                    self.root.after(0, lambda: icon.config(text="✓", fg=green))
+                except Exception:
+                    pass
+
+    def _mark_step_active(self, idx):
+        """Mark a step as currently in progress (thread-safe)."""
+        if hasattr(self, '_step_icons') and 0 <= idx < len(self._step_icons):
+            icon = self._step_icons[idx]
+            accent = self.ACCENT
+            try:
+                self.root.after(0, lambda: icon.config(text="⟳", fg=accent))
+            except Exception:
+                pass
+
+    def _mark_step_error(self, idx):
+        """Mark a step as failed (thread-safe)."""
+        if hasattr(self, '_step_icons') and 0 <= idx < len(self._step_icons):
+            icon = self._step_icons[idx]
+            red = self.RED
+            try:
+                self.root.after(0, lambda: icon.config(text="✗", fg=red))
+            except Exception:
+                pass
+
+    def _on_close(self):
+        """Clean shutdown — upload daily report before exiting."""
+        self._anim_running = False
+        # Try to upload daily report on close
         try:
-            # Verificar en registro de Windows
+            from src.reports.daily_report import generate_daily_report
+            result = generate_daily_report()
+            if result.get('status') == 'success':
+                print(f"Daily report uploaded: {result.get('message')}")
+        except Exception as e:
+            print(f"Report upload skipped: {e}")
+        self.root.destroy()
+    
+    def _ollama_is_running(self):
+        """Check if Ollama API is responding."""
+        try:
+            response = requests.get(OLLAMA_API, timeout=3)
+            return response.status_code == 200
+        except Exception:
+            return False
+
+    def _find_ollama_exe(self):
+        """Find the Ollama executable path on this system."""
+        # Common install locations
+        candidates = [
+            os.path.join(os.getenv('LOCALAPPDATA', ''), 'Programs', 'Ollama', 'ollama.exe'),
+            os.path.join(os.getenv('LOCALAPPDATA', ''), 'Ollama', 'ollama.exe'),
+            os.path.join(os.getenv('PROGRAMFILES', ''), 'Ollama', 'ollama.exe'),
+            os.path.join(os.getenv('USERPROFILE', ''), 'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
+        ]
+        for path in candidates:
+            if path and os.path.isfile(path):
+                return path
+
+        # Try to find via PATH
+        import shutil
+        found = shutil.which('ollama')
+        if found:
+            return found
+
+        # Search in registry for install location
+        try:
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")
-            for i in range(0, winreg.QueryInfoKey(key)[0]):
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                try:
+                    subkey_name = winreg.EnumKey(key, i)
+                    subkey = winreg.OpenKey(key, subkey_name)
+                    name = winreg.QueryValueEx(subkey, "DisplayName")[0]
+                    if "ollama" in name.lower():
+                        try:
+                            install_loc = winreg.QueryValueEx(subkey, "InstallLocation")[0]
+                            exe = os.path.join(install_loc, 'ollama.exe')
+                            if os.path.isfile(exe):
+                                winreg.CloseKey(subkey)
+                                winreg.CloseKey(key)
+                                return exe
+                        except Exception:
+                            pass
+                    winreg.CloseKey(subkey)
+                except Exception:
+                    continue
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
+        return None
+
+    def _is_ollama_installed(self):
+        """Check if Ollama is installed (regardless of whether it's running)."""
+        # Check registry
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")
+            for i in range(winreg.QueryInfoKey(key)[0]):
                 try:
                     subkey_name = winreg.EnumKey(key, i)
                     subkey = winreg.OpenKey(key, subkey_name)
@@ -52,18 +495,63 @@ class AIdan:
                         winreg.CloseKey(key)
                         return True
                     winreg.CloseKey(subkey)
-                except:
+                except Exception:
                     continue
             winreg.CloseKey(key)
-        except:
+        except Exception:
             pass
-        
-        # Verificar si el servicio responde
+
+        # Check if exe exists in common paths
+        return self._find_ollama_exe() is not None
+
+    def _start_ollama(self):
+        """Start Ollama if installed but not running. Returns True if API responds."""
+        if self._ollama_is_running():
+            return True
+
+        self.log("Iniciando Ollama...", "blue")
+
+        # Try 'ollama serve' first (works if in PATH)
+        exe = self._find_ollama_exe() or 'ollama'
         try:
-            response = requests.get(OLLAMA_API, timeout=3)
-            return response.status_code == 200
-        except:
-            return False
+            # Launch ollama serve in background (detached)
+            subprocess.Popen(
+                [exe, 'serve'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            )
+        except Exception:
+            # Try launching the app shortcut (Ollama app with tray icon)
+            try:
+                ollama_app = os.path.join(os.getenv('LOCALAPPDATA', ''), 'Programs', 'Ollama', 'Ollama.exe')
+                if os.path.isfile(ollama_app):
+                    subprocess.Popen(
+                        [ollama_app],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+            except Exception:
+                pass
+
+        # Wait for API to come up
+        for i in range(20):
+            time.sleep(1.5)
+            if self._ollama_is_running():
+                return True
+            if i % 4 == 3:
+                self.log(f"Esperando que Ollama responda... ({i+1}s)", "blue")
+
+        return self._ollama_is_running()
+
+    def check_ollama_installed(self):
+        """Check if Ollama is installed and ensure it's running."""
+        if self._ollama_is_running():
+            return True
+        if self._is_ollama_installed():
+            return self._start_ollama()
+        return False
     
     def install_ollama(self):
         """Descargar e instalar Ollama"""
@@ -204,8 +692,9 @@ class AIdan:
                     
                     added = 0
                     for item in news_items:
-                        if add_news(item['url'], item['title'], item['summary'], 
-                                   item['language'], str(item['entities']), str(item['tags'])):
+                        if add_news(item['url'], item['title'], item['summary'],
+                                   item['language'], str(item['entities']), str(item['tags']),
+                                   published_at=item.get('published_at')):
                             added += 1
                     
                     logger.info(f"[{iteration}] Added {added}/{len(news_items)} news")
@@ -222,7 +711,8 @@ class AIdan:
             from src.common.config import Config
             from src.common.logging_setup import setup_logging
             from src.common.db import (init_db, get_unprocessed_news, mark_news_processed,
-                                       add_alert, add_auto_strategy, get_news_fetch_time)
+                                       add_alert, add_auto_strategy, get_news_fetch_time,
+                                       get_strategies_pending_evaluation, auto_evaluate_strategy)
             from src.analyzer.news_analyzer import NewsAnalyzer
             from src.analyzer.technical import TechnicalAnalyzer
             
@@ -232,8 +722,20 @@ class AIdan:
             
             analyzer = NewsAnalyzer(logger)
             tech = TechnicalAnalyzer(logger)
-            logger.info("Analyzer ready")
-            
+
+            # SMC Engine initialization
+            from src.analyzer.mtf_analyzer import MTFAnalyzer
+            from src.analyzer.smc import SMCEngine
+            mtf = MTFAnalyzer(logger)
+            smc = SMCEngine(logger, mtf)
+
+            # Auto-Tuner initialization
+            from src.optimizer.auto_tuner import AutoTuner
+            tuner = AutoTuner(logger)
+            # Run initial optimization on startup
+            tuner.run_optimization(force=True)
+            logger.info("Analyzer + SMC + AutoTuner ready")
+
             iteration = 0
             while True:
                 try:
@@ -321,18 +823,138 @@ class AIdan:
                     if alerts_sent > 0 or strategies_created > 0:
                         logger.info(f"[{iteration}] Alerts: {alerts_sent} | Strategies: {strategies_created}")
 
+                    # ── Run auto-tuner optimization every 4h ──
+                    try:
+                        tuner_result = tuner.run_optimization()
+                        if tuner_result:
+                            logger.info(f"[{iteration}] AutoTuner: {tuner_result.get('status')} | improvements={len(tuner_result.get('improvements', []))}")
+                    except Exception as e:
+                        logger.error(f"AutoTuner error: {e}", exc_info=True)
+
                     # ── Structure scanner: generate strategies from market structure alone ──
                     try:
                         from src.common.db import get_active_profile
                         profile = get_active_profile()
-                        structure_signals = tech.detect_structure_signals(
-                            min_confidence=profile.get('min_confidence', 60))
-                        prof_sl = profile.get('stop_loss_pips', 5)
-                        prof_tp = profile.get('take_profit_pips', 10)
+                        prof_name = profile.get('name', 'default')
+                        min_conf = profile.get('min_confidence', 60)
+                        logger.info(f"[{iteration}] Structure scan: profile='{prof_name}' min_conf={min_conf}")
 
-                        for sig in structure_signals:
-                            direction = sig['direction']
-                            conf = sig['confidence']
+                        # Session filter: skip if outside active sessions and tuner says to block
+                        tuner_params = tuner.get_params()
+                        skip_session = False
+                        if tuner_params.get('block_outside_sessions', False):
+                            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                            utc_hour = _dt.now(_tz.utc).hour
+                            in_london = tuner_params['session_london_start'] <= utc_hour < tuner_params['session_london_end']
+                            in_ny = tuner_params['session_ny_start'] <= utc_hour < tuner_params['session_ny_end']
+                            if not in_london and not in_ny:
+                                skip_session = True
+                                logger.info(f"[{iteration}] AutoTuner: outside active sessions (UTC {utc_hour}h), skipping structure scan")
+
+                        if not skip_session:
+                            structure_signals = tech.detect_structure_signals(
+                                min_confidence=min_conf)
+                            logger.info(f"[{iteration}] Structure signals: {len(structure_signals)}")
+
+                            # AutoTuner: block setup types with poor win rates
+                            before_block = len(structure_signals)
+                            structure_signals = [s for s in structure_signals
+                                                 if not tuner.is_setup_blocked(s.get('setup_type', ''))]
+                            tuner_blocked = before_block - len(structure_signals)
+                            if tuner_blocked > 0:
+                                logger.info(f"[{iteration}] AutoTuner blocked {tuner_blocked} low-WR setup(s)")
+
+                            prof_sl = profile.get('stop_loss_pips', 5)
+                            prof_tp = profile.get('take_profit_pips', 10)
+
+                            # HTF bias filter: block counter-trend signals when bias is strong
+                            htf_bias = None
+                            try:
+                                if smc:
+                                    smc_status = smc.get_status()
+                                    htf_bias = smc_status.get('htf_bias', None)
+                            except Exception:
+                                htf_bias = None
+
+                            if htf_bias and htf_bias != 'neutral':
+                                blocked_dir = 'CALL' if htf_bias == 'bearish' else 'PUT'
+                                before_count = len(structure_signals)
+                                structure_signals = [s for s in structure_signals if s['direction'] != blocked_dir]
+                                blocked = before_count - len(structure_signals)
+                                if blocked > 0:
+                                    logger.info(f"[{iteration}] HTF bias {htf_bias}: blocked {blocked} {blocked_dir} signal(s)")
+
+                            # Consensus: pick SINGLE direction with strongest total confidence
+                            call_sigs = [s for s in structure_signals if s['direction'] == 'CALL']
+                            put_sigs = [s for s in structure_signals if s['direction'] == 'PUT']
+                            call_score = sum(s['confidence'] for s in call_sigs)
+                            put_score = sum(s['confidence'] for s in put_sigs)
+
+                            if call_score > 0 and put_score > 0:
+                                ratio = max(call_score, put_score) / min(call_score, put_score)
+                                if ratio < 1.15:
+                                    logger.info(f"[{iteration}] Structure: conflicting signals (CALL={call_score:.0f} vs PUT={put_score:.0f}), skipping")
+                                    structure_signals = []
+                                elif call_score > put_score:
+                                    structure_signals = [max(call_sigs, key=lambda s: s['confidence'])]
+                                else:
+                                    structure_signals = [max(put_sigs, key=lambda s: s['confidence'])]
+                            elif call_sigs:
+                                structure_signals = [max(call_sigs, key=lambda s: s['confidence'])]
+                            elif put_sigs:
+                                structure_signals = [max(put_sigs, key=lambda s: s['confidence'])]
+
+                            # Capture candles snapshot for frozen chart display
+                            candles_snap = None
+                            try:
+                                raw_candles = tech._fetch_candles()
+                                if raw_candles:
+                                    candles_snap = [
+                                        {'o': round(c['open'], 5), 'h': round(c['high'], 5),
+                                         'l': round(c['low'], 5), 'c': round(c['close'], 5),
+                                         't': c['datetime']}
+                                        for c in raw_candles[-30:]
+                                    ]
+                            except Exception:
+                                pass
+
+                            for sig in structure_signals:
+                                direction = sig['direction']
+                                conf = sig['confidence']
+                                price = tech.get_market_state().get('price', 0)
+                                if price <= 0:
+                                    break
+                                pip = 0.0001
+                                if direction == 'CALL':
+                                    sl = round(price - prof_sl * pip, 5)
+                                    tp = round(price + prof_tp * pip, 5)
+                                else:
+                                    sl = round(price + prof_sl * pip, 5)
+                                    tp = round(price - prof_tp * pip, 5)
+
+                                sid = add_auto_strategy(
+                                    alert_id=None,
+                                    news_title=f"[ESTRUCTURA] {sig['reason'][:80]}",
+                                    direction=direction, entry_price=price,
+                                    stop_loss=sl, take_profit=tp,
+                                    confidence=conf, impact_score=int(conf),
+                                    trigger_type='structure',
+                                    candles_snapshot=candles_snap,
+                                    profile_name=prof_name)
+                                if sid:
+                                    strategies_created += 1
+                                    logger.info(f"Structure strategy #{sid}: {direction} @ {price:.5f} | {sig['setup_type']} | {sig['reason'][:60]}")
+                    except Exception as e:
+                        logger.error(f"Structure scanner error: {e}", exc_info=True)
+
+                    # ── SMC Scanner: multi-timeframe + demand/supply zones + confirmation ──
+                    try:
+                        smc.update()
+                        smc_setups = smc.check_confirmations()
+                        logger.info(f"[{iteration}] SMC setups: {len(smc_setups)}")
+                        for setup in smc_setups:
+                            direction = setup['direction']
+                            conf = setup['confidence']
                             price = tech.get_market_state().get('price', 0)
                             if price <= 0:
                                 break
@@ -346,16 +968,112 @@ class AIdan:
 
                             sid = add_auto_strategy(
                                 alert_id=None,
-                                news_title=f"[ESTRUCTURA] {sig['reason'][:80]}",
+                                news_title=f"[SMC] {setup['reason'][:80]}",
                                 direction=direction, entry_price=price,
                                 stop_loss=sl, take_profit=tp,
                                 confidence=conf, impact_score=int(conf),
-                                trigger_type='structure')
+                                trigger_type='smc')
                             if sid:
                                 strategies_created += 1
-                                logger.info(f"Structure strategy #{sid}: {direction} @ {price:.5f} | {sig['setup_type']} | {sig['reason'][:60]}")
+                                logger.info(f"SMC strategy #{sid}: {direction} @ {price:.5f} | {setup['reason'][:60]}")
                     except Exception as e:
-                        logger.error(f"Structure scanner error: {e}")
+                        logger.error(f"SMC scanner error: {e}", exc_info=True)
+
+                    if strategies_created > 0:
+                        logger.info(f"[{iteration}] Total strategies created this cycle: {strategies_created}")
+
+                    # ── Auto-evaluate expired strategies ──
+                    try:
+                        pending = get_strategies_pending_evaluation()
+                        if pending:
+                            candles = tech._fetch_candles()
+                            current_price = tech.get_market_state().get('price', 0)
+
+                            for row in pending:
+                                sid, direction, entry_price, sl, tp = row[0], row[1], row[2], row[3], row[4]
+                                conf, expiry_min = row[5], row[6]
+                                created_at_str, expires_at_str = row[7], row[8]
+                                news_title, trigger_type = row[9], row[10]
+
+                                if not current_price or not entry_price:
+                                    continue
+
+                                # Check if TP or SL was hit using candle history
+                                hit_tp = False
+                                hit_sl = False
+
+                                if candles:
+                                    from datetime import datetime as dt
+                                    try:
+                                        entry_ts = dt.strptime(str(created_at_str).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                                    except Exception:
+                                        entry_ts = None
+
+                                    if entry_ts:
+                                        for c in candles:
+                                            c_ts = c.get('datetime', c.get('timestamp', 0))
+                                            try:
+                                                if isinstance(c_ts, (int, float)):
+                                                    from datetime import timezone as tz_mod, timedelta as td_mod
+                                                    c_time = dt.fromtimestamp(c_ts, tz=tz_mod(td_mod(hours=-3))).replace(tzinfo=None)
+                                                else:
+                                                    c_time = dt.strptime(str(c_ts).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                                            except Exception:
+                                                continue
+
+                                            if c_time < entry_ts:
+                                                continue
+
+                                            # Check highs/lows against TP/SL
+                                            if direction == 'CALL':
+                                                if c['high'] >= tp:
+                                                    hit_tp = True
+                                                    break
+                                                if c['low'] <= sl:
+                                                    hit_sl = True
+                                                    break
+                                            else:  # PUT
+                                                if c['low'] <= tp:
+                                                    hit_tp = True
+                                                    break
+                                                if c['high'] >= sl:
+                                                    hit_sl = True
+                                                    break
+
+                                # Determine result
+                                pip = 0.0001
+                                if hit_tp:
+                                    result = 'win'
+                                    pips_result = abs(tp - entry_price) / pip
+                                elif hit_sl:
+                                    result = 'loss'
+                                    pips_result = -abs(sl - entry_price) / pip
+                                else:
+                                    # Neither TP nor SL hit — evaluate by direction
+                                    if direction == 'CALL':
+                                        pips_result = (current_price - entry_price) / pip
+                                    else:
+                                        pips_result = (entry_price - current_price) / pip
+                                    # AutoTuner: require minimum pip movement to count as win
+                                    min_pips = tuner.get_params().get('min_pips_for_win', 1.5)
+                                    result = 'win' if pips_result >= min_pips else 'loss'
+
+                                exit_px = tp if hit_tp else (sl if hit_sl else current_price)
+
+                                ctx = {
+                                    'entry_price': entry_price,
+                                    'direction': direction,
+                                    'confidence': conf,
+                                    'trigger_type': trigger_type or '',
+                                    'market_trend': tech.get_market_state().get('trend', ''),
+                                    'rsi_at_entry': tech.get_market_state().get('rsi', 0),
+                                }
+                                auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
+                                method = 'TP hit' if hit_tp else ('SL hit' if hit_sl else f'price eval {current_price:.5f}')
+                                logger.info(f"Auto-eval #{sid}: {result.upper()} | {direction} entry={entry_price:.5f} exit={exit_px:.5f} | {pips_result:+.1f}p | {method}")
+
+                    except Exception as e:
+                        logger.error(f"Auto-eval error: {e}", exc_info=True)
 
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")
@@ -368,14 +1086,33 @@ class AIdan:
         """Servicio API integrado"""
         try:
             import uvicorn
+            import logging as _logging
+            print("API: importing src.admin.main...")
             from src.admin.main import app
-            
-            # Configuración para ejecutable
+            print("API: import successful, starting uvicorn...")
+
+            # Disable uvicorn's own logging config (crashes in frozen exe)
+            MINIMAL_LOG_CONFIG = {
+                "version": 1,
+                "disable_existing_loggers": False,
+                "handlers": {
+                    "default": {
+                        "class": "logging.StreamHandler",
+                        "stream": "ext://sys.stderr",
+                    },
+                },
+                "loggers": {
+                    "uvicorn": {"handlers": ["default"], "level": "WARNING"},
+                    "uvicorn.error": {"handlers": ["default"], "level": "WARNING"},
+                    "uvicorn.access": {"handlers": ["default"], "level": "WARNING"},
+                },
+            }
+
             config = uvicorn.Config(
-                app, 
-                host="127.0.0.1", 
+                app,
+                host="127.0.0.1",
                 port=8000,
-                log_level="error",
+                log_config=MINIMAL_LOG_CONFIG,
                 access_log=False,
                 loop="asyncio"
             )
@@ -385,6 +1122,7 @@ class AIdan:
             print(f"FATAL API: {e}")
             import traceback
             traceback.print_exc()
+            self.log(f"Error API: {e}", "red")
     
     def start_services(self):
         """Iniciar los 3 servicios como threads"""
@@ -435,94 +1173,339 @@ class AIdan:
         self.log("Intentá abrir manualmente en tu navegador", "orange")
         return False
     
+    def _animate_dots(self):
+        """Animate loading dots on the status label."""
+        if not self._anim_running:
+            return
+        if not hasattr(self, '_dot_count'):
+            self._dot_count = 0
+        self._dot_count = (self._dot_count + 1) % 4
+        dots = '.' * self._dot_count
+        if hasattr(self, '_current_status_text'):
+            self.status_label.config(text=self._current_status_text + dots)
+        if self._anim_running:
+            self.root.after(500, self._animate_dots)
+
+    def _animate_progress(self):
+        """Smooth animated progress bar with shimmer effect."""
+        if not self._anim_running and not hasattr(self, '_progress_target'):
+            return
+        target = getattr(self, '_progress_target', 0)
+        current = getattr(self, '_progress_current', 0)
+        # Ease towards target
+        if current < target:
+            current = min(current + 0.008, target)
+            self._progress_current = current
+        # Draw on canvas
+        if hasattr(self, '_progress_canvas'):
+            c = self._progress_canvas
+            w = c.winfo_width() or 480
+            h = c.winfo_height() or 6
+            c.delete('all')
+            # Background track
+            c.create_rectangle(0, 0, w, h, fill=self.BORDER, outline='')
+            # Filled portion
+            fill_w = int(w * current)
+            if fill_w > 0:
+                c.create_rectangle(0, 0, fill_w, h, fill=self.ACCENT, outline='')
+                # Shimmer highlight
+                import math
+                shimmer_x = int((math.sin(time.time() * 3) + 1) / 2 * fill_w)
+                shimmer_w = min(60, fill_w)
+                for i in range(shimmer_w):
+                    alpha_frac = 1 - abs(i - shimmer_w // 2) / (shimmer_w // 2)
+                    r = int(0x00 + (0xff - 0x00) * alpha_frac * 0.3)
+                    g = int(0xd4 + (0xff - 0xd4) * alpha_frac * 0.3)
+                    b = int(0xff)
+                    color = f'#{r:02x}{g:02x}{b:02x}'
+                    x = shimmer_x - shimmer_w // 2 + i
+                    if 0 <= x < fill_w:
+                        c.create_rectangle(x, 0, x + 1, h, fill=color, outline='')
+        self.root.after(30, self._animate_progress)
+
+    def _animate_glow(self):
+        """Pulse the glow ring behind the title."""
+        if not self._anim_running:
+            return
+        if hasattr(self, '_glow_canvas') and hasattr(self, '_glow_oval'):
+            import math
+            phase = (math.sin(time.time() * 2) + 1) / 2  # 0..1
+            # Interpolate between dim and bright
+            r = int(0x00 + 0x00 * phase)
+            g = int(0x50 + int(0x64 * phase))
+            b = int(0x80 + int(0x7f * phase))
+            color = f'#{r:02x}{g:02x}{b:02x}'
+            self._glow_canvas.itemconfig(self._glow_oval, fill=color, outline=color)
+        self.root.after(50, self._animate_glow)
+
     def run(self):
-        """Flujo principal"""
-        # Crear GUI
+        """Flujo principal con UI moderna."""
+        import math
+
+        W, H = 620, 520
+
+        # ── Window (borderless but stays in taskbar) ──
         self.root = tk.Tk()
-        self.root.title("AIdan Launcher")
-        self.root.geometry("500x300")
+        self.root.title("AIdan v3.0")
+        self.root.geometry(f"{W}x{H}")
         self.root.resizable(False, False)
-        
-        # Título
-        title_label = tk.Label(self.root, text="🚀 AIdan v1.2", 
-                              font=("Arial", 24, "bold"), fg="#2196F3")
-        title_label.pack(pady=20)
-        
-        # Estado
-        self.status_label = tk.Label(self.root, text="Iniciando...", 
-                                     font=("Arial", 11), wraplength=450)
-        self.status_label.pack(pady=20)
-        
-        # Botón cerrar
-        close_button = tk.Button(self.root, text="Cerrar AIdan", 
-                                command=self.root.destroy, bg="#f44336", fg="white",
-                                font=("Arial", 12, "bold"), width=15, height=2)
-        close_button.pack(pady=20)
-        
-        # Info
-        info_label = tk.Label(self.root, 
-                            text="Mantén esta ventana abierta mientras usas AIdan.\n"
-                                 "El dashboard se abrirá automáticamente en tu navegador.",
-                            font=("Arial", 9), fg="gray")
-        info_label.pack(pady=10)
-        
-        # Iniciar verificación en thread
+        self.root.configure(bg=self.BG)
+        self.root.overrideredirect(True)
+        self._anim_running = True
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Center on screen
+        self.root.update_idletasks()
+        sx = (self.root.winfo_screenwidth() - W) // 2
+        sy = (self.root.winfo_screenheight() - H) // 2
+        self.root.geometry(f"{W}x{H}+{sx}+{sy}")
+
+        # Make borderless window appear in taskbar (Windows)
+        try:
+            import ctypes
+            GWL_EXSTYLE = -20
+            WS_EX_APPWINDOW = 0x00040000
+            WS_EX_TOOLWINDOW = 0x00000080
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            style = (style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+            self.root.withdraw()
+            self.root.after(10, self.root.deiconify)
+        except Exception:
+            pass
+
+        # ── Drag support ──
+        self._drag_data = {'x': 0, 'y': 0}
+        def start_drag(e):
+            self._drag_data['x'] = e.x
+            self._drag_data['y'] = e.y
+        def do_drag(e):
+            dx = e.x - self._drag_data['x']
+            dy = e.y - self._drag_data['y']
+            x = self.root.winfo_x() + dx
+            y = self.root.winfo_y() + dy
+            self.root.geometry(f"+{x}+{y}")
+
+        # ── Outer border glow ──
+        border_frame = tk.Frame(self.root, bg=self.ACCENT_DIM, padx=1, pady=1)
+        border_frame.pack(fill='both', expand=True)
+        inner_frame = tk.Frame(border_frame, bg=self.BG)
+        inner_frame.pack(fill='both', expand=True)
+
+        # ── Custom title bar ──
+        titlebar = tk.Frame(inner_frame, bg='#060a10', height=36)
+        titlebar.pack(fill='x')
+        titlebar.pack_propagate(False)
+        titlebar.bind('<Button-1>', start_drag)
+        titlebar.bind('<B1-Motion>', do_drag)
+
+        tb_left = tk.Label(titlebar, text="  AIdan", font=("Segoe UI", 9),
+                          fg=self.TEXT_DIM, bg='#060a10')
+        tb_left.pack(side='left', padx=4)
+        tb_left.bind('<Button-1>', start_drag)
+        tb_left.bind('<B1-Motion>', do_drag)
+
+        close_btn = tk.Label(titlebar, text=" \u2715 ", font=("Segoe UI", 12),
+                            fg=self.TEXT_DIM, bg='#060a10', cursor='hand2')
+        close_btn.pack(side='right', padx=8)
+        close_btn.bind('<Button-1>', lambda e: self._on_close())
+        close_btn.bind('<Enter>', lambda e: close_btn.config(fg=self.RED, bg='#1a0008'))
+        close_btn.bind('<Leave>', lambda e: close_btn.config(fg=self.TEXT_DIM, bg='#060a10'))
+
+        # ── Accent line under titlebar ──
+        tk.Frame(inner_frame, bg=self.ACCENT, height=2).pack(fill='x')
+
+        # ── Main content area ──
+        content = tk.Frame(inner_frame, bg=self.BG)
+        content.pack(fill='both', expand=True, padx=32, pady=0)
+
+        # ── Glow canvas + Title ──
+        header_canvas = tk.Canvas(content, bg=self.BG, height=90, highlightthickness=0)
+        header_canvas.pack(fill='x', pady=(18, 0))
+        self._glow_canvas = header_canvas
+
+        # Glow ellipse (drawn behind text)
+        self._glow_oval = header_canvas.create_oval(
+            30, 10, 220, 80, fill=self.ACCENT_GLOW, outline=self.ACCENT_GLOW
+        )
+
+        # Title text on canvas
+        header_canvas.create_text(
+            125, 42, text="AIdan", font=("Segoe UI", 38, "bold"),
+            fill=self.TEXT, anchor='center'
+        )
+        # Version badge
+        header_canvas.create_rectangle(200, 25, 262, 50, fill=self.ACCENT_DIM, outline=self.ACCENT)
+        header_canvas.create_text(
+            231, 37, text="v3.0", font=("Segoe UI", 11, "bold"),
+            fill='#ffffff', anchor='center'
+        )
+
+        # ── Subtitle ──
+        tk.Label(content, text="Scalping Intelligence Engine  ·  EUR/USD",
+                font=("Segoe UI", 10), fg=self.TEXT_DIM, bg=self.BG
+        ).pack(anchor='w', padx=4, pady=(2, 12))
+
+        # ── Gradient separator ──
+        sep_canvas = tk.Canvas(content, bg=self.BG, height=2, highlightthickness=0)
+        sep_canvas.pack(fill='x')
+        sep_canvas.update_idletasks()
+        sep_w = sep_canvas.winfo_width() or 540
+        for i in range(sep_w):
+            frac = i / max(sep_w, 1)
+            if frac < 0.5:
+                intensity = frac * 2
+            else:
+                intensity = (1 - frac) * 2
+            r = int(0x00 * intensity)
+            g = int(0xd4 * intensity)
+            b = int(0xff * intensity)
+            sep_canvas.create_rectangle(i, 0, i + 1, 2, fill=f'#{r:02x}{g:02x}{b:02x}', outline='')
+
+        # ── Steps checklist ──
+        steps_frame = tk.Frame(content, bg=self.BG_CARD, highlightbackground=self.BORDER,
+                              highlightthickness=1)
+        steps_frame.pack(fill='x', pady=(14, 0), ipady=8)
+
+        step_names = ["Ollama Engine", "Modelo IA", "Modelo Vision", "Servicios", "Dashboard"]
+        self._step_icons = []
+        for i, name in enumerate(step_names):
+            row = tk.Frame(steps_frame, bg=self.BG_CARD)
+            row.pack(fill='x', padx=16, pady=2)
+            icon = tk.Label(row, text="○", font=("Consolas", 11),
+                           fg=self.TEXT_DIM, bg=self.BG_CARD, width=2)
+            icon.pack(side='left')
+            self._step_icons.append(icon)
+            tk.Label(row, text=name, font=("Segoe UI", 10),
+                    fg=self.TEXT, bg=self.BG_CARD).pack(side='left', padx=(6, 0))
+
+        # ── Animated progress bar ──
+        self._progress_canvas = tk.Canvas(content, bg=self.BORDER, height=6,
+                                         highlightthickness=0)
+        self._progress_canvas.pack(fill='x', pady=(12, 0))
+        self._progress_steps = 0
+        self._progress_total = 5
+        self._progress_target = 0.02
+        self._progress_current = 0.0
+
+        # ── Status line ──
+        self.status_label = tk.Label(content, text="Iniciando...",
+                                     font=("Segoe UI", 10), fg=self.ACCENT,
+                                     bg=self.BG, anchor='w')
+        self.status_label.pack(fill='x', pady=(10, 0))
+        self._current_status_text = "Iniciando"
+
+        # ── Log console ──
+        log_frame = tk.Frame(content, bg=self.BG_CARD, highlightbackground=self.BORDER,
+                            highlightthickness=1)
+        log_frame.pack(fill='both', expand=True, pady=(8, 0))
+
+        self._log_text = tk.Text(log_frame, bg=self.BG_CARD, fg=self.TEXT_DIM,
+                                font=("Consolas", 8), height=3, width=50,
+                                borderwidth=0, highlightthickness=0,
+                                state='disabled', wrap='word')
+        self._log_text.pack(fill='both', expand=True, padx=8, pady=4)
+        self._log_text.tag_configure('green', foreground=self.GREEN)
+        self._log_text.tag_configure('red', foreground=self.RED)
+        self._log_text.tag_configure('blue', foreground=self.ACCENT)
+        self._log_text.tag_configure('orange', foreground=self.ORANGE)
+        self._log_text.tag_configure('white', foreground=self.TEXT)
+
+        # ── Footer ──
+        footer = tk.Frame(content, bg=self.BG)
+        footer.pack(fill='x', pady=(6, 10))
+        tk.Label(footer, text="Mantene esta ventana abierta mientras uses AIdan",
+                font=("Segoe UI", 8), fg=self.TEXT_DIM, bg=self.BG).pack(side='left')
+
+        # ── Start animations ──
+        self._animate_dots()
+        self._animate_progress()
+        self._animate_glow()
+
+        # ── Thread-safe messagebox helper ──
+        import threading
+        _msgbox_result = {}
+        _msgbox_event = threading.Event()
+
+        def _ask_yesno_safe(title, message):
+            """Show messagebox from main thread, wait for result."""
+            _msgbox_event.clear()
+            def _show():
+                _msgbox_result['value'] = messagebox.askyesno(title, message)
+                _msgbox_event.set()
+            self.root.after(0, _show)
+            _msgbox_event.wait(timeout=120)
+            return _msgbox_result.get('value', False)
+
+        # ── Init thread ──
         def init_thread():
-            # 1. Verificar Ollama
-            self.log("🔍 Verificando Ollama...", "blue")
+            # 1. Ollama
+            self._mark_step_active(0)
+            self.log("Verificando Ollama...", "blue")
             if not self.check_ollama_installed():
-                response = messagebox.askyesno(
+                response = _ask_yesno_safe(
                     "Ollama no instalado",
                     "AIdan necesita Ollama (motor de IA local).\n\n"
-                    "¿Descargar e instalar Ollama ahora?\n"
-                    "(Descarga ~400MB, instalación ~5 minutos)"
+                    "Descargar e instalar Ollama ahora?\n"
+                    "(Descarga ~400MB, instalacion ~5 minutos)"
                 )
                 if response:
                     if not self.install_ollama():
-                        self.log("❌ No se pudo instalar Ollama", "red")
+                        self.log("Ollama: error de instalacion", "red")
+                        self._mark_step_error(0)
                         return
                 else:
-                    self.log("❌ Ollama es necesario para AIdan", "red")
+                    self.log("Ollama es necesario para AIdan", "red")
+                    self._mark_step_error(0)
                     return
-            else:
-                self.log("✓ Ollama instalado", "green")
-            
-            # 2. Verificar modelo
-            self.log(f"🔍 Verificando modelo {OLLAMA_MODEL}...", "blue")
+            self.log("Ollama listo", "green")
+            self._advance_progress(step_index=0)
+
+            # 2. Modelo IA
+            self._mark_step_active(1)
+            self.log(f"Verificando modelo {OLLAMA_MODEL}...", "blue")
             if not self.check_ollama_model():
-                response = messagebox.askyesno(
+                response = _ask_yesno_safe(
                     "Modelo no instalado",
                     f"Se necesita descargar el modelo {OLLAMA_MODEL}\n"
-                    f"Tamaño: ~4GB\n\n"
-                    "¿Descargar ahora?"
+                    f"Tamano: ~4GB\n\nDescargar ahora?"
                 )
                 if response:
                     if not self.install_ollama_model():
-                        self.log("❌ No se pudo instalar el modelo", "red")
+                        self.log("Error instalando modelo", "red")
+                        self._mark_step_error(1)
                         return
                 else:
-                    self.log("⚠️ Sin modelo, análisis limitado", "orange")
-            else:
-                self.log(f"✓ Modelo {OLLAMA_MODEL} listo", "green")
-            
-            # 3. Verificar modelo de visión (llava) para análisis de gráficos
-            self.log("🔍 Verificando modelo de visión (llava)...", "blue")
-            if not self.check_vision_model():
-                self.log("📦 Descargando llava (análisis de gráficos)...", "blue")
-                self.install_vision_model()
-            else:
-                self.log("✓ Modelo de visión listo", "green")
+                    self.log("Sin modelo, analisis limitado", "orange")
+            self.log(f"Modelo {OLLAMA_MODEL} listo", "green")
+            self._advance_progress(step_index=1)
 
-            # 4. Iniciar servicios
+            # 3. Vision
+            self._mark_step_active(2)
+            self.log("Verificando modelo de vision (llava)...", "blue")
+            if not self.check_vision_model():
+                self.log("Descargando llava (analisis de graficos)...", "blue")
+                self.install_vision_model()
+            self.log("Modelo de vision listo", "green")
+            self._advance_progress(step_index=2)
+
+            # 4. Servicios
+            self._mark_step_active(3)
             if self.start_services():
-                # 5. Abrir dashboard
+                self._advance_progress(step_index=3)
+                # 5. Dashboard
+                self._mark_step_active(4)
                 self.open_dashboard()
-        
-        # Ejecutar init en background
+                self._advance_progress(step_index=4)
+                self._anim_running = False
+                self.log("AIdan activo — dashboard abierto", "green")
+
         Thread(target=init_thread, daemon=True).start()
-        
-        # Mantener ventana abierta
+        # Start strategy watcher (polls /auto-strategies, fires toast on new ones)
+        _launch_strategy_watcher(self.root)
         self.root.mainloop()
+
 
 if __name__ == "__main__":
     aidan = AIdan()
