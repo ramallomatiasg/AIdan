@@ -99,8 +99,8 @@ class NewsAnalyzer:
         """Analyze news and calculate impact score with EUR/USD analysis - REQUIRES AI"""
         try:
             # SOLO USAR IA - NO KEYWORDS
-            if self.ai_mode not in ['ollama', 'claude']:
-                self.logger.error(f"AI NOT AVAILABLE - Ollama debe estar corriendo. No se analizará la noticia.")
+            if self.ai_mode not in ['groq', 'ollama', 'claude']:
+                self.logger.error(f"AI NOT AVAILABLE - Groq/Ollama debe estar corriendo. No se analizará la noticia.")
                 return None
             
             result = self._analyze_with_ai(news_id, title, summary, entities, tags)
@@ -377,13 +377,33 @@ class NewsAnalyzer:
         except Exception:
             pass
 
+        # Inject economic calendar data for context
+        calendar_context = ''
+        try:
+            import requests
+            resp = requests.get('http://localhost:8000/calendar', timeout=3)
+            if resp.status_code == 200:
+                events = resp.json().get('events', [])
+                if events:
+                    cal_lines = []
+                    for ev in events:
+                        actual = f" Actual: {ev['actual']}" if ev.get('actual') else ""
+                        forecast = f" Prev: {ev['forecast']}" if ev.get('forecast') else ""
+                        previous = f" Ant: {ev['previous']}" if ev.get('previous') else ""
+                        impact_icon = "!!!" if ev['impact'] == 'High' else "!"
+                        cal_lines.append(f"  {impact_icon} {ev['time']} {ev['currency']} {ev['event']}{forecast}{previous}{actual}")
+                    calendar_context = f"\n\nCALENDARIO ECONÓMICO HOY/MAÑANA (datos reales, usá esto para evaluar impacto):\n" + "\n".join(cal_lines)
+        except Exception:
+            pass
+
         return f"""Sos analista de trading de opciones binarias EUR/USD. Analizá esta noticia y decidí si OPERAR o NO OPERAR.
 
 TÍTULO: {title}
 CONTENIDO: {summary[:500]}
-{lessons}
+{lessons}{calendar_context}
 Responde SOLO con JSON válido (sin markdown, sin ```json). Cada campo debe ser ÚNICO para esta noticia específica:
 {{
+    "relevance_to_eurusd": "<DIRECTA|INDIRECTA|NINGUNA - explicar en 1 línea POR QUÉ afecta o no al par EUR/USD>",
     "impact_score": <NÚMERO 0-100>,
     "level": "<BAJA|MEDIA|ALTA|CRITICA>",
     "should_operate": <true|false>,
@@ -395,26 +415,34 @@ Responde SOLO con JSON válido (sin markdown, sin ```json). Cada campo debe ser 
     "market_implications": "<empezar con ACCIÓN: OPERAR o ACCIÓN: NO OPERAR>"
 }}
 
-GUÍA DE SCORES (impact_score - importancia de la noticia):
-- 90-100: Cambio de tasas Fed/ECB, crisis financiera
-- 75-89: Datos de inflación, empleo, PIB que sorprenden
-- 50-74: Noticias económicas secundarias con poco impacto forex
-- 20-49: Noticias corporativas, earnings, M&A (no mueven EUR/USD)
-- 0-19: Noticias sin relación a forex
+PASO 1 - EVALUAR RELEVANCIA: Antes de asignar scores, preguntate: ¿esta noticia mueve DIRECTAMENTE el par EUR/USD?
+- DIRECTA: Decisiones de Fed/ECB/BoJ, datos macro (inflación, empleo, PIB), política comercial USD/EUR, crisis bancaria
+- INDIRECTA: Petróleo, geopolítica, commodities (afectan USD indirectamente)
+- NINGUNA: Acciones individuales, earnings, deportes, tech, M&A corporativo, autos, entretenimiento
 
-GUÍA DE CONFIDENCE (probabilidad de acertar la dirección):
-- Evaluar: ¿la noticia indica CLARAMENTE una dirección para EUR/USD?
-- 85-100: Señal clarísima (Fed sube tasas → USD fuerte → PUT seguro)
-- 65-84: Señal probable pero con matices
-- 40-64: Dirección incierta, depende de interpretación
-- 0-39: No hay señal clara → direction debe ser NEUTRAL
+PASO 2 - ASIGNAR SCORES según relevancia:
+Si relevance = NINGUNA → impact_score DEBE ser < 20, direction DEBE ser NEUTRAL, confidence < 15
+Si relevance = INDIRECTA → impact_score 20-70, confidence hasta 65, direction puede ser CALL/PUT si el mecanismo hacia EUR/USD es razonable (ej: petróleo sube → USD afectado → EUR/USD se mueve)
+Si relevance = DIRECTA → impact_score y confidence según análisis real
 
-IMPORTANTE:
-- impact_score y confidence son INDEPENDIENTES. Una noticia puede ser importante (score=92) pero de dirección incierta (confidence=45)
-- should_operate = true SOLO si score >= 75 Y confidence >= 60 Y direction es CALL o PUT
-- Noticias sobre petróleo, oro, acciones, M&A: generalmente score < 50 para EUR/USD
-- Si la noticia NO afecta directamente a USD o EUR: direction = NEUTRAL, score bajo
-- NO copies valores de ejemplo. ANALIZA la noticia y genera scores ÚNICOS"""
+GUÍA DE SCORES (impact_score):
+- 90-100: Cambio de tasas Fed/ECB, crisis financiera sistémica
+- 75-89: Datos de inflación/empleo/PIB que sorprenden vs expectativas
+- 50-74: Noticias macro secundarias con impacto moderado
+- 20-49: Noticias con relación indirecta a forex
+- 0-19: Noticias sin relación a EUR/USD
+
+GUÍA DE CONFIDENCE:
+- 85-100: Mecanismo causal directo y claro (Fed sube tasas → USD fuerte → PUT)
+- 65-84: Mecanismo probable pero con variables
+- 40-64: Dirección incierta, múltiples interpretaciones
+- 0-39: No hay señal clara → direction DEBE ser NEUTRAL
+
+REGLAS OBLIGATORIAS:
+- should_operate = true SOLO si direction es CALL o PUT Y relevance es DIRECTA o INDIRECTA
+- Si relevance es NINGUNA: should_operate = false, direction = NEUTRAL, SIEMPRE
+- NO inventes mecanismos causales rebuscados para justificar CALL/PUT en noticias irrelevantes
+- Cada noticia DEBE tener scores ÚNICOS basados en su contenido específico"""
 
     def _parse_ai_result(self, news_id, result_text, method):
         """Parse JSON result from AI response. Shared by Groq and Ollama."""
@@ -430,7 +458,7 @@ IMPORTANTE:
         impact_score = int(result.get('impact_score', 50))
         confidence = float(result.get('confidence', 50.0))
 
-        should_alert = should_operate and impact_score >= 80
+        should_alert = should_operate
 
         self.logger.info(f"{method}: {result.get('level')} - {result.get('direction')} - score={impact_score} conf={confidence:.1f}% - operate={should_operate}")
 
@@ -471,7 +499,7 @@ IMPORTANTE:
                         {'role': 'system', 'content': 'Sos un analista experto de forex EUR/USD. Respondé SOLO con JSON válido.'},
                         {'role': 'user', 'content': prompt}
                     ],
-                    'temperature': 0.5,
+                    'temperature': 0.3,
                     'max_tokens': 500,
                     'stream': False
                 },
@@ -506,7 +534,7 @@ IMPORTANTE:
                     'stream': False,
                     'format': 'json',
                     'options': {
-                        'temperature': 0.5,
+                        'temperature': 0.3,
                         'top_p': 0.9,
                         'num_predict': 500
                     }

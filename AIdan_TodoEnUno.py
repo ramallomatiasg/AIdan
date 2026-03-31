@@ -108,7 +108,7 @@ def _show_strategy_toast(strategy: dict, candles: list):
     tk.Label(hdr, text=conf_lbl, font=('Segoe UI', 9),
              fg=clr_gold, bg=clr_card).pack(side='left', padx=4)
 
-    badge_colors = {'news': ('#f97316', '#1a0a00'), 'structure': ('#818cf8', '#0a0a1a'), 'smc': ('#e040fb', '#140014')}
+    badge_colors = {'news': ('#f97316', '#1a0a00'), 'structure': ('#818cf8', '#0a0a1a'), 'smc': ('#e040fb', '#140014'), 'calendar': ('#facc15', '#1a1600')}
     bc, bk = badge_colors.get(trigger, ('#64748b', '#111'))
     tk.Label(hdr, text=f' {trigger.upper()} ', font=('Segoe UI', 8, 'bold'),
              fg=bc, bg=bk).pack(side='left', padx=4)
@@ -736,6 +736,123 @@ class AIdan:
             tuner.run_optimization(force=True)
             logger.info("Analyzer + SMC + AutoTuner ready")
 
+            # Calendar pre-news: track already-traded events across cycles
+            _traded_calendar_events = set()
+
+            # ── Startup: expire and evaluate pending strategies from previous session ──
+            try:
+                import sqlite3 as _sq3
+                from src.common.db import DB_PATH, now_ar
+                _conn = _sq3.connect(DB_PATH)
+                expired_count = _conn.execute("""
+                    UPDATE auto_strategies SET status = 'expired'
+                    WHERE expires_at < ? AND status = 'active'
+                """, (now_ar(),)).rowcount
+                _conn.commit()
+                _conn.close()
+                if expired_count:
+                    logger.info(f"Startup: marked {expired_count} strategies as expired")
+
+                pending = get_strategies_pending_evaluation()
+                if pending:
+                    candles = tech._fetch_candles()
+                    current_price = tech.get_market_state().get('price', 0)
+                    for row in pending:
+                        sid, direction, entry_price, sl, tp = row[0], row[1], row[2], row[3], row[4]
+                        conf, expiry_min = row[5], row[6]
+                        created_at_str, expires_at_str = row[7], row[8]
+                        news_title, trigger_type = row[9], row[10]
+                        if not current_price or not entry_price:
+                            continue
+                        hit_tp, hit_sl, hit_be = False, False, False
+                        # Break Even: 1:1 R:R distance from entry
+                        sl_distance = abs(entry_price - sl)
+                        be_target = (entry_price + sl_distance) if direction == 'CALL' else (entry_price - sl_distance)
+                        be_triggered = False
+                        if candles:
+                            from datetime import datetime as dt
+                            try:
+                                entry_ts = dt.strptime(str(created_at_str).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                            except Exception:
+                                entry_ts = None
+                            if entry_ts:
+                                for c in candles:
+                                    c_ts = c.get('datetime', c.get('timestamp', 0))
+                                    try:
+                                        if isinstance(c_ts, (int, float)):
+                                            from datetime import timezone as tz_mod, timedelta as td_mod
+                                            c_time = dt.fromtimestamp(c_ts, tz=tz_mod(td_mod(hours=-3))).replace(tzinfo=None)
+                                        else:
+                                            c_time = dt.strptime(str(c_ts).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                                    except Exception:
+                                        continue
+                                    if c_time < entry_ts:
+                                        continue
+                                    # Check if 1:1 R:R was reached (BE trigger)
+                                    if not be_triggered:
+                                        if direction == 'CALL' and c['high'] >= be_target:
+                                            be_triggered = True
+                                        elif direction == 'PUT' and c['low'] <= be_target:
+                                            be_triggered = True
+                                    if direction == 'CALL':
+                                        if c['high'] >= tp:
+                                            hit_tp = True; break
+                                        effective_sl = entry_price if be_triggered else sl
+                                        if c['low'] <= effective_sl:
+                                            if be_triggered:
+                                                hit_be = True
+                                            else:
+                                                hit_sl = True
+                                            break
+                                    else:
+                                        if c['low'] <= tp:
+                                            hit_tp = True; break
+                                        effective_sl = entry_price if be_triggered else sl
+                                        if c['high'] >= effective_sl:
+                                            if be_triggered:
+                                                hit_be = True
+                                            else:
+                                                hit_sl = True
+                                            break
+                        pip = 0.0001
+                        try:
+                            est_spread = tech.get_session_info()['spread_est']
+                        except Exception:
+                            est_spread = 1.0
+                        if hit_tp:
+                            result = 'win'
+                            pips_result = abs(tp - entry_price) / pip - est_spread
+                        elif hit_be:
+                            result = 'break_even'
+                            pips_result = 0.0
+                        elif hit_sl:
+                            result = 'loss'
+                            pips_result = -(abs(sl - entry_price) / pip + est_spread)
+                        else:
+                            pips_result = ((current_price - entry_price) / pip - est_spread) if direction == 'CALL' else ((entry_price - current_price) / pip - est_spread)
+                            min_pips = tuner.get_params().get('min_pips_for_win', 1.5)
+                            if be_triggered and pips_result < min_pips:
+                                result = 'break_even'
+                                pips_result = 0.0
+                            else:
+                                result = 'win' if pips_result >= min_pips else 'loss'
+                        exit_px = tp if hit_tp else (entry_price if hit_be else (sl if hit_sl else current_price))
+                        _setup_type = ''
+                        _title_lower = (news_title or '').lower()
+                        for _st in ['breakout', 'breakdown', 'bb_rejection', 'reversal', 'momentum', 'crossover', 'continuation', 'rebote', 'rechazo', 'soporte', 'resistencia']:
+                            if _st in _title_lower:
+                                _setup_type = _st
+                                break
+                        ctx = {'entry_price': entry_price, 'direction': direction, 'confidence': conf,
+                               'setup_type': _setup_type, 'trigger_type': trigger_type or '',
+                               'market_trend': tech.get_market_state().get('trend', ''),
+                               'rsi_at_entry': tech.get_market_state().get('rsi', 0)}
+                        auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
+                        logger.info(f"Startup eval #{sid}: {result.upper()} | {direction} entry={entry_price:.5f} exit={exit_px:.5f} | {pips_result:+.1f}p")
+                    logger.info(f"Startup: evaluated {len(pending)} pending strategies")
+            except Exception as e:
+                logger.error(f"Startup eval error: {e}", exc_info=True)
+
             iteration = 0
             while True:
                 try:
@@ -744,10 +861,12 @@ class AIdan:
                     
                     alerts_sent = 0
                     strategies_created = 0
+                    # Source conflict resolution: track directions from each source
+                    cycle_signals = []  # list of {'source': str, 'direction': str, 'confidence': int}
                     for news_id, url, title, summary, entities, tags in news_items:
                         result = analyzer.analyze(news_id, title, summary, entities, tags)
 
-                        if result and result['should_alert']:
+                        if result:
                             add_alert(news_id, result['impact_score'], result['level'],
                                     result['explanation'], result['eur_usd_impact'],
                                     result['market_implications'],
@@ -757,7 +876,8 @@ class AIdan:
                                     result.get('confidence', 50))
                             alerts_sent += 1
 
-                            # Auto-strategy: use active profile params + fresh news (<10 min)
+                        # Auto-strategy: check against active profile (independent of should_alert)
+                        if result and result.get('direction', 'NEUTRAL') != 'NEUTRAL':
                             from src.common.db import get_active_profile
                             profile = get_active_profile()
                             prof_min_impact = profile.get('min_impact', 75)
@@ -771,7 +891,7 @@ class AIdan:
                             dir_ok = prof_direction == 'any' or result.get('direction') == prof_direction
                             direction = result.get('direction', 'NEUTRAL')
 
-                            if score_ok and conf_ok and dir_ok and direction != 'NEUTRAL':
+                            if score_ok and conf_ok and dir_ok:
                                 try:
                                     from datetime import datetime as dt
                                     fetch_ts = get_news_fetch_time(news_id)
@@ -781,40 +901,58 @@ class AIdan:
                                         from datetime import timezone, timedelta as td
                                         ar_tz = timezone(td(hours=-3))
                                         age_min = (dt.now(ar_tz).replace(tzinfo=None) - fetch_time).total_seconds() / 60
-                                        is_fresh = age_min <= 10
+                                        is_fresh = age_min <= 30
                                         if not is_fresh:
-                                            logger.info(f"Skip auto-strategy: news {age_min:.0f}min old (max 10)")
+                                            logger.info(f"Skip auto-strategy: news {age_min:.0f}min old (max 30)")
 
                                     if is_fresh:
                                         market = tech.get_market_state()
                                         price = market.get('price', 0)
                                         if price > 0:
-                                            pip = 0.0001
-                                            if direction == 'CALL':
-                                                sl = round(price - prof_sl * pip, 5)
-                                                tp = round(price + prof_tp * pip, 5)
-                                            else:  # PUT
-                                                sl = round(price + prof_sl * pip, 5)
-                                                tp = round(price - prof_tp * pip, 5)
+                                            # Adaptive SL/TP based on ATR + structure levels
+                                            adaptive = tech.compute_adaptive_sl_tp(direction, price, market, profile)
+                                            sl = adaptive['sl']
+                                            tp = adaptive['tp']
 
-                                            # Get alert_id from DB (last inserted)
-                                            import sqlite3
-                                            from src.common.db import DB_PATH
-                                            conn = sqlite3.connect(DB_PATH)
-                                            c = conn.cursor()
-                                            c.execute("SELECT id FROM alerts WHERE news_id=? ORDER BY id DESC LIMIT 1", (news_id,))
-                                            row = c.fetchone()
-                                            conn.close()
-                                            if row:
-                                                sid = add_auto_strategy(
-                                                    alert_id=row[0], news_title=title,
-                                                    direction=direction, entry_price=price,
-                                                    stop_loss=sl, take_profit=tp,
-                                                    confidence=result.get('confidence', 50),
-                                                    impact_score=result['impact_score'])
-                                                if sid:
-                                                    strategies_created += 1
-                                                    logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f}")
+                                            # Adaptive expiry based on TP distance and current volatility
+                                            avg_range_pips = market.get('avg_range_pips', 5.0)
+                                            avg_range_pips = avg_range_pips if avg_range_pips > 0 else 5.0
+                                            expiry_min = max(15, int(adaptive['tp_pips'] / avg_range_pips * 5))
+                                            expiry_min = min(expiry_min, 60)  # cap at 60 min
+
+                                            # Spread gate: skip if estimated spread > 25% of SL
+                                            session_info = TechnicalAnalyzer.get_session_info()
+                                            est_spread = session_info['spread_est']
+                                            if est_spread > adaptive['sl_pips'] * 0.25:
+                                                logger.info(f"Spread gate: skipping news strategy, spread {est_spread:.1f}p > 25% of SL {adaptive['sl_pips']:.1f}p")
+                                            else:
+                                                # Adjust entry price for spread
+                                                half_spread = est_spread / 2
+                                                if direction == 'CALL':
+                                                    price = price + half_spread * 0.0001
+                                                else:
+                                                    price = price - half_spread * 0.0001
+
+                                                # Get alert_id from DB (last inserted)
+                                                import sqlite3
+                                                from src.common.db import DB_PATH
+                                                conn = sqlite3.connect(DB_PATH)
+                                                c = conn.cursor()
+                                                c.execute("SELECT id FROM alerts WHERE news_id=? ORDER BY id DESC LIMIT 1", (news_id,))
+                                                row = c.fetchone()
+                                                conn.close()
+                                                if row:
+                                                    sid = add_auto_strategy(
+                                                        alert_id=row[0], news_title=title,
+                                                        direction=direction, entry_price=price,
+                                                        stop_loss=sl, take_profit=tp,
+                                                        confidence=result.get('confidence', 50),
+                                                        impact_score=result['impact_score'],
+                                                        expiry_minutes=expiry_min)
+                                                    if sid:
+                                                        strategies_created += 1
+                                                        cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': result.get('confidence', 50)})
+                                                        logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}]")
                                 except Exception as e:
                                     logger.error(f"Auto-strategy error: {e}")
 
@@ -823,13 +961,180 @@ class AIdan:
                     if alerts_sent > 0 or strategies_created > 0:
                         logger.info(f"[{iteration}] Alerts: {alerts_sent} | Strategies: {strategies_created}")
 
-                    # ── Run auto-tuner optimization every 4h ──
+                    # ── Run auto-tuner optimization every 30min ──
                     try:
+                        logger.info(f"[{iteration}] AutoTuner: checking if optimization cycle is due...")
                         tuner_result = tuner.run_optimization()
                         if tuner_result:
-                            logger.info(f"[{iteration}] AutoTuner: {tuner_result.get('status')} | improvements={len(tuner_result.get('improvements', []))}")
+                            logger.info(f"[{iteration}] AutoTuner: {tuner_result.get('status')} | improvements={len(tuner_result.get('improvements', []))} | trades_analyzed={tuner_result.get('trades', 'N/A')}")
+                        else:
+                            logger.info(f"[{iteration}] AutoTuner: skipped (interval not reached yet)")
                     except Exception as e:
                         logger.error(f"AutoTuner error: {e}", exc_info=True)
+
+                    # ── Calendar Pre-News Trading: straddle before high-impact events ──
+                    try:
+                        from datetime import datetime as _cal_dt, timezone as _cal_tz, timedelta as _cal_td
+                        from src.analyzer.trading_knowledge import get_entry_rules_summary
+
+                        cal_resp = requests.get('http://localhost:8000/calendar', timeout=5)
+                        if cal_resp.status_code == 200:
+                            cal_events = cal_resp.json() if isinstance(cal_resp.json(), list) else cal_resp.json().get('data', [])
+                            utc_now = _cal_dt.now(_cal_tz.utc)
+                            entry_rules = get_entry_rules_summary()
+
+                            for evt in cal_events:
+                                try:
+                                    evt_impact = evt.get('impact', '').strip()
+                                    if evt_impact not in ('High', 'Medium'):
+                                        continue
+
+                                    # Parse event datetime
+                                    evt_date_str = evt.get('date', '')
+                                    if not evt_date_str:
+                                        continue
+                                    # Handle ISO format with timezone offset
+                                    try:
+                                        evt_dt = _cal_dt.fromisoformat(evt_date_str)
+                                    except (ValueError, TypeError):
+                                        continue
+                                    # Convert to UTC for comparison
+                                    if evt_dt.tzinfo is not None:
+                                        evt_utc = evt_dt.astimezone(_cal_tz.utc)
+                                    else:
+                                        evt_utc = evt_dt.replace(tzinfo=_cal_tz.utc)
+
+                                    # Only events in the next 30 minutes
+                                    minutes_until = (evt_utc - utc_now).total_seconds() / 60
+                                    if minutes_until < 0 or minutes_until > 30:
+                                        continue
+
+                                    # Dedup: build a unique key for this event
+                                    evt_key = f"{evt.get('event', '')}_{evt_date_str}"
+                                    if evt_key in _traded_calendar_events:
+                                        continue
+
+                                    evt_name = evt.get('event', 'Unknown Event')
+                                    evt_currency = evt.get('currency', '')
+                                    logger.info(f"[{iteration}] Calendar: {evt_name} ({evt_impact}) in {minutes_until:.0f}min - preparing straddle")
+
+                                    # Get market state
+                                    ms = tech.get_market_state()
+                                    price = ms.get('price', 0)
+                                    support = ms.get('support', 0)
+                                    resistance = ms.get('resistance', 0)
+                                    if price <= 0 or support <= 0 or resistance <= 0:
+                                        continue
+
+                                    from src.common.db import get_active_profile
+                                    profile = get_active_profile()
+
+                                    # Confidence boost based on impact
+                                    base_conf = profile.get('min_confidence', 60)
+                                    if evt_impact == 'High':
+                                        cal_conf_bonus = 15
+                                    else:
+                                        cal_conf_bonus = 5
+
+                                    # Capture candles snapshot for chart
+                                    cal_candles_snap = None
+                                    try:
+                                        raw_candles = tech._fetch_candles()
+                                        if raw_candles:
+                                            cal_candles_snap = [
+                                                {'o': round(c['open'], 5), 'h': round(c['high'], 5),
+                                                 'l': round(c['low'], 5), 'c': round(c['close'], 5),
+                                                 't': c['datetime']}
+                                                for c in raw_candles[-30:]
+                                            ]
+                                    except Exception:
+                                        pass
+
+                                    # STRADDLE: generate CALL above resistance and PUT below support
+                                    straddle_sides = [
+                                        {'direction': 'CALL', 'zone': resistance, 'label': f'CALL zona {resistance:.4f}'},
+                                        {'direction': 'PUT',  'zone': support,    'label': f'PUT zona {support:.4f}'},
+                                    ]
+
+                                    for side in straddle_sides:
+                                        direction = side['direction']
+                                        conf = base_conf + cal_conf_bonus
+
+                                        # Adaptive SL/TP
+                                        adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
+                                        sl = adaptive['sl']
+                                        tp = adaptive['tp']
+
+                                        # Spread gate: skip if estimated spread > 25% of SL
+                                        session_info = tech.get_session_info()
+                                        est_spread = session_info['spread_est']
+                                        if est_spread > adaptive['sl_pips'] * 0.25:
+                                            logger.info(f"Spread gate: skipping calendar {direction}, spread {est_spread:.1f}p > 25% of SL {adaptive['sl_pips']:.1f}p")
+                                            continue
+
+                                        # Adjust entry price for spread
+                                        entry_px = price
+                                        half_spread = est_spread / 2
+                                        if direction == 'CALL':
+                                            entry_px = price + half_spread * 0.0001
+                                        else:
+                                            entry_px = price - half_spread * 0.0001
+
+                                        # Adaptive expiry: use 30 min or ATR-based, whichever is larger
+                                        avg_range = ms.get('avg_range_pips', 5.0)
+                                        candles_needed = adaptive['tp_pips'] / max(avg_range, 1.0)
+                                        expiry_min = max(20, min(60, int(candles_needed * 5)))
+
+                                        # Impact score: high impact events get higher base score
+                                        cal_impact_score = 70 if evt_impact == 'High' else 50
+                                        # Add momentum/trend bonuses
+                                        mom = ms.get('momentum', '')
+                                        if (direction == 'CALL' and mom == 'up') or (direction == 'PUT' and mom == 'down'):
+                                            cal_impact_score += 8
+
+                                        # Source conflict resolution with prior cycle signals
+                                        for prior in cycle_signals:
+                                            if prior['direction'] == direction:
+                                                conf = min(95, conf + 10)
+                                                logger.info(f"Source agreement: calendar {direction} agrees with {prior['source']}, conf +10 -> {conf}")
+                                            else:
+                                                if conf <= prior['confidence']:
+                                                    conf = max(10, conf - 20)
+                                                    logger.info(f"Source conflict: calendar {direction} vs {prior['source']} {prior['direction']}, conf -20 -> {conf}")
+
+                                        news_title_cal = f"[CALENDARIO] Pre-{evt_name} ({evt_impact} Impact) - {side['label']}"
+                                        prof_name = profile.get('name', 'default')
+
+                                        sid = add_auto_strategy(
+                                            alert_id=None,
+                                            news_title=news_title_cal,
+                                            direction=direction,
+                                            entry_price=entry_px,
+                                            stop_loss=sl,
+                                            take_profit=tp,
+                                            confidence=conf,
+                                            impact_score=min(cal_impact_score, 100),
+                                            trigger_type='calendar',
+                                            candles_snapshot=cal_candles_snap,
+                                            profile_name=prof_name,
+                                            expiry_minutes=expiry_min)
+                                        if sid:
+                                            strategies_created += 1
+                                            cycle_signals.append({'source': 'calendar', 'direction': direction, 'confidence': conf})
+                                            logger.info(f"Calendar strategy #{sid}: {direction} @ {entry_px:.5f} SL={sl:.5f} TP={tp:.5f} | {evt_name} in {minutes_until:.0f}min")
+
+                                    # Mark this event as traded so we don't create duplicates next cycle
+                                    _traded_calendar_events.add(evt_key)
+
+                                except Exception as evt_err:
+                                    logger.error(f"Calendar event processing error: {evt_err}")
+                                    continue
+                        else:
+                            logger.debug(f"[{iteration}] Calendar endpoint returned {cal_resp.status_code}")
+                    except requests.exceptions.ConnectionError:
+                        logger.debug(f"[{iteration}] Calendar endpoint not available")
+                    except Exception as e:
+                        logger.error(f"Calendar pre-news error: {e}", exc_info=True)
 
                     # ── Structure scanner: generate strategies from market structure alone ──
                     try:
@@ -892,8 +1197,8 @@ class AIdan:
 
                             if call_score > 0 and put_score > 0:
                                 ratio = max(call_score, put_score) / min(call_score, put_score)
-                                if ratio < 1.15:
-                                    logger.info(f"[{iteration}] Structure: conflicting signals (CALL={call_score:.0f} vs PUT={put_score:.0f}), skipping")
+                                if ratio < 1.30:
+                                    logger.info(f"[{iteration}] Structure: conflicting signals (CALL={call_score:.0f} vs PUT={put_score:.0f}, ratio={ratio:.2f} < 1.30), skipping")
                                     structure_signals = []
                                 elif call_score > put_score:
                                     structure_signals = [max(call_sigs, key=lambda s: s['confidence'])]
@@ -921,28 +1226,87 @@ class AIdan:
                             for sig in structure_signals:
                                 direction = sig['direction']
                                 conf = sig['confidence']
-                                price = tech.get_market_state().get('price', 0)
+                                ms = tech.get_market_state()
+                                price = ms.get('price', 0)
                                 if price <= 0:
                                     break
-                                pip = 0.0001
+
+                                # Adaptive SL/TP based on ATR + structure levels
+                                adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
+                                sl = adaptive['sl']
+                                tp = adaptive['tp']
+
+                                # Spread gate: skip if estimated spread > 25% of SL
+                                session_info = tech.get_session_info()
+                                est_spread = session_info['spread_est']
+                                if est_spread > adaptive['sl_pips'] * 0.25:
+                                    logger.info(f"Spread gate: skipping structure strategy, spread {est_spread:.1f}p > 25% of SL {adaptive['sl_pips']:.1f}p")
+                                    continue
+                                # Adjust entry price for spread
+                                half_spread = est_spread / 2
                                 if direction == 'CALL':
-                                    sl = round(price - prof_sl * pip, 5)
-                                    tp = round(price + prof_tp * pip, 5)
+                                    price = price + half_spread * 0.0001
                                 else:
-                                    sl = round(price + prof_sl * pip, 5)
-                                    tp = round(price - prof_tp * pip, 5)
+                                    price = price - half_spread * 0.0001
+                                # Spread awareness: penalize confidence if spread is moderate
+                                spread_ratio = est_spread / max(adaptive['sl_pips'], 1)
+                                if spread_ratio > 0.15:
+                                    spread_penalty = int((spread_ratio - 0.10) * 30)  # ~1-5 points
+                                    conf = max(20, conf - spread_penalty)
+                                    logger.info(f"Spread penalty: {est_spread:.1f}p = {spread_ratio:.0%} of SL, conf -{spread_penalty} → {conf}")
+
+                                # Impact score: history-based when available, else dynamic
+                                struct_score = 40
+                                try:
+                                    from src.common.db import get_setup_win_rates
+                                    wr_data = get_setup_win_rates().get(sig.get('setup_type', ''), {})
+                                    if wr_data.get('total', 0) >= 3:
+                                        struct_score = int(30 + wr_data['win_rate'] * 0.7)
+                                    else:
+                                        struct_score += int(conf * 0.3)
+                                except Exception:
+                                    struct_score += int(conf * 0.3)
+                                # HTF alignment bonus
+                                if htf_bias and ((direction == 'CALL' and htf_bias == 'bullish') or
+                                                  (direction == 'PUT' and htf_bias == 'bearish')):
+                                    struct_score += 15
+                                # Trend strength bonus
+                                ts = ms.get('trend_strength', 'weak')
+                                if ts == 'strong': struct_score += 10
+                                elif ts == 'moderate': struct_score += 5
+                                # Momentum alignment
+                                mom = ms.get('momentum', '')
+                                if (direction == 'CALL' and mom == 'up') or (direction == 'PUT' and mom == 'down'):
+                                    struct_score += 8
+
+                                # Adaptive expiry: time needed for TP based on current ATR
+                                avg_range = ms.get('avg_range_pips', 5.0)
+                                candles_needed = adaptive['tp_pips'] / max(avg_range, 1.0)
+                                expiry_min = max(15, min(60, int(candles_needed * 5)))
+
+                                # Source conflict resolution: adjust conf based on agreement/conflict with prior signals
+                                for prior in cycle_signals:
+                                    if prior['direction'] == direction:
+                                        conf = min(95, conf + 10)
+                                        logger.info(f"Source agreement: structure {direction} agrees with {prior['source']}, conf +10 → {conf}")
+                                    else:
+                                        if conf <= prior['confidence']:
+                                            conf = max(10, conf - 20)
+                                            logger.info(f"Source conflict: structure {direction} vs {prior['source']} {prior['direction']}, conf -20 → {conf}")
 
                                 sid = add_auto_strategy(
                                     alert_id=None,
                                     news_title=f"[ESTRUCTURA] {sig['reason'][:80]}",
                                     direction=direction, entry_price=price,
                                     stop_loss=sl, take_profit=tp,
-                                    confidence=conf, impact_score=int(conf),
+                                    confidence=conf, impact_score=min(struct_score, 100),
                                     trigger_type='structure',
                                     candles_snapshot=candles_snap,
-                                    profile_name=prof_name)
+                                    profile_name=prof_name,
+                                    expiry_minutes=expiry_min)
                                 if sid:
                                     strategies_created += 1
+                                    cycle_signals.append({'source': 'structure', 'direction': direction, 'confidence': conf})
                                     logger.info(f"Structure strategy #{sid}: {direction} @ {price:.5f} | {sig['setup_type']} | {sig['reason'][:60]}")
                     except Exception as e:
                         logger.error(f"Structure scanner error: {e}", exc_info=True)
@@ -955,26 +1319,65 @@ class AIdan:
                         for setup in smc_setups:
                             direction = setup['direction']
                             conf = setup['confidence']
-                            price = tech.get_market_state().get('price', 0)
+                            ms = tech.get_market_state()
+                            price = ms.get('price', 0)
                             if price <= 0:
                                 break
-                            pip = 0.0001
+
+                            # Adaptive SL/TP
+                            adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
+                            sl = adaptive['sl']
+                            tp = adaptive['tp']
+
+                            # Spread gate: skip if estimated spread > 25% of SL
+                            session_info = tech.get_session_info()
+                            est_spread = session_info['spread_est']
+                            if est_spread > adaptive['sl_pips'] * 0.25:
+                                logger.info(f"Spread gate: skipping SMC strategy, spread {est_spread:.1f}p > 25% of SL {adaptive['sl_pips']:.1f}p")
+                                continue
+                            # Adjust entry price for spread
+                            half_spread = est_spread / 2
                             if direction == 'CALL':
-                                sl = round(price - prof_sl * pip, 5)
-                                tp = round(price + prof_tp * pip, 5)
+                                price = price + half_spread * 0.0001
                             else:
-                                sl = round(price + prof_sl * pip, 5)
-                                tp = round(price - prof_tp * pip, 5)
+                                price = price - half_spread * 0.0001
+
+                            # Adaptive expiry
+                            avg_range = ms.get('avg_range_pips', 5.0)
+                            candles_needed = adaptive['tp_pips'] / max(avg_range, 1.0)
+                            expiry_min = max(15, min(60, int(candles_needed * 5)))
+
+                            # Impact score: history-based when available, else confidence
+                            smc_impact = int(conf)
+                            try:
+                                from src.common.db import get_setup_win_rates
+                                smc_wr = get_setup_win_rates().get(setup.get('setup_type', 'smc'), {})
+                                if smc_wr.get('total', 0) >= 3:
+                                    smc_impact = int(30 + smc_wr['win_rate'] * 0.7)
+                            except Exception:
+                                pass
+
+                            # Source conflict resolution: adjust conf based on agreement/conflict with prior signals
+                            for prior in cycle_signals:
+                                if prior['direction'] == direction:
+                                    conf = min(95, conf + 10)
+                                    logger.info(f"Source agreement: SMC {direction} agrees with {prior['source']}, conf +10 → {conf}")
+                                else:
+                                    if conf <= prior['confidence']:
+                                        conf = max(10, conf - 20)
+                                        logger.info(f"Source conflict: SMC {direction} vs {prior['source']} {prior['direction']}, conf -20 → {conf}")
 
                             sid = add_auto_strategy(
                                 alert_id=None,
                                 news_title=f"[SMC] {setup['reason'][:80]}",
                                 direction=direction, entry_price=price,
                                 stop_loss=sl, take_profit=tp,
-                                confidence=conf, impact_score=int(conf),
-                                trigger_type='smc')
+                                confidence=conf, impact_score=smc_impact,
+                                trigger_type='smc',
+                                expiry_minutes=expiry_min)
                             if sid:
                                 strategies_created += 1
+                                cycle_signals.append({'source': 'smc', 'direction': direction, 'confidence': conf})
                                 logger.info(f"SMC strategy #{sid}: {direction} @ {price:.5f} | {setup['reason'][:60]}")
                     except Exception as e:
                         logger.error(f"SMC scanner error: {e}", exc_info=True)
@@ -982,8 +1385,20 @@ class AIdan:
                     if strategies_created > 0:
                         logger.info(f"[{iteration}] Total strategies created this cycle: {strategies_created}")
 
-                    # ── Auto-evaluate expired strategies ──
+                    # ── Mark expired strategies + auto-evaluate ──
                     try:
+                        # Expire active strategies past their expiry time
+                        try:
+                            import sqlite3 as _sq3
+                            _conn = _sq3.connect(DB_PATH)
+                            _conn.execute("""
+                                UPDATE auto_strategies SET status = 'expired'
+                                WHERE expires_at < ? AND status = 'active'
+                            """, (now_ar(),))
+                            _conn.commit()
+                            _conn.close()
+                        except Exception:
+                            pass
                         pending = get_strategies_pending_evaluation()
                         if pending:
                             candles = tech._fetch_candles()
@@ -998,9 +1413,14 @@ class AIdan:
                                 if not current_price or not entry_price:
                                     continue
 
-                                # Check if TP or SL was hit using candle history
+                                # Check if TP or SL was hit using candle history (with Break Even logic)
                                 hit_tp = False
                                 hit_sl = False
+                                hit_be = False
+                                # Break Even: 1:1 R:R distance from entry
+                                sl_distance = abs(entry_price - sl)
+                                be_target = (entry_price + sl_distance) if direction == 'CALL' else (entry_price - sl_distance)
+                                be_triggered = False
 
                                 if candles:
                                     from datetime import datetime as dt
@@ -1024,52 +1444,88 @@ class AIdan:
                                             if c_time < entry_ts:
                                                 continue
 
-                                            # Check highs/lows against TP/SL
+                                            # Check if 1:1 R:R was reached (BE trigger)
+                                            if not be_triggered:
+                                                if direction == 'CALL' and c['high'] >= be_target:
+                                                    be_triggered = True
+                                                elif direction == 'PUT' and c['low'] <= be_target:
+                                                    be_triggered = True
+
+                                            # Check highs/lows against TP/SL (with BE-adjusted SL)
                                             if direction == 'CALL':
                                                 if c['high'] >= tp:
                                                     hit_tp = True
                                                     break
-                                                if c['low'] <= sl:
-                                                    hit_sl = True
+                                                effective_sl = entry_price if be_triggered else sl
+                                                if c['low'] <= effective_sl:
+                                                    if be_triggered:
+                                                        hit_be = True
+                                                    else:
+                                                        hit_sl = True
                                                     break
                                             else:  # PUT
                                                 if c['low'] <= tp:
                                                     hit_tp = True
                                                     break
-                                                if c['high'] >= sl:
-                                                    hit_sl = True
+                                                effective_sl = entry_price if be_triggered else sl
+                                                if c['high'] >= effective_sl:
+                                                    if be_triggered:
+                                                        hit_be = True
+                                                    else:
+                                                        hit_sl = True
                                                     break
 
-                                # Determine result
+                                # Determine result (accounting for estimated spread)
                                 pip = 0.0001
+                                try:
+                                    from src.analyzer.technical import TechnicalAnalyzer
+                                    est_spread = TechnicalAnalyzer.get_session_info()['spread_est']
+                                except Exception:
+                                    est_spread = 1.0
+
                                 if hit_tp:
                                     result = 'win'
-                                    pips_result = abs(tp - entry_price) / pip
+                                    pips_result = abs(tp - entry_price) / pip - est_spread
+                                elif hit_be:
+                                    result = 'break_even'
+                                    pips_result = 0.0
                                 elif hit_sl:
                                     result = 'loss'
-                                    pips_result = -abs(sl - entry_price) / pip
+                                    pips_result = -(abs(sl - entry_price) / pip + est_spread)
                                 else:
                                     # Neither TP nor SL hit — evaluate by direction
                                     if direction == 'CALL':
-                                        pips_result = (current_price - entry_price) / pip
+                                        pips_result = (current_price - entry_price) / pip - est_spread
                                     else:
-                                        pips_result = (entry_price - current_price) / pip
+                                        pips_result = (entry_price - current_price) / pip - est_spread
                                     # AutoTuner: require minimum pip movement to count as win
                                     min_pips = tuner.get_params().get('min_pips_for_win', 1.5)
-                                    result = 'win' if pips_result >= min_pips else 'loss'
+                                    if be_triggered and pips_result < min_pips:
+                                        result = 'break_even'
+                                        pips_result = 0.0
+                                    else:
+                                        result = 'win' if pips_result >= min_pips else 'loss'
 
-                                exit_px = tp if hit_tp else (sl if hit_sl else current_price)
+                                exit_px = tp if hit_tp else (entry_price if hit_be else (sl if hit_sl else current_price))
 
+                                # Extract setup_type from news_title for learning
+                                _setup_type = ''
+                                _title_lower = (news_title or '').lower()
+                                for _st in ['breakout', 'breakdown', 'bb_rejection', 'reversal', 'momentum', 'crossover', 'continuation', 'rebote', 'rechazo', 'soporte', 'resistencia']:
+                                    if _st in _title_lower:
+                                        _setup_type = _st
+                                        break
                                 ctx = {
                                     'entry_price': entry_price,
                                     'direction': direction,
                                     'confidence': conf,
+                                    'setup_type': _setup_type,
                                     'trigger_type': trigger_type or '',
                                     'market_trend': tech.get_market_state().get('trend', ''),
                                     'rsi_at_entry': tech.get_market_state().get('rsi', 0),
                                 }
                                 auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
-                                method = 'TP hit' if hit_tp else ('SL hit' if hit_sl else f'price eval {current_price:.5f}')
+                                method = 'TP hit' if hit_tp else ('BE hit' if hit_be else ('SL hit' if hit_sl else f'price eval {current_price:.5f}'))
                                 logger.info(f"Auto-eval #{sid}: {result.upper()} | {direction} entry={entry_price:.5f} exit={exit_px:.5f} | {pips_result:+.1f}p | {method}")
 
                     except Exception as e:

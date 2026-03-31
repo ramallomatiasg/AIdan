@@ -40,14 +40,15 @@ DEFAULT_PARAMS = {
     # Level bounce/rejection
     'level_proximity_pips': 5,      # max pips from level for bounce/rejection
 
-    # Confidence base values
-    'conf_breakout': 70,
-    'conf_rsi_reversal': 72,
-    'conf_bb_rejection': 68,
-    'conf_momentum': 72,
-    'conf_ma_crossover': 65,
-    'conf_trend_cont': 62,
-    'conf_level_bounce': 55,
+    # Confidence base values (legacy — dynamic_conf() ignores these now,
+    # kept only for backward compatibility with tuner DB records)
+    'conf_breakout': 0,
+    'conf_rsi_reversal': 0,
+    'conf_bb_rejection': 0,
+    'conf_momentum': 0,
+    'conf_ma_crossover': 0,
+    'conf_trend_cont': 0,
+    'conf_level_bounce': 0,
 
     # Session filter (hours in UTC)
     'session_london_start': 7,
@@ -57,7 +58,7 @@ DEFAULT_PARAMS = {
     'block_outside_sessions': False,
 
     # Setup blocker
-    'min_trades_to_block': 8,       # need this many trades to block a setup
+    'min_trades_to_block': 5,       # need this many trades to block a setup
     'block_win_rate_threshold': 35,  # block setups below this win rate
 
     # Auto-eval minimum movement
@@ -102,7 +103,7 @@ class AutoTuner:
         self.db_path = db_path
         self._current_params = dict(DEFAULT_PARAMS)
         self._last_run = 0
-        self._run_interval = 4 * 3600  # run every 4 hours
+        self._run_interval = 30 * 60  # run every 30 minutes
         self._init_db_table()
         self._load_params()
 
@@ -317,7 +318,7 @@ class AutoTuner:
         from src.common.db import get_setup_win_rates
         rates = get_setup_win_rates()
         params = self._current_params
-        min_trades = params.get('min_trades_to_block', 8)
+        min_trades = params.get('min_trades_to_block', 5)
         threshold = params.get('block_win_rate_threshold', 35)
 
         conn = sqlite3.connect(self.db_path)
@@ -396,8 +397,8 @@ class AutoTuner:
         self.logger.info("AutoTuner: starting optimization cycle...")
 
         trades = self._get_trade_history()
-        if len(trades) < 10:
-            self.logger.info(f"AutoTuner: only {len(trades)} trades, need 10+ to optimize. Skipping.")
+        if len(trades) < 3:
+            self.logger.info(f"AutoTuner: only {len(trades)} trades, need 3+ to optimize. Skipping.")
             return {'status': 'insufficient_data', 'trades': len(trades)}
 
         # Evaluate current params as baseline
@@ -421,7 +422,7 @@ class AutoTuner:
 
                 # Better if: higher win rate with acceptable profit factor
                 # or similar win rate with much better profit factor
-                if total >= 5 and wr > best_wr + 1.0:  # at least 1% improvement
+                if total >= 3 and wr > best_wr + 1.0:  # at least 1% improvement
                     best_wr = wr
                     best_pf = pf
                     best_params[param_name] = val
@@ -434,7 +435,7 @@ class AutoTuner:
         session_stats = self._get_session_stats(trades)
         off_wr = session_stats.get('off', {}).get('win_rate', 50)
         off_total = session_stats.get('off', {}).get('total', 0)
-        if off_total >= 5 and off_wr < 35:
+        if off_total >= 3 and off_wr < 35:
             best_params['block_outside_sessions'] = True
             improvements.append(f"block_outside_sessions: False → True (off-hours WR={off_wr:.0f}%)")
 

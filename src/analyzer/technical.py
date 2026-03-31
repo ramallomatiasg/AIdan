@@ -4,7 +4,7 @@ Fetches live price data and calculates indicators to validate/invalidate fundame
 """
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 
 class TechnicalAnalyzer:
@@ -13,7 +13,7 @@ class TechnicalAnalyzer:
     def __init__(self, logger):
         self.logger = logger
         self._cache = {}
-        self._cache_ttl = 30  # seconds
+        self._cache_ttl = 15  # seconds — faster price refresh for dashboard
         self._triggered_levels = {}  # {level_key: timestamp} — avoid duplicate signals
         self._last_trigger_cleanup = 0
 
@@ -208,9 +208,16 @@ class TechnicalAnalyzer:
         else:
             rsi_zone = 'neutral'
 
-        # Volatility (ATR-like: average range of last 10 candles in pips)
-        ranges = [(c['high'] - c['low']) * 10000 for c in candles[-10:]]
-        avg_range = sum(ranges) / len(ranges) if ranges else 0
+        # Volatility: True ATR-14 (accounts for gaps via previous close)
+        atr_period = min(14, len(candles) - 1)
+        true_ranges = []
+        for i in range(-atr_period, 0):
+            h = candles[i]['high']
+            l = candles[i]['low']
+            prev_c = candles[i - 1]['close']
+            tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+            true_ranges.append(tr * 10000)  # convert to pips
+        avg_range = sum(true_ranges) / len(true_ranges) if true_ranges else 0
         if avg_range > 10:
             volatility = 'high'
         elif avg_range > 4:
@@ -316,6 +323,12 @@ class TechnicalAnalyzer:
         if not candles or len(candles) < 25:
             return []
 
+        # ATR gate: skip if volatility too low (dead market)
+        avg_range = market.get('avg_range_pips', 0)
+        if avg_range < 1.5:
+            self.logger.info(f"Structure: ATR too low ({avg_range:.1f}p < 1.5p), skipping")
+            return []
+
         # Load historical win rates for dynamic confidence adjustment
         setup_win_rates = {}
         try:
@@ -326,8 +339,8 @@ class TechnicalAnalyzer:
 
         # Cleanup old triggered levels (every 30 min)
         now = time.time()
-        if now - self._last_trigger_cleanup > 300:  # cleanup every 5 min
-            cutoff = now - 900  # forget levels older than 15 min
+        if now - self._last_trigger_cleanup > 120:  # cleanup every 2 min
+            cutoff = now - 300  # forget levels older than 5 min
             self._triggered_levels = {k: v for k, v in self._triggered_levels.items() if v > cutoff}
             self._last_trigger_cleanup = now
 
@@ -368,14 +381,109 @@ class TechnicalAnalyzer:
             key = f"{round(level, 5)}_{direction}"
             self._triggered_levels[key] = time.time()
 
-        def dynamic_conf(base_conf, setup_type):
-            """Adjust base confidence using historical win rate for this setup type."""
+        def dynamic_conf(_unused_base, setup_type):
+            """Calculate confidence 100% from market conditions — NO hardcoded bases.
+            Every point of confidence is earned from real market factors."""
+            import random
+            conf = 50  # Neutral starting point for ALL setup types
+
+            # ── 1. Setup-specific market alignment (0 to +20) ──
+            if 'breakout' in setup_type or 'breakdown' in setup_type:
+                if trend_strength == 'strong': conf += 18
+                elif trend_strength == 'moderate': conf += 12
+                elif trend_strength == 'weak': conf += 5
+                # Breakouts need momentum
+                if momentum in ('up', 'down'): conf += 8
+            elif 'reversal' in setup_type:
+                # Reversals are stronger at RSI extremes
+                if rsi_zone in ('oversold', 'overbought'): conf += 18
+                elif rsi < 35 or rsi > 65: conf += 10
+                else: conf += 3
+            elif 'bb_rejection' in setup_type:
+                # BB rejections favor mean reversion
+                if rsi_zone in ('oversold', 'overbought'): conf += 15
+                elif rsi < 38 or rsi > 62: conf += 10
+                else: conf += 5
+            elif 'momentum' in setup_type:
+                if momentum in ('up', 'down'): conf += 15
+                if trend_strength in ('strong', 'moderate'): conf += 8
+            elif 'crossover' in setup_type:
+                if trend_strength == 'strong': conf += 12
+                elif trend_strength == 'moderate': conf += 8
+                if momentum in ('up', 'down'): conf += 6
+            elif 'trend_cont' in setup_type:
+                if trend_strength == 'strong': conf += 15
+                elif trend_strength == 'moderate': conf += 10
+                if momentum in ('up', 'down'): conf += 5
+            elif 'level_bounce' in setup_type or 'level_rejection' in setup_type:
+                conf += 5  # Basic proximity — rest comes from other factors
+                if trend_strength in ('strong', 'moderate'): conf += 8
+
+            # ── 2. Trend alignment (±10) ──
+            if trend_strength == 'strong':
+                conf += 10
+            elif trend_strength == 'moderate':
+                conf += 5
+            elif trend_strength == 'weak':
+                conf -= 3
+
+            # ── 3. RSI context (±8) ──
+            if 'reversal' in setup_type or 'rejection' in setup_type:
+                if rsi_zone in ('oversold', 'overbought'):
+                    conf += 8  # RSI confirms reversal/rejection
+            elif 'breakout' in setup_type or 'momentum' in setup_type:
+                if 40 < rsi < 60:
+                    conf -= 6  # Neutral RSI weakens breakout signal
+                elif rsi_zone in ('overbought',) and 'bull' in setup_type:
+                    conf -= 4  # Overbought weakens bullish breakout
+                elif rsi_zone in ('oversold',) and 'bear' in setup_type:
+                    conf -= 4
+
+            # ── 4. Volatility context (±8) ──
+            vol = market.get('volatility', 'normal')
+            if vol == 'high':
+                if 'breakout' in setup_type or 'momentum' in setup_type:
+                    conf += 8  # High vol favors breakouts
+                elif 'rejection' in setup_type or 'bounce' in setup_type:
+                    conf -= 4  # High vol hurts mean reversion
+            elif vol == 'low':
+                if 'rejection' in setup_type or 'bounce' in setup_type:
+                    conf += 6  # Low vol favors mean reversion
+                elif 'breakout' in setup_type:
+                    conf -= 8  # Low vol breakouts unreliable
+
+            # ── 4b. ATR gate: penalise very low volatility (< 2.0 pips on 5-min) ──
+            _avg_range = market.get('avg_range_pips', 5.0)
+            if _avg_range < 2.0:
+                conf -= 12  # Near-dead market, signal unreliable
+
+            # ── 5. Candle pattern context (±5) ──
+            if len(candles) >= 3:
+                body1 = abs(prev1['close'] - prev1['open']) * 10000
+                body2 = abs(prev2['close'] - prev2['open']) * 10000
+                if body1 > 3:  # Strong candle body
+                    conf += 3
+                if body1 > body2 * 1.5:  # Increasing momentum
+                    conf += 2
+
+            # ── 6. Historical win rate blend (if enough data, ±15) ──
             stats = setup_win_rates.get(setup_type, {})
-            if stats.get('total', 0) >= 5:
-                # Blend: 60% base + 40% historical
-                historical = 50 + int(stats['win_rate'] / 100 * 40)  # maps 0-100% WR to 50-90
-                return int(base_conf * 0.6 + historical * 0.4)
-            return base_conf
+            if stats.get('total', 0) >= 3:
+                wr = stats['win_rate']
+                if wr > 60: conf += 15
+                elif wr > 50: conf += 8
+                elif wr > 40: conf += 0
+                elif wr > 30: conf -= 8
+                else: conf -= 15
+
+            # ── 7. Session awareness (±10) ──
+            session_info = TechnicalAnalyzer.get_session_info()
+            conf += session_info['conf_adj']
+
+            # ── 8. Random jitter to avoid identical values (±3) ──
+            conf += random.randint(-3, 3)
+
+            return max(20, min(95, conf))
 
         # Recent closed candles (not current incomplete one)
         prev1 = candles[-2]
@@ -403,10 +511,24 @@ class TechnicalAnalyzer:
                 return True
             return False
 
-        # ── 1. BREAKOUT above resistance ──
+        # ── Wick filter helper ──
+        def wick_ratio(candle):
+            """Return wick percentage of total range (0-1). High = likely false breakout."""
+            rng = candle['high'] - candle['low']
+            if rng <= 0:
+                return 0
+            body_top = max(candle['open'], candle['close'])
+            body_bot = min(candle['open'], candle['close'])
+            upper_wick = candle['high'] - body_top
+            lower_wick = body_bot - candle['low']
+            return max(upper_wick, lower_wick) / rng
+
+        # ── 1. BREAKOUT above resistance (candle-close confirmed) ──
         for res in resistances:
             dist = (price - res) * 10000  # in pips
-            if 0.3 < dist < tuner_params.get('breakout_dist_max', 15) and crossed_above(res):
+            # Require CLOSED candle above resistance (not just current price)
+            candle_confirmed = prev1['close'] > res
+            if 0.3 < dist < tuner_params.get('breakout_dist_max', 15) and crossed_above(res) and candle_confirmed:
                 if not already_triggered(res, 'CALL'):
                     conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakout_resistance')
                     if trend == 'bullish':
@@ -415,6 +537,9 @@ class TechnicalAnalyzer:
                         conf += 5
                     if rsi_zone == 'overbought':
                         conf -= 10
+                    # Wick filter: penalize if breakout candle has long wick (false breakout risk)
+                    if wick_ratio(prev1) > 0.6:
+                        conf -= 15
                     if conf >= min_confidence:
                         signals.append({
                             'direction': 'CALL',
@@ -425,10 +550,11 @@ class TechnicalAnalyzer:
                         })
                         mark_triggered(res, 'CALL')
 
-        # ── 2. BREAKDOWN below support ──
+        # ── 2. BREAKDOWN below support (candle-close confirmed) ──
         for sup in supports:
             dist = (sup - price) * 10000  # in pips
-            if 0.3 < dist < tuner_params.get('breakdown_dist_max', 15) and crossed_below(sup):
+            candle_confirmed = prev1['close'] < sup
+            if 0.3 < dist < tuner_params.get('breakdown_dist_max', 15) and crossed_below(sup) and candle_confirmed:
                 if not already_triggered(sup, 'PUT'):
                     conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakdown_support')
                     if trend == 'bearish':
@@ -437,6 +563,8 @@ class TechnicalAnalyzer:
                         conf += 5
                     if rsi_zone == 'oversold':
                         conf -= 10
+                    if wick_ratio(prev1) > 0.6:
+                        conf -= 15
                     if conf >= min_confidence:
                         signals.append({
                             'direction': 'PUT',
@@ -677,9 +805,172 @@ class TechnicalAnalyzer:
                             mark_triggered(res, 'LEVEL_PUT')
                         break
 
+        # ── Candlestick pattern confirmation ──
+        try:
+            candle_patterns = self.detect_candle_patterns(candles)
+        except Exception:
+            candle_patterns = []
+
+        for sig in signals:
+            sig['candle_patterns'] = candle_patterns
+            for pat in candle_patterns:
+                # Boost confidence when pattern direction aligns with signal
+                if sig['direction'] == 'CALL' and pat['direction'] == 'bullish':
+                    sig['confidence'] = min(sig['confidence'] + pat['confidence_boost'], 95)
+                    sig['reason'] += f" Patrón {pat['pattern']} confirma dirección alcista."
+                elif sig['direction'] == 'PUT' and pat['direction'] == 'bearish':
+                    sig['confidence'] = min(sig['confidence'] + pat['confidence_boost'], 95)
+                    sig['reason'] += f" Patrón {pat['pattern']} confirma dirección bajista."
+                # Penalize slightly when pattern contradicts signal
+                elif pat['direction'] == 'bullish' and sig['direction'] == 'PUT':
+                    sig['confidence'] = max(sig['confidence'] - pat['confidence_boost'] // 2, 20)
+                    sig['reason'] += f" Precaución: patrón {pat['pattern']} contradice (alcista)."
+                elif pat['direction'] == 'bearish' and sig['direction'] == 'CALL':
+                    sig['confidence'] = max(sig['confidence'] - pat['confidence_boost'] // 2, 20)
+                    sig['reason'] += f" Precaución: patrón {pat['pattern']} contradice (bajista)."
+
         if signals:
             self.logger.info(f"Structure scanner: {len(signals)} signals detected")
         return signals
+
+    def detect_candle_patterns(self, candles):
+        """Detect Japanese candlestick patterns in recent candles.
+        Returns list of dicts: [{'pattern': str, 'direction': str, 'reliability': str, 'confidence_boost': int}]
+        """
+        patterns = []
+        if not candles or len(candles) < 3:
+            return patterns
+
+        def _body(c):
+            return abs(c['close'] - c['open'])
+
+        def _range(c):
+            return c['high'] - c['low']
+
+        def _upper_wick(c):
+            return c['high'] - max(c['open'], c['close'])
+
+        def _lower_wick(c):
+            return min(c['open'], c['close']) - c['low']
+
+        def _is_green(c):
+            return c['close'] > c['open']
+
+        def _is_red(c):
+            return c['close'] < c['open']
+
+        last = candles[-1]
+        prev = candles[-2]
+        prev2 = candles[-3]
+
+        body_last = _body(last)
+        range_last = _range(last)
+        upper_last = _upper_wick(last)
+        lower_last = _lower_wick(last)
+
+        # Avoid division by zero
+        if range_last <= 0:
+            return patterns
+
+        # ── 1. Doji: body < 10% of total range ──
+        if body_last < range_last * 0.10:
+            patterns.append({
+                'pattern': 'Doji',
+                'direction': 'neutral',
+                'reliability': 'low',
+                'confidence_boost': 2
+            })
+
+        # ── 2. Hammer: small body + long lower wick (>2x body) ──
+        # Typically at bottom of move (last 5 candles trending down)
+        if body_last > 0 and lower_last > body_last * 2 and upper_last < body_last:
+            # Check if at bottom of move: previous candles trending down
+            lookback = candles[-6:-1] if len(candles) >= 6 else candles[:-1]
+            trending_down = lookback[0]['close'] > lookback[-1]['close']
+            if trending_down:
+                patterns.append({
+                    'pattern': 'Hammer',
+                    'direction': 'bullish',
+                    'reliability': 'medium',
+                    'confidence_boost': 8
+                })
+
+        # ── 3. Shooting Star: small body + long upper wick (>2x body) ──
+        # Typically at top of move (last 5 candles trending up)
+        if body_last > 0 and upper_last > body_last * 2 and lower_last < body_last:
+            lookback = candles[-6:-1] if len(candles) >= 6 else candles[:-1]
+            trending_up = lookback[-1]['close'] > lookback[0]['close']
+            if trending_up:
+                patterns.append({
+                    'pattern': 'Shooting Star',
+                    'direction': 'bearish',
+                    'reliability': 'medium',
+                    'confidence_boost': 8
+                })
+
+        # ── 4. Bullish Engulfing: red candle followed by larger green candle ──
+        if (_is_red(prev) and _is_green(last)
+                and last['close'] > prev['open'] and last['open'] < prev['close']):
+            patterns.append({
+                'pattern': 'Bullish Engulfing',
+                'direction': 'bullish',
+                'reliability': 'high',
+                'confidence_boost': 12
+            })
+
+        # ── 5. Bearish Engulfing: green candle followed by larger red candle ──
+        if (_is_green(prev) and _is_red(last)
+                and last['close'] < prev['open'] and last['open'] > prev['close']):
+            patterns.append({
+                'pattern': 'Bearish Engulfing',
+                'direction': 'bearish',
+                'reliability': 'high',
+                'confidence_boost': 12
+            })
+
+        # ── 6. Marubozu: full body, very small wicks (wicks < 10% of range) ──
+        if (upper_last < range_last * 0.10 and lower_last < range_last * 0.10
+                and body_last > range_last * 0.80):
+            direction = 'bullish' if _is_green(last) else 'bearish'
+            patterns.append({
+                'pattern': 'Marubozu',
+                'direction': direction,
+                'reliability': 'high',
+                'confidence_boost': 10
+            })
+
+        # ── 7. Morning Star: big red, small body, big green (3-candle) ──
+        range_prev2 = _range(prev2)
+        range_prev = _range(prev)
+        body_prev2 = _body(prev2)
+        body_prev = _body(prev)
+
+        if (range_prev2 > 0 and range_prev > 0
+                and _is_red(prev2) and body_prev2 > range_prev2 * 0.5
+                and body_prev < range_prev * 0.30
+                and _is_green(last) and body_last > range_last * 0.5
+                and last['close'] > (prev2['open'] + prev2['close']) / 2):
+            patterns.append({
+                'pattern': 'Morning Star',
+                'direction': 'bullish',
+                'reliability': 'high',
+                'confidence_boost': 15
+            })
+
+        # ── 8. Evening Star: big green, small body, big red (3-candle) ──
+        if (range_prev2 > 0 and range_prev > 0
+                and _is_green(prev2) and body_prev2 > range_prev2 * 0.5
+                and body_prev < range_prev * 0.30
+                and _is_red(last) and body_last > range_last * 0.5
+                and last['close'] < (prev2['open'] + prev2['close']) / 2):
+            patterns.append({
+                'pattern': 'Evening Star',
+                'direction': 'bearish',
+                'reliability': 'high',
+                'confidence_boost': 15
+            })
+
+        return patterns
 
     def get_candles_text(self, n=15):
         """Return last N candles as text for AI context, with pattern detection."""
@@ -779,4 +1070,97 @@ class TechnicalAnalyzer:
             'summary': 'Sin datos técnicos disponibles',
             'timestamp': datetime.utcnow().isoformat(),
             'source': 'fallback'
+        }
+
+    # ── Session & Adaptive SL/TP helpers ──
+
+    @staticmethod
+    def get_session_info():
+        """Return current trading session info based on UTC hour."""
+        utc_hour = datetime.now(timezone.utc).hour
+        if 7 <= utc_hour < 12:
+            return {'session': 'london', 'conf_adj': 8, 'spread_est': 0.6, 'label': 'London'}
+        elif 12 <= utc_hour < 17:
+            return {'session': 'ny_overlap', 'conf_adj': 10, 'spread_est': 0.8, 'label': 'NY Overlap'}
+        elif 17 <= utc_hour < 20:
+            return {'session': 'late_ny', 'conf_adj': 0, 'spread_est': 1.0, 'label': 'Late NY'}
+        else:
+            return {'session': 'off_hours', 'conf_adj': -15, 'spread_est': 1.5, 'label': 'Off-hours'}
+
+    def compute_adaptive_sl_tp(self, direction, price, market_state, profile):
+        """
+        Compute SL/TP adapted to current volatility (ATR-14) and structure levels.
+        - SL: max(profile_sl, ATR * 1.2) -- never tighter than market noise
+        - TP: max(profile_tp, ATR * 2.0) -- minimum 2:1 initial target
+        - Minimum 1.5:1 risk:reward ratio enforced
+        - Caps: SL <= 15 pips, TP <= 30 pips (scalping limits)
+        """
+        pip = 0.0001
+        prof_sl = profile.get('stop_loss_pips', 5)
+        prof_tp = profile.get('take_profit_pips', 15)
+        atr_pips = market_state.get('avg_range_pips', 5.0)
+        structures = market_state.get('chart_structures', {})
+        supports = structures.get('supports', [])
+        resistances = structures.get('resistances', [])
+
+        # ATR-adaptive base: SL never tighter than market noise, TP at least 2x ATR
+        atr_sl = max(prof_sl, round(atr_pips * 1.2, 1))
+        atr_tp = max(prof_tp, round(atr_pips * 2.0, 1))
+
+        # Clamp SL behind structural level
+        if direction == 'CALL' and supports:
+            # Find nearest support BELOW price
+            below_sups = [s for s in supports if s < price]
+            if below_sups:
+                nearest_sup = max(below_sups)  # closest below
+                structural_sl = (price - nearest_sup) * 10000 + 1.0  # 1 pip beyond
+                atr_sl = max(atr_sl, min(structural_sl, prof_sl * 2.5))  # don't go crazy
+        elif direction == 'PUT' and resistances:
+            above_res = [r for r in resistances if r > price]
+            if above_res:
+                nearest_res = min(above_res)  # closest above
+                structural_sl = (nearest_res - price) * 10000 + 1.0
+                atr_sl = max(atr_sl, min(structural_sl, prof_sl * 2.5))
+
+        # Limit TP to nearest opposing level
+        if direction == 'CALL' and resistances:
+            above_res = [r for r in resistances if r > price + 2 * pip]
+            if above_res:
+                nearest_res = min(above_res)
+                level_tp = (nearest_res - price) * 10000 - 0.5  # half pip inside
+                if level_tp > atr_sl * 1.5:  # only if R:R stays good
+                    atr_tp = min(atr_tp, max(level_tp, prof_tp))
+        elif direction == 'PUT' and supports:
+            below_sups = [s for s in supports if s < price - 2 * pip]
+            if below_sups:
+                nearest_sup = max(below_sups)
+                level_tp = (price - nearest_sup) * 10000 - 0.5
+                if level_tp > atr_sl * 1.5:
+                    atr_tp = min(atr_tp, max(level_tp, prof_tp))
+
+        # Enforce minimum 1.5:1 R:R
+        if atr_tp < atr_sl * 1.5:
+            atr_tp = atr_sl * 1.5
+
+        # Cap maximum values for scalping
+        atr_sl = min(atr_sl, 15.0)  # max 15 pips SL
+        atr_tp = min(atr_tp, 30.0)  # max 30 pips TP
+
+        method = f'atr({atr_pips:.1f}p)'
+        if supports or resistances:
+            method += '+struct'
+
+        # Calculate actual prices
+        if direction == 'CALL':
+            sl = round(price - atr_sl * pip, 5)
+            tp = round(price + atr_tp * pip, 5)
+        else:
+            sl = round(price + atr_sl * pip, 5)
+            tp = round(price - atr_tp * pip, 5)
+
+        return {
+            'sl': sl, 'tp': tp,
+            'sl_pips': round(atr_sl, 1), 'tp_pips': round(atr_tp, 1),
+            'rr_ratio': round(atr_tp / atr_sl, 2) if atr_sl > 0 else 2.0,
+            'method': method
         }

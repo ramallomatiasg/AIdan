@@ -225,6 +225,31 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 - Auto-evaluacion mejorada con minimo de pips para win
 - Logging mejorado con uvicorn compatible con exe congelado
 
+### v3.1.0 (31 Mar 2026)
+- Deteccion de patrones de velas japonesas (hammer, engulfing, shooting star, doji, morning/evening star, marubozu)
+- Boost/penalizacion de confianza segun patron confirme o contradiga la senal
+- Calendar Pre-News Trading: genera estrategias straddle 30 min antes de datos High Impact
+- Break Even automatico: SL se mueve a entry cuando precio alcanza 1:1 R:R
+- Nuevo status auto_break_even (no cuenta como win ni loss)
+- Dashboard segmentado por tipo: NEWS / ESTRUCTURA / SMC / CALENDARIO / PATRON
+- Filtros por trigger_type en panel de estrategias
+- Base de conocimiento profesional: VWAP, Order Flow, velas, break even, scalping EUR/USD
+- Versionado semantico MAJOR.MINOR.PATCH
+
+### v3.0.0 (31 Mar 2026)
+- SL/TP adaptativo por ATR (ya no fijo 5/10 pips)
+- Confirmacion de cierre de vela anti-mecha para breakouts
+- Confianza dinamica por sesion de trading (London/NY boost, Asian penalty)
+- Expiracion adaptativa 15-60 min segun volatilidad
+- Gate de spread (no genera si spread > 25% del SL)
+- Resolucion de conflictos entre fuentes (news vs structure vs SMC)
+- Impact score basado en historial real de win rates
+- Evaluacion de estrategias pendientes al reiniciar
+- Calendario economico (Forex Factory) inyectado al news analyzer
+- Deteccion de Groq API key expirada con fallback a Ollama mejorado
+- Version centralizada en Config con endpoint /version
+- Dashboard lee version del server dinamicamente
+
 ### v2.2 (20 Mar 2026)
 - Smart Money Concepts (SMC): analisis multi-temporalidad H1/M15/M5
 - Panel visual de tendencias con estructura HH/HL/LH/LL

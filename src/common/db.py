@@ -14,20 +14,16 @@ def today_ar():
     return datetime.now(TZ_AR).strftime('%Y-%m-%d')
 
 def _get_base_dir():
-    """Get the base directory for state files (works for dev and PyInstaller .exe)."""
+    """Always use %APPDATA%/AIdan/ — single DB for both dev and exe."""
+    appdata = os.environ.get('APPDATA', '')
+    if appdata:
+        base = os.path.join(appdata, 'AIdan')
+        os.makedirs(base, exist_ok=True)
+        return base
+    # Fallback: project root
     if getattr(sys, 'frozen', False):
-        # For the portable exe, always use %APPDATA%/AIdan/ for persistent data.
-        # This prevents data loss when running from RAR temp folders or moving the exe.
-        appdata = os.environ.get('APPDATA', '')
-        if appdata:
-            base = os.path.join(appdata, 'AIdan')
-            os.makedirs(base, exist_ok=True)
-            return base
-        # Fallback: directory where the exe lives
         return os.path.dirname(sys.executable)
-    else:
-        # Running as script — project root (2 levels up from src/common/)
-        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sys
 _BASE_DIR = _get_base_dir()
@@ -120,7 +116,7 @@ def init_db():
             take_profit REAL,
             confidence REAL,
             impact_score INTEGER,
-            expiry_minutes INTEGER DEFAULT 5,
+            expiry_minutes INTEGER DEFAULT 15,
             status TEXT DEFAULT 'active',
             created_at TIMESTAMP,
             expires_at TIMESTAMP,
@@ -276,7 +272,7 @@ def get_recent_alerts(limit=50):
                n.published_at
         FROM alerts a
         JOIN news n ON a.news_id = n.id
-        WHERE date(a.alert_sent_at) = date(?)
+        WHERE a.alert_sent_at >= datetime(?, '-3 days')
         ORDER BY a.alert_sent_at DESC
         LIMIT ?
     """, (today_ar(), min(limit, 50),))
@@ -370,7 +366,7 @@ def get_active_profile():
     # Defaults (conservative)
     return {
         'min_impact': 50, 'min_confidence': 55, 'direction': 'any',
-        'stop_loss_pips': 5, 'take_profit_pips': 15, 'expiry_minutes': 5
+        'stop_loss_pips': 5, 'take_profit_pips': 15, 'expiry_minutes': 15
     }
 
 def cleanup_old_data(hours=72):
@@ -390,39 +386,33 @@ def cleanup_old_data(hours=72):
 
 # ── Auto-Strategy functions ──
 
-def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, take_profit, confidence, impact_score, expiry_minutes=5, trigger_type='news', candles_snapshot=None, profile_name=None):
+def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, take_profit, confidence, impact_score, expiry_minutes=15, trigger_type='news', candles_snapshot=None, profile_name=None):
     """Add auto-generated strategy, enforcing max 6 cap and dedup.
     alert_id can be None for structure-triggered strategies."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
-        # Dedup: skip if a strategy with same direction exists within 15 min and ~8 pips
-        cutoff = now_ar() - timedelta(minutes=15)
+        # Get cooldown from active profile (default 2 min)
+        try:
+            profile = get_active_profile()
+            cooldown_min = profile.get('cooldown_minutes', 2)
+        except Exception:
+            cooldown_min = 2
+
+        # Dedup: skip if a strategy with same direction exists within cooldown and ~5 pips
+        cutoff = now_ar() - timedelta(minutes=max(cooldown_min * 2, 3))
         cursor.execute("""
             SELECT id, entry_price FROM auto_strategies
             WHERE direction = ? AND created_at > ?
         """, (direction, cutoff))
         for row in cursor.fetchall():
             existing_price = row[1] or 0
-            if abs(existing_price - entry_price) < 0.0008:  # within 8 pips
+            if abs(existing_price - entry_price) < 0.0005:  # within 5 pips
                 conn.close()
                 return None  # duplicate, skip
 
-        # Anti-contradiction: skip if OPPOSITE direction was created within 15 min
-        # This prevents CALL after recent PUT and vice versa
-        opposite = 'PUT' if direction == 'CALL' else 'CALL'
-        cursor.execute("""
-            SELECT id FROM auto_strategies
-            WHERE direction = ? AND created_at > ?
-            LIMIT 1
-        """, (opposite, cutoff))
-        if cursor.fetchone():
-            conn.close()
-            return None  # contradictory, skip
-
-        # Also: skip if ANY strategy (regardless of direction) was created within 5 min
-        # Prevents flooding with too many strategies
-        recent_cutoff = now_ar() - timedelta(minutes=5)
+        # Global cooldown: skip if ANY strategy was created within cooldown_minutes
+        recent_cutoff = now_ar() - timedelta(minutes=cooldown_min)
         cursor.execute("""
             SELECT id FROM auto_strategies WHERE created_at > ? LIMIT 1
         """, (recent_cutoff,))
@@ -570,13 +560,15 @@ def get_strategy_performance():
     cursor.execute("SELECT result, COUNT(*) FROM strategy_results GROUP BY result")
     rows = cursor.fetchall()
     conn.close()
-    stats = {'wins': 0, 'losses': 0, 'skips': 0}
+    stats = {'wins': 0, 'losses': 0, 'skips': 0, 'break_evens': 0}
     for result, count in rows:
         if result == 'win': stats['wins'] = count
         elif result == 'loss': stats['losses'] = count
         elif result == 'skip': stats['skips'] = count
-    total = stats['wins'] + stats['losses']
+        elif result == 'break_even': stats['break_evens'] = count
+    total = stats['wins'] + stats['losses']  # BE excluded from win rate
     stats['total'] = total
+    stats['total_resolved'] = total + stats['break_evens']
     stats['win_rate'] = round((stats['wins'] / total * 100) if total > 0 else 0, 1)
     return stats
 
@@ -626,8 +618,9 @@ def auto_evaluate_strategy(strategy_id, result, exit_price, pips, market_context
               ctx.get('direction', ''), ctx.get('confidence', 0),
               ctx.get('setup_type', ''), ctx.get('trigger_type', ''),
               ctx.get('market_trend', ''), ctx.get('rsi_at_entry', 0), ctx.get('htf_bias', '')))
+        status_map = {'win': 'auto_win', 'loss': 'auto_loss', 'break_even': 'auto_break_even'}
         cursor.execute("UPDATE auto_strategies SET status = ? WHERE id = ?",
-                       ('auto_win' if result == 'win' else 'auto_loss', strategy_id))
+                       (status_map.get(result, 'auto_loss'), strategy_id))
         conn.commit()
     finally:
         conn.close()
@@ -767,7 +760,7 @@ def get_learned_lessons():
     """Generate learned lessons text for AI prompts based on trade history.
     Returns a string with patterns detected from past results."""
     trades = get_detailed_trade_history(50)
-    if len(trades) < 5:
+    if len(trades) < 2:
         return ""
 
     lines = [f"\nLECCIONES APRENDIDAS ({len(trades)} operaciones analizadas):"]
@@ -786,7 +779,7 @@ def get_learned_lessons():
             dir_stats[d]['losses'] += 1
     for d, s in dir_stats.items():
         total = s['wins'] + s['losses']
-        if total >= 3:
+        if total >= 2:
             wr = round(s['wins'] / total * 100)
             lines.append(f"  - {d}: {wr}% acierto ({s['wins']}W/{s['losses']}L)")
 
@@ -795,7 +788,7 @@ def get_learned_lessons():
     if setup_stats:
         lines.append("  Setups:")
         for setup, s in sorted(setup_stats.items(), key=lambda x: x[1].get('win_rate', 0), reverse=True):
-            if s['total'] >= 3:
+            if s['total'] >= 2:
                 label = setup.replace('_', ' ').title()
                 emoji = '✅' if s['win_rate'] >= 60 else '⚠️' if s['win_rate'] >= 40 else '❌'
                 lines.append(f"    {emoji} {label}: {s['win_rate']}% ({s['wins']}W/{s['losses']}L)")
@@ -816,10 +809,10 @@ def get_learned_lessons():
 
     w_total = htf_aligned['with']['w'] + htf_aligned['with']['l']
     a_total = htf_aligned['against']['w'] + htf_aligned['against']['l']
-    if w_total >= 3:
+    if w_total >= 2:
         wr = round(htf_aligned['with']['w'] / w_total * 100)
         lines.append(f"  - A FAVOR de HTF: {wr}% acierto ({w_total} trades)")
-    if a_total >= 3:
+    if a_total >= 2:
         wr = round(htf_aligned['against']['w'] / a_total * 100)
         lines.append(f"  - CONTRA HTF: {wr}% acierto ({a_total} trades) {'← EVITAR' if wr < 40 else ''}")
 
@@ -839,7 +832,7 @@ def get_learned_lessons():
             conf_brackets[b]['l'] += 1
     for bracket, s in conf_brackets.items():
         total = s['w'] + s['l']
-        if total >= 3:
+        if total >= 2:
             wr = round(s['w'] / total * 100)
             lines.append(f"  - Confianza {bracket}: {wr}% acierto ({total} trades)")
 

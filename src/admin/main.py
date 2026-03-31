@@ -26,6 +26,8 @@ logger = setup_logging(__name__, Config.LOG_LEVEL)
 
 
 # Groq API helper (free, Llama 70B)
+_groq_status = {"ok": True, "last_error": "", "last_error_time": None}
+
 def _call_groq(messages, temperature=0.75, max_tokens=600):
     """Call Groq API (OpenAI-compatible). Returns response text or None."""
     api_key = Config.GROQ_API_KEY
@@ -47,15 +49,32 @@ def _call_groq(messages, temperature=0.75, max_tokens=600):
         if resp.status_code == 200:
             content = resp.json()['choices'][0]['message']['content']
             logger.info(f"Groq response OK ({len(content)} chars)")
+            _groq_status["ok"] = True
+            _groq_status["last_error"] = ""
             return content
         else:
-            logger.warning(f"Groq error {resp.status_code}: {resp.text[:200]}")
+            error_msg = resp.text[:300]
+            _groq_status["last_error"] = f"HTTP {resp.status_code}: {error_msg}"
+            _groq_status["last_error_time"] = __import__('datetime').datetime.now().isoformat()
+            if resp.status_code == 401:
+                _groq_status["ok"] = False
+                logger.error(f"⚠️ GROQ API KEY EXPIRADA O INVÁLIDA. Renovar en console.groq.com")
+            elif resp.status_code == 429:
+                logger.warning(f"Groq rate limit alcanzado. Usando Ollama como fallback.")
+            else:
+                logger.warning(f"Groq error {resp.status_code}: {error_msg}")
             return None
     except Exception as e:
+        _groq_status["last_error"] = str(e)
+        _groq_status["last_error_time"] = __import__('datetime').datetime.now().isoformat()
         logger.warning(f"Groq unavailable: {e}")
         return None
 
-app = FastAPI(title="Financial News Monitor API", version="3.0.0")
+app = FastAPI(title="Financial News Monitor API", version=Config.VERSION)
+
+@app.get("/version")
+def get_version():
+    return {"version": Config.VERSION}
 
 # UTC ISO helper — SQLite stores "2026-03-17 13:44:18.439" without timezone
 def _utc_iso(ts_str):
@@ -63,6 +82,12 @@ def _utc_iso(ts_str):
     if not ts_str:
         return ts_str
     return ts_str.replace(' ', 'T').split('.')[0] + '-03:00'
+
+def _published_iso(ts_str):
+    """Convert published_at (already UTC from RSS feeds) to ISO 8601."""
+    if not ts_str:
+        return ts_str
+    return ts_str.replace(' ', 'T').split('.')[0] + 'Z'
 
 # Vision model detection
 _vision_model_cache = {'model': None, 'checked': 0}
@@ -166,13 +191,19 @@ async def ai_status():
         has_ollama = r.status_code == 200
     except:
         pass
-    primary = "groq" if has_groq else ("ollama" if has_ollama else "keywords")
-    return JSONResponse({
+    groq_healthy = has_groq and _groq_status["ok"]
+    primary = "groq" if groq_healthy else ("ollama" if has_ollama else "keywords")
+    result = {
         "primary": primary,
         "groq_available": has_groq,
+        "groq_healthy": groq_healthy,
         "ollama_available": has_ollama,
-        "model": Config.GROQ_MODEL if has_groq else "llama3.1:8b"
-    })
+        "model": Config.GROQ_MODEL if groq_healthy else "llama3.1:8b"
+    }
+    if _groq_status["last_error"]:
+        result["groq_error"] = _groq_status["last_error"]
+        result["groq_error_time"] = _groq_status["last_error_time"]
+    return JSONResponse(result)
 
 # Servir página About
 @app.get("/about")
@@ -197,6 +228,60 @@ async def health():
         "status": "healthy",
         "timestamp": datetime.now().isoformat()
     })
+
+_price_cache = {"price": 0, "ts": 0}
+
+@app.get("/price")
+async def get_price():
+    """Fast price endpoint — Yahoo Finance real-time (same source as candles/strategies).
+    Local cache 3s to avoid hammering."""
+    import time as _time
+    now = _time.time()
+    if now - _price_cache["ts"] < 3 and _price_cache["price"] > 0:
+        return JSONResponse({"price": _price_cache["price"]})
+    try:
+        # Primary: Yahoo Finance real-time price (free, no key, ~200ms)
+        for host in ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']:
+            try:
+                resp = requests.get(
+                    f"https://{host}/v8/finance/chart/EURUSD=X",
+                    params={'interval': '1m', 'range': '1m'},
+                    headers={'User-Agent': 'Mozilla/5.0'},
+                    timeout=5
+                )
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                result = data.get('chart', {}).get('result', [])
+                if not result:
+                    continue
+                quotes = result[0].get('indicators', {}).get('quote', [{}])[0]
+                closes = quotes.get('close', [])
+                p = 0
+                for c in reversed(closes):
+                    if c is not None and c > 0:
+                        p = round(float(c), 5)
+                        break
+                if p == 0:
+                    p = result[0].get('meta', {}).get('regularMarketPrice', 0)
+                    if p > 0:
+                        p = round(float(p), 5)
+                if p > 0:
+                    _price_cache["price"] = p
+                    _price_cache["ts"] = now
+                    return JSONResponse({"price": p})
+            except Exception:
+                continue
+        # Fallback: market_state cache
+        tech = get_tech()
+        state = tech.get_market_state()
+        p = state.get('price', 0)
+        if p > 0:
+            _price_cache["price"] = round(p, 5)
+            _price_cache["ts"] = now
+        return JSONResponse({"price": _price_cache["price"]})
+    except Exception:
+        return JSONResponse({"price": _price_cache["price"] or 0}, status_code=503)
 
 @app.get("/stats")
 async def get_dashboard_stats():
@@ -229,7 +314,7 @@ async def get_recent_alerts_endpoint(limit: int = 50):
                 "impact_score": impact_score,
                 "level": alert_level,
                 "sent_at": _utc_iso(sent_at),
-                "published_at": _utc_iso(published_at) if published_at else None,
+                "published_at": _published_iso(published_at) if published_at else None,
                 "title": title,
                 "url": url,
                 "explanation": explanation,
@@ -279,7 +364,7 @@ async def get_recent_news_endpoint(limit: int = 200):
                 "title": title,
                 "url": url,
                 "fetched_at": _utc_iso(fetched_at),
-                "published_at": _utc_iso(published_at) if published_at else None,
+                "published_at": _published_iso(published_at) if published_at else None,
                 "language": language,
                 "tags": tags
             })
@@ -557,8 +642,14 @@ async def get_data_source():
 @app.get("/price-compare")
 async def price_compare():
     """Compare prices from all available sources for debugging spread differences."""
-    from src.common.price_feed import _fetch_twelvedata, _fetch_yahoo, _get_twelve_data_key, _map_interval_to_yahoo
+    from src.common.price_feed import _fetch_fxcm, _fetch_twelvedata, _fetch_yahoo, _get_twelve_data_key, _map_interval_to_yahoo
     results = {}
+    try:
+        fxcm = _fetch_fxcm('5min', 5)
+        if fxcm:
+            results['fxcm'] = {'close': fxcm[-1]['close'], 'high': fxcm[-1]['high'], 'low': fxcm[-1]['low'], 'datetime': fxcm[-1]['datetime']}
+    except Exception as e:
+        results['fxcm'] = {'error': str(e)}
     try:
         key = _get_twelve_data_key()
         if key:
@@ -575,13 +666,17 @@ async def price_compare():
     except Exception as e:
         results['yahoo'] = {'error': str(e)}
 
-    # Calculate spread between sources
+    # Calculate spreads between all source pairs
     closes = {k: v['close'] for k, v in results.items() if 'close' in v}
     if len(closes) >= 2:
-        vals = list(closes.values())
-        spread_pips = abs(vals[0] - vals[1]) / 0.0001
-        results['spread_pips'] = round(spread_pips, 1)
-        results['note'] = f"Diferencia entre fuentes: {spread_pips:.1f} pips"
+        keys = list(closes.keys())
+        spreads = {}
+        for i in range(len(keys)):
+            for j in range(i + 1, len(keys)):
+                pair = f"{keys[i]}_vs_{keys[j]}"
+                spread_pips = abs(closes[keys[i]] - closes[keys[j]]) / 0.0001
+                spreads[pair] = round(spread_pips, 1)
+        results['spreads_pips'] = spreads
 
     return JSONResponse({"status": "success", "data": results})
 
@@ -663,10 +758,37 @@ async def list_auto_strategies():
             if len(r) > 15 and r[15]:
                 try:
                     import json as _json
+                    from datetime import datetime as _dt, timezone as _tz
                     raw = _json.loads(r[15])
-                    snapshot = [{"time": int(float(c['t'])) if c.get('t') else 0,
-                                 "open": c['o'], "high": c['h'],
-                                 "low": c['l'], "close": c['c']} for c in raw]
+                    snapshot = []
+                    for c in raw:
+                        # Handle both compact {o,h,l,c,t} and full {open,high,low,close,time} formats
+                        ts = c.get('time') or c.get('t') or 0
+                        if isinstance(ts, str) and '-' in ts:
+                            try:
+                                ts = int(_dt.strptime(ts, '%Y-%m-%d %H:%M:%S').replace(tzinfo=_tz.utc).timestamp())
+                            except Exception:
+                                ts = 0
+                        else:
+                            try:
+                                ts = int(float(ts))
+                            except (ValueError, TypeError):
+                                ts = 0
+                        snapshot.append({
+                            "time": ts,
+                            "open": c.get('open') or c.get('o', 0),
+                            "high": c.get('high') or c.get('h', 0),
+                            "low": c.get('low') or c.get('l', 0),
+                            "close": c.get('close') or c.get('c', 0)
+                        })
+                    # Smooth gaps: open = prev close
+                    for si in range(1, len(snapshot)):
+                        pc = snapshot[si - 1]['close']
+                        snapshot[si]['open'] = pc
+                        if pc > snapshot[si]['high']:
+                            snapshot[si]['high'] = pc
+                        if pc < snapshot[si]['low']:
+                            snapshot[si]['low'] = pc
                 except Exception:
                     pass
             strategies.append({
@@ -737,28 +859,66 @@ async def strategy_perf():
     """Get win/loss stats for auto-strategies"""
     return JSONResponse({"status": "success", "data": get_strategy_performance()})
 
+_candles_cache = {"data": [], "last_fetch": 0}
+
+def _convert_candles_to_lw(candles):
+    """Convert raw candles to Lightweight Charts format.
+    All timestamps treated as UTC to avoid timezone misalignment.
+    Smooths gaps: each candle opens where the previous one closed."""
+    from datetime import datetime as _dt, timezone as _tz
+    lw_candles = []
+    for c in candles:
+        ts = c.get('datetime', c.get('timestamp', 0))
+        try:
+            ts_int = int(float(ts))
+        except (ValueError, TypeError):
+            try:
+                dt = _dt.strptime(str(ts), '%Y-%m-%d %H:%M:%S').replace(tzinfo=_tz.utc)
+                ts_int = int(dt.timestamp())
+            except Exception:
+                continue
+        ts_aligned = (ts_int // 300) * 300
+        lw_candles.append({
+            "time": ts_aligned,
+            "open": round(c['open'], 6), "high": round(c['high'], 6),
+            "low": round(c['low'], 6), "close": round(c['close'], 6)
+        })
+    # Remove duplicate timestamps (keep last occurrence)
+    seen = {}
+    for candle in lw_candles:
+        seen[candle['time']] = candle
+    result = sorted(seen.values(), key=lambda x: x['time'])
+    # Smooth gaps: set open = previous close so candles connect visually
+    for i in range(1, len(result)):
+        prev_close = result[i - 1]['close']
+        cur = result[i]
+        cur['open'] = prev_close
+        # Adjust high/low to include the smoothed open
+        if prev_close > cur['high']:
+            cur['high'] = prev_close
+        if prev_close < cur['low']:
+            cur['low'] = prev_close
+    return result
+
 @app.get("/candles")
 async def get_candles():
-    """Get EUR/USD candle data for Lightweight Charts"""
+    """Get EUR/USD candle data for Lightweight Charts (cached, refreshes every 2 min)"""
+    import time as _time
     try:
-        tech = get_tech()
-        candles = tech._fetch_candles()
-        if not candles:
+        now = _time.time()
+        # Refresh every 60s (Yahoo has no strict rate limit)
+        if now - _candles_cache["last_fetch"] > 60 or not _candles_cache["data"]:
+            tech = get_tech()
+            candles = tech._fetch_candles()
+            if candles and len(candles) > 5:
+                _candles_cache["data"] = _convert_candles_to_lw(candles)
+                _candles_cache["last_fetch"] = now
+                logger.info(f"Candles cache refreshed: {len(_candles_cache['data'])} candles")
+
+        if not _candles_cache["data"]:
             return JSONResponse({"status": "error", "message": "No candle data"}, status_code=503)
-        # Convert to Lightweight Charts format: [{time (unix), open, high, low, close}]
-        lw_candles = []
-        for c in candles:
-            ts = c.get('datetime', c.get('timestamp', 0))
-            try:
-                ts_int = int(float(ts))
-            except (ValueError, TypeError):
-                continue
-            lw_candles.append({
-                "time": ts_int,
-                "open": round(c['open'], 5), "high": round(c['high'], 5),
-                "low": round(c['low'], 5), "close": round(c['close'], 5)
-            })
-        return JSONResponse({"status": "success", "data": lw_candles})
+
+        return JSONResponse({"status": "success", "data": _candles_cache["data"]})
     except Exception as e:
         logger.error(f"Error fetching candles: {e}")
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
@@ -902,6 +1062,62 @@ class ChatRequest(BaseModel):
     context: Optional[List[ChatMessage]] = []
     image_base64: Optional[str] = None
 
+# ── Economic Calendar (Forex Factory free JSON) ──
+_calendar_cache = {"events": [], "ts": 0}
+
+def _fetch_calendar_events():
+    """Fetch economic calendar from Forex Factory free JSON"""
+    import time as _time
+    now = _time.time()
+    if now - _calendar_cache["ts"] < 3600 and _calendar_cache["events"]:
+        return _calendar_cache["events"]
+
+    try:
+        resp = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.json", timeout=10)
+        if resp.status_code == 200:
+            all_events = resp.json()
+            from datetime import datetime, timezone, timedelta
+            ar_tz = timezone(timedelta(hours=-3))
+            today = datetime.now(ar_tz).strftime('%Y-%m-%d')
+            tomorrow = (datetime.now(ar_tz) + timedelta(days=1)).strftime('%Y-%m-%d')
+
+            filtered = []
+            for ev in all_events:
+                country = ev.get('country', '')
+                impact = ev.get('impact', '')
+                if country not in ('USD', 'EUR'):
+                    continue
+                if impact not in ('High', 'Medium'):
+                    continue
+
+                event_date = ev.get('date', '')[:10]
+                if event_date not in (today, tomorrow):
+                    continue
+
+                filtered.append({
+                    'date': ev.get('date', ''),
+                    'time': ev.get('date', '')[11:16] if len(ev.get('date', '')) > 15 else '',
+                    'currency': country,
+                    'event': ev.get('title', ''),
+                    'impact': impact,
+                    'forecast': ev.get('forecast', ''),
+                    'previous': ev.get('previous', ''),
+                    'actual': ev.get('actual', '')
+                })
+
+            _calendar_cache["events"] = filtered
+            _calendar_cache["ts"] = now
+            return filtered
+    except Exception as e:
+        logger.warning(f"Calendar fetch failed: {e}")
+
+    return _calendar_cache["events"]
+
+@app.get("/calendar")
+async def get_calendar():
+    events = _fetch_calendar_events()
+    return JSONResponse({"status": "success", "events": events})
+
 @app.get("/chat-context")
 async def get_chat_context():
     """Obtener contexto actual del sistema para el chat"""
@@ -1040,7 +1256,8 @@ async def chat_with_ollama(request: ChatRequest):
                 strategies_text += f"    Status: {status} | Noticia: {title[:60]}\n"
             strat_perf = get_strategy_performance()
             if strat_perf.get('total', 0) > 0:
-                strategies_text += f"  📊 Estrategias: {strat_perf['wins']}W/{strat_perf['losses']}L | WR: {strat_perf['win_rate']}%\n"
+                be_str = f"/{strat_perf.get('break_evens', 0)}BE" if strat_perf.get('break_evens', 0) > 0 else ""
+                strategies_text += f"  📊 Estrategias: {strat_perf['wins']}W/{strat_perf['losses']}L{be_str} | WR: {strat_perf['win_rate']}%\n"
 
         # Formatear alertas para el contexto
         alerts_text = ""
@@ -1117,6 +1334,42 @@ IMPORTANTE: Usá estos datos técnicos para CONTRASTAR con las noticias. Si las 
         except Exception as e:
             logger.warning(f"SMC context for chat failed: {e}")
 
+        # Economic calendar context - real events from Forex Factory
+        calendar_text = ""
+        try:
+            from datetime import datetime, timezone, timedelta
+            ar_tz = timezone(timedelta(hours=-3))
+            now_ar = datetime.now(ar_tz)
+            day_names = {'Monday': 'Lunes', 'Tuesday': 'Martes', 'Wednesday': 'Miércoles',
+                         'Thursday': 'Jueves', 'Friday': 'Viernes', 'Saturday': 'Sábado', 'Sunday': 'Domingo'}
+            day_en = now_ar.strftime('%A')
+            today_str = f"{day_names.get(day_en, day_en)} {now_ar.strftime('%d/%m/%Y')}"
+            hour_now = now_ar.strftime('%H:%M')
+
+            events = _fetch_calendar_events()
+            events_text = ""
+            if events:
+                for ev in events:
+                    impact_icon = "\U0001f534" if ev['impact'] == 'High' else "\U0001f7e1"
+                    actual_str = f" | Actual: {ev['actual']}" if ev.get('actual') else ""
+                    forecast_str = f" | Previsión: {ev['forecast']}" if ev.get('forecast') else ""
+                    prev_str = f" | Anterior: {ev['previous']}" if ev.get('previous') else ""
+                    events_text += f"\n  {impact_icon} {ev['time']} UTC | {ev['currency']} | {ev['event']}{forecast_str}{prev_str}{actual_str}"
+
+            calendar_text = f"""
+
+\U0001f4c5 CALENDARIO ECONÓMICO (Hoy es {today_str}, hora actual: {hour_now} AR):
+{events_text if events_text else '  No se pudieron obtener eventos. Recomendá al usuario revisar el CALENDARIO ECONÓMICO en el dashboard.'}
+
+REGLAS PARA EVENTOS:
+- NO operar 5 min antes y después de eventos \U0001f534 ALTO impacto
+- Esperar el pullback post-noticia, no entrar en el spike
+- Si un evento importante está cerca (< 30 min), ADVERTÍ al trader con urgencia
+- Eventos clave: decisiones tasas Fed/ECB, NFP, IPC (CPI), PIB, PMI, declaraciones Powell/Lagarde
+- Mencioná los eventos próximos SIEMPRE que el usuario pregunte sobre el mercado"""
+        except Exception as e:
+            logger.warning(f"Calendar context failed: {e}")
+
         # Construir historial de conversación
         conversation_history = ""
         if request.context:
@@ -1144,7 +1397,7 @@ PERFIL DE EXPERTISE:
 
 DATOS EN TIEMPO REAL DEL SISTEMA:
 - Noticias monitoreadas: {total_news}
-- Alertas generadas: {total_alerts}{perf_text}{patterns_text}{tech_text}{smc_text}{alerts_text}{news_text}{strategies_text}
+- Alertas generadas: {total_alerts}{perf_text}{patterns_text}{tech_text}{smc_text}{calendar_text}{alerts_text}{news_text}{strategies_text}
 
 CÓMO RESPONDÉS:
 1. Español rioplatense, directo, sin rodeos
@@ -1206,18 +1459,38 @@ AIdan:"""
         model_used = None
 
         # Try DeepSeek first (no image support on free tier)
+        total_chars = sum(len(m.get('content', '')) for m in ds_messages)
+        logger.info(f"Chat context: {len(ds_messages)} messages, {total_chars} chars total")
         if not request.image_base64:
             result = _call_groq(ds_messages, temperature=0.75, max_tokens=600)
             if result:
                 assistant_message = result
                 model_used = f"groq-{Config.GROQ_MODEL}"
 
-        # Fallback to Ollama
+        # Fallback to Ollama (using /api/chat with messages format)
         if not assistant_message:
+            logger.warning("Groq failed, falling back to Ollama")
             import random
+            ollama_model = 'llama3.1:8b'
+            # Condensed system prompt for 8b model (4096 ctx limit)
+            ollama_system = f"""Sos AIdan, trader profesional de scalping EUR/USD. Respondé en español argentino, directo y conciso.
+{calendar_text}
+{tech_text}
+{smc_text}
+{strategies_text}
+
+REGLAS: Usá SOLO los datos de arriba. NO inventes eventos ni noticias. Si no tenés datos, decí que no hay info disponible. Respondé en 3-8 líneas."""
+            ollama_messages = [
+                {"role": "system", "content": ollama_system},
+            ]
+            if request.context:
+                for msg in request.context[-6:]:
+                    ollama_messages.append({"role": msg.role, "content": msg.content})
+            ollama_messages.append({"role": "user", "content": user_message})
+
             ollama_payload = {
-                'model': 'llama3.1:8b',
-                'prompt': system_context,
+                'model': ollama_model,
+                'messages': ollama_messages,
                 'stream': False,
                 'options': {
                     'temperature': 0.75, 'top_p': 0.9,
@@ -1235,11 +1508,11 @@ AIdan:"""
                         "message": "No hay modelo de visión instalado. Ejecutá: ollama pull llava"
                     }, status_code=503)
                 ollama_payload['model'] = vision_model
-                ollama_payload['images'] = [request.image_base64]
+                ollama_messages[-1]["images"] = [request.image_base64]
                 ollama_payload['options']['num_predict'] = 800
                 logger.info(f"Using {vision_model} for image analysis")
 
-            response = requests.post('http://localhost:11434/api/generate',
+            response = requests.post('http://localhost:11434/api/chat',
                 json=ollama_payload, timeout=90)
 
             if response.status_code != 200:
@@ -1249,7 +1522,7 @@ AIdan:"""
                     "message": "IA no disponible. Verificá Ollama o configurá DEEPSEEK_API_KEY."
                 }, status_code=503)
 
-            assistant_message = response.json().get('response', '').strip()
+            assistant_message = response.json().get('message', {}).get('content', '').strip()
             model_used = ollama_payload['model']
 
         return JSONResponse({

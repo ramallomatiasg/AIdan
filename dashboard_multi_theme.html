@@ -193,12 +193,12 @@
         /* ===== MAIN LAYOUT ===== */
         .main-grid {
             display: grid;
-            grid-template-columns: 1fr 400px;
+            grid-template-columns: 1fr 340px;
             grid-template-rows: auto auto auto;
             gap: 14px;
-            padding: 14px 28px 56px;
-            max-width: 1700px;
-            margin: 0 auto;
+            padding: 14px 16px 56px;
+            max-width: 100%;
+            margin: 0;
         }
 
         /* ===== CARDS ===== */
@@ -240,7 +240,7 @@
 
         /* ===== CHART ===== */
         .chart-section { grid-column: 1; grid-row: 1; }
-        .chart-container { height: 500px; position: relative; }
+        .chart-container { height: 650px; position: relative; }
         .chart-container iframe { width: 100%; height: 100%; border: none; }
 
         /* ===== CHAT ===== */
@@ -476,6 +476,12 @@
 
         /* ===== RESULT BUTTONS ===== */
         .alert-actions { display: flex; gap: 4px; margin-top: 6px; }
+        .strat-filter-btn {
+            padding: 5px 14px; border: none; background: transparent; color: var(--text-muted);
+            cursor: pointer; font-weight: 600; transition: all 0.2s;
+        }
+        .strat-filter-btn:hover { color: var(--text-primary); background: var(--bg-card); }
+        .strat-filter-btn.active { background: var(--accent-cyan, #00bcd4); color: #000; }
         .result-btn {
             background: none; border: 1px solid var(--border);
             border-radius: 6px; padding: 2px 8px;
@@ -599,7 +605,7 @@
         /* ===== STRATEGY CREATOR ===== */
         .strategy-grid {
             display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
-            padding: 14px 28px 80px; max-width: 1700px; margin: 0 auto;
+            padding: 14px 16px 80px; max-width: 100%; margin: 0;
         }
         .strat-section-title {
             font-size: 17px; font-weight: 700; text-transform: uppercase;
@@ -666,7 +672,7 @@
 <header class="header">
     <div class="header-left">
         <div>
-            <div class="logo">AIdan <span style="font-size:16px;font-weight:400;opacity:0.6;">v2.2</span></div>
+            <div class="logo">AIdan <span id="appVersion" style="font-size:16px;font-weight:400;opacity:0.6;">v3.1.0</span></div>
             <div class="logo-sub">Scalping EUR/USD</div>
         </div>
     </div>
@@ -723,10 +729,8 @@
             </span>
             <span class="card-badge badge-live">&#x25CF; LIVE</span>
         </div>
-        <div class="chart-container" id="tradingview-widget">
-            <div class="tradingview-widget-container" style="height:100%;width:100%">
-                <div id="tradingview_chart" style="height:100%;width:100%"></div>
-            </div>
+        <div class="chart-container" id="main-chart-wrapper">
+            <div id="main-chart" style="height:100%;width:100%"></div>
         </div>
     </div>
 
@@ -845,7 +849,7 @@
             <span>Solo eventos de impacto medio y alto que afectan EUR/USD</span>
         </div>
         <div class="calendar-container">
-            <iframe src="https://sslecal2.investing.com?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&importance=2,3&features=datepicker,timezone,filters&countries=5,72&calType=week&timeZone=20&lang=4"
+            <iframe src="https://sslecal2.investing.com?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&importance=2,3&features=datepicker,timezone,filters&countries=5,72&calType=week&timeZone=12&lang=4"
                 width="100%" height="420" frameborder="0"
                 allowtransparency="true"></iframe>
         </div>
@@ -868,10 +872,24 @@
         <span style="font-size:16px;font-weight:700;color:var(--text-primary);">&#x1F3AF; Estrategias Auto-Generadas</span>
         <span style="font-size:16px;color:var(--text-muted);">Max 6 · Noticias + Estructura de mercado</span>
         <span id="structureStatus" style="font-size:16px;color:var(--accent-cyan);"></span>
+        <!-- Strategy filter toggle -->
+        <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden;font-size:14px;" id="stratFilterBar">
+            <button class="strat-filter-btn active" data-filter="all" onclick="setStratFilter('all')">Todas</button>
+            <button class="strat-filter-btn" data-filter="active" onclick="setStratFilter('active')">Activas</button>
+            <button class="strat-filter-btn" data-filter="closed" onclick="setStratFilter('closed')">Cerradas</button>
+        </div>
+        <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden;font-size:14px;" id="triggerFilterBar">
+            <button class="strat-filter-btn trigger-filter active" data-trigger="all" onclick="setTriggerFilter('all')">Todas</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="news" onclick="setTriggerFilter('news')">&#x1F4F0; News</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="structure" onclick="setTriggerFilter('structure')">&#x1F4CA; Estructura</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="smc" onclick="setTriggerFilter('smc')">&#x1F9E0; SMC</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="calendar" onclick="setTriggerFilter('calendar')">&#x1F4C5; Calendario</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="pattern" onclick="setTriggerFilter('pattern')">&#x1F56F; Patron</button>
+        </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center;" id="stratPerfBar">
             <button onclick="generateReport()" id="reportBtn" style="background:var(--accent-purple,#9b59b6);color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;" title="Subir reporte diario a Google Sheets">Reporte</button>
             <span class="stat-chip">Win Rate <span id="stratWR">0%</span></span>
-            <span class="stat-chip">W/L <span id="stratWL">0/0</span></span>
+            <span class="stat-chip">W/L/BE <span id="stratWL">0/0/0</span></span>
         </div>
     </div>
 
@@ -929,6 +947,7 @@
                     <div class="strat-row"><label>Stop loss (pips)</label><input type="number" id="stratSL" min="1" max="50" value="5" step="0.5"></div>
                     <div class="strat-row"><label>Take profit (pips)</label><input type="number" id="stratTP" min="1" max="50" value="10" step="0.5"></div>
                     <div class="strat-row"><label>Expiracion (min)</label><input type="number" id="stratExpiry" min="1" max="30" value="5"></div>
+                    <div class="strat-row"><label>Cooldown entre estrategias (min)</label><input type="number" id="stratCooldown" min="0" max="30" value="2" step="1"></div>
                     <div class="strat-actions"><button onclick="saveStrategy()">&#x1F4BE; Guardar perfil</button></div>
                 </div>
             </div>
@@ -945,37 +964,229 @@
 </div>
 </div><!-- /tab-estrategias -->
 
-<!-- ===== TRADINGVIEW WIDGET ===== -->
-<script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+<!-- ===== CHART LIBRARY ===== -->
 <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 <script type="text/javascript">
+    let mainChart = null;
+    let mainSeries = null;
+    let mainMa9Series = null;
+    let mainMa20Series = null;
+    let lastTickPrice = 0;
+
     function initChart() {
-        if (typeof TradingView === 'undefined') { setTimeout(initChart, 1000); return; }
+        if (typeof LightweightCharts === 'undefined') { setTimeout(initChart, 500); return; }
+        const container = document.getElementById('main-chart');
+        if (!container) return;
+        container.innerHTML = '';
         const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
-        new TradingView.widget({
-            "autosize": true,
-            "symbol": "OANDA:EURUSD",
-            "interval": "5",
-            "timezone": "America/Argentina/Buenos_Aires",
-            "theme": isDark ? "dark" : "light",
-            "style": "1",
-            "locale": "es",
-            "toolbar_bg": isDark ? "#141c2b" : "#ffffff",
-            "enable_publishing": false,
-            "hide_top_toolbar": false,
-            "hide_legend": false,
-            "save_image": false,
-            "container_id": "tradingview_chart",
-            "backgroundColor": isDark ? "#080c14" : "#ffffff",
-            "gridColor": isDark ? "#1a2535" : "#f0f0f0",
-            "studies": [
-                "RSI@tv-basicstudies",
-                "MASimple@tv-basicstudies",
-                "BB@tv-basicstudies"
-            ],
-            "show_popup_button": false,
-            "withdateranges": true
+
+        mainChart = LightweightCharts.createChart(container, {
+            width: container.clientWidth,
+            height: container.clientHeight || 620,
+            layout: {
+                background: { type: 'solid', color: isDark ? '#080c14' : '#ffffff' },
+                textColor: isDark ? '#8a95a8' : '#475569',
+                fontSize: 11
+            },
+            grid: {
+                vertLines: { color: isDark ? '#141e2e22' : '#f0f0f0' },
+                horzLines: { color: isDark ? '#141e2e22' : '#f0f0f0' }
+            },
+            timeScale: {
+                timeVisible: true, secondsVisible: false,
+                borderColor: isDark ? '#1a2535' : '#ddd',
+                rightOffset: 5,
+                tickMarkFormatter: (time) => {
+                    const d = new Date(time * 1000);
+                    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                }
+            },
+            rightPriceScale: {
+                borderColor: isDark ? '#1a2535' : '#ddd',
+                autoScale: true,
+                scaleMargins: { top: 0.1, bottom: 0.1 }
+            },
+            crosshair: { mode: 0 },
+            localization: {
+                priceFormatter: (p) => p.toFixed(5),
+                timeFormatter: (ts) => {
+                    const d = new Date(ts * 1000);
+                    return d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'});
+                }
+            }
         });
+
+        mainSeries = mainChart.addCandlestickSeries({
+            upColor: '#22c55e', downColor: '#ef4444',
+            borderUpColor: '#16a34a', borderDownColor: '#dc2626',
+            wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+            priceFormat: { type: 'price', precision: 5, minMove: 0.00001 }
+        });
+
+        mainMa9Series = mainChart.addLineSeries({
+            color: '#f59e0b', lineWidth: 1,
+            priceLineVisible: false, lastValueVisible: false,
+            crosshairMarkerVisible: false
+        });
+        mainMa20Series = mainChart.addLineSeries({
+            color: '#3b82f6', lineWidth: 1,
+            priceLineVisible: false, lastValueVisible: false,
+            crosshairMarkerVisible: false
+        });
+
+        const ro = new ResizeObserver(() => {
+            if (mainChart) mainChart.applyOptions({ width: container.clientWidth, height: container.clientHeight || 620 });
+        });
+        ro.observe(container);
+
+        refreshMainChart();
+    }
+
+    async function refreshMainChart() {
+        try {
+            const res = await fetch(`${typeof API_BASE !== 'undefined' ? API_BASE : ''}/candles`);
+            const data = await res.json();
+            if (data.status !== 'success' || !data.data || !data.data.length) return;
+            if (cachedCandles && data.data.length < cachedCandles.length * 0.5) return;
+
+            const candles = data.data;
+            if (!mainSeries) return;
+            mainSeries.setData(candles);
+
+            const ma9 = [], ma20 = [];
+            for (let i = 0; i < candles.length; i++) {
+                if (i >= 8) {
+                    let sum = 0; for (let j = i-8; j<=i; j++) sum += candles[j].close;
+                    ma9.push({ time: candles[i].time, value: sum / 9 });
+                }
+                if (i >= 19) {
+                    let sum = 0; for (let j = i-19; j<=i; j++) sum += candles[j].close;
+                    ma20.push({ time: candles[i].time, value: sum / 20 });
+                }
+            }
+            mainMa9Series.setData(ma9);
+            mainMa20Series.setData(ma20);
+
+            const last = candles[candles.length - 1];
+            lastTickPrice = last.close;
+            cachedCandles = candles;
+            updateHeaderPrice(last.close);
+            // Zoom to last ~60 candles for better visibility
+            if (candles.length > 60) {
+                const fromCandle = candles[candles.length - 60];
+                const toCandle = candles[candles.length - 1];
+                mainChart.timeScale().setVisibleRange({
+                    from: fromCandle.time,
+                    to: toCandle.time + 300
+                });
+            } else {
+                mainChart.timeScale().fitContent();
+            }
+        } catch(e) { console.warn('Chart refresh failed:', e); }
+    }
+
+    function updateHeaderPrice(price) {
+        const priceEl = document.querySelector('.chart-section .card-title');
+        if (!priceEl || !cachedCandles || cachedCandles.length < 2) return;
+        const prev = cachedCandles[cachedCandles.length - 2];
+        const change = price - prev.close;
+        const changePips = (change * 10000).toFixed(1);
+        const changeSign = change >= 0 ? '+' : '';
+        const color = change >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+        priceEl.innerHTML = `<span class="icon">&#x1F4C8;</span> EUR/USD ${price.toFixed(5)} <span style="font-size:12px;color:${color}">${changeSign}${changePips}p</span>`;
+    }
+
+    // ── Real-time price via Twelve Data WebSocket (tick-by-tick, free tier: 1 symbol) ──
+    let priceWs = null;
+    let wsReconnectTimer = null;
+    const TD_WS_KEY = '46f407e058674f159a2a176e023ab536';
+
+    function connectPriceWs() {
+        if (priceWs && priceWs.readyState <= 1) return; // already open/connecting
+        try {
+            priceWs = new WebSocket(`wss://ws.twelvedata.com/v1/quotes/price?apikey=${TD_WS_KEY}`);
+            priceWs.onopen = () => {
+                console.log('WS: connected to Twelve Data');
+                priceWs.send(JSON.stringify({ action: 'subscribe', params: { symbols: 'EUR/USD' } }));
+                // Update LIVE indicator
+                const liveEl = document.querySelector('.live-indicator');
+                if (liveEl) liveEl.style.opacity = '1';
+            };
+            priceWs.onmessage = (evt) => {
+                try {
+                    const msg = JSON.parse(evt.data);
+                    // Price tick: {symbol, price, timestamp, ...}
+                    if (msg.price && msg.price > 0) {
+                        onPriceTick(msg.price);
+                    }
+                } catch(e) {}
+            };
+            priceWs.onclose = () => {
+                console.log('WS: disconnected, reconnecting in 5s...');
+                const liveEl = document.querySelector('.live-indicator');
+                if (liveEl) liveEl.style.opacity = '0.4';
+                clearTimeout(wsReconnectTimer);
+                wsReconnectTimer = setTimeout(connectPriceWs, 5000);
+            };
+            priceWs.onerror = () => {
+                priceWs.close();
+            };
+        } catch(e) {
+            // Fallback to polling if WebSocket fails
+            console.warn('WS: failed, falling back to polling');
+            setInterval(tickPriceFallback, 3000);
+        }
+    }
+
+    function onPriceTick(price) {
+        price = parseFloat(price);
+        if (!price || price <= 0) return;
+
+        // Flash effect on price change
+        const priceEl = document.querySelector('.chart-section .card-title');
+        const priceChanged = lastTickPrice > 0 && Math.abs(price - lastTickPrice) > 0.000005;
+        if (priceChanged && priceEl) {
+            const flashColor = price > lastTickPrice ? 'var(--accent-green)' : 'var(--accent-red)';
+            priceEl.style.textShadow = `0 0 8px ${flashColor}`;
+            setTimeout(() => { priceEl.style.textShadow = 'none'; }, 300);
+        }
+
+        updateHeaderPrice(price);
+
+        // Update last candle on chart in real-time
+        if (mainSeries && cachedCandles && cachedCandles.length > 0) {
+            const INTERVAL = 300;
+            const now = Math.floor(Date.now() / 1000);
+            const currentSlot = Math.floor(now / INTERVAL) * INTERVAL;
+            const lastCandle = cachedCandles[cachedCandles.length - 1];
+
+            if (lastCandle.time === currentSlot) {
+                lastCandle.close = price;
+                if (price > lastCandle.high) lastCandle.high = price;
+                if (price < lastCandle.low) lastCandle.low = price;
+                mainSeries.update(lastCandle);
+            } else if (currentSlot > lastCandle.time) {
+                // New candle period — connect to previous close
+                const newCandle = { time: currentSlot, open: lastCandle.close, high: Math.max(lastCandle.close, price), low: Math.min(lastCandle.close, price), close: price };
+                cachedCandles.push(newCandle);
+                mainSeries.update(newCandle);
+            } else {
+                lastCandle.close = price;
+                if (price > lastCandle.high) lastCandle.high = price;
+                if (price < lastCandle.low) lastCandle.low = price;
+                mainSeries.update(lastCandle);
+            }
+            lastTickPrice = price;
+        }
+    }
+
+    // Fallback: REST polling if WebSocket unavailable
+    async function tickPriceFallback() {
+        try {
+            const res = await fetch(`${typeof API_BASE !== 'undefined' ? API_BASE : ''}/price`);
+            const data = await res.json();
+            if (data && data.price && data.price > 0) onPriceTick(data.price);
+        } catch(e) {}
     }
 </script>
 
@@ -997,7 +1208,8 @@
         localStorage.setItem('aidan-theme', next);
         document.getElementById('themeToggle').textContent = next === 'light' ? '\u2600\uFE0F' : '\uD83C\uDF19';
         // Recrear chart con nuevo tema
-        document.getElementById('tradingview_chart').innerHTML = '';
+        if (mainChart) { try { mainChart.remove(); } catch(e) {} mainChart = null; }
+        document.getElementById('main-chart').innerHTML = '';
         initChart();
     }
     (function() {
@@ -1082,7 +1294,8 @@
                 const d = data2.data;
                 const stratEl = document.getElementById('statStratWR');
                 if (stratEl) {
-                    stratEl.textContent = d.total > 0 ? d.win_rate + '% (' + d.wins + 'W/' + d.losses + 'L)' : '0%';
+                    const sBe = (d.break_evens || 0) > 0 ? '/' + d.break_evens + 'BE' : '';
+                    stratEl.textContent = d.total > 0 ? d.win_rate + '% (' + d.wins + 'W/' + d.losses + 'L' + sBe + ')' : '0%';
                     if (d.total > 0) stratEl.className = 'stat-value ' + (d.win_rate >= 55 ? 'green' : d.win_rate >= 45 ? 'yellow' : 'red');
                 }
             }
@@ -1197,7 +1410,7 @@
             const scorePct = Math.min(score, 100);
             const scoreClass = score >= 75 ? 's-high' : score >= 50 ? 's-medium' : 's-low';
             const scoreColor = score >= 75 ? 'var(--accent-red)' : score >= 50 ? 'var(--accent-yellow)' : 'var(--accent-green)';
-            const time = formatTime(alert.sent_at);
+            const time = formatTime(alert.published_at || alert.sent_at);
             const recorded = recordedResults[alert.id];
             const btnState = (type) => recorded ? (recorded === type ? `recorded active-${type}` : 'recorded') : '';
             const confColor = alert.confidence >= 80 ? 'var(--accent-green)' : alert.confidence >= 60 ? 'var(--accent-yellow)' : 'var(--text-muted)';
@@ -1459,6 +1672,22 @@
     let cachedCandles = null;
     let lwChartInstances = [];
     let lastStratFingerprint = '';
+    let currentStratFilter = 'all';
+    let currentTriggerFilter = 'all';
+
+    function setStratFilter(filter) {
+        currentStratFilter = filter;
+        document.querySelectorAll('#stratFilterBar .strat-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === filter));
+        lastStratFingerprint = ''; // force re-render
+        loadAutoStrategies();
+    }
+
+    function setTriggerFilter(trigger) {
+        currentTriggerFilter = trigger;
+        document.querySelectorAll('#triggerFilterBar .strat-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.trigger === trigger));
+        lastStratFingerprint = ''; // force re-render
+        loadAutoStrategies();
+    }
 
     function playStrategySound() {
         try {
@@ -1642,12 +1871,12 @@
         loadStructureStatus();
         loadSMCState();
         try {
-            // Fetch candles if not cached or stale
-            if (!cachedCandles) {
+            // Fetch candles if not cached (refreshMainChart may have set them already)
+            if (!cachedCandles || cachedCandles.length === 0) {
                 try {
                     const cRes = await fetch(`${API_BASE}/candles`);
                     const cData = await cRes.json();
-                    if (cData.status === 'success') cachedCandles = cData.data;
+                    if (cData.status === 'success' && cData.data && cData.data.length > 0) cachedCandles = cData.data;
                 } catch(e) { console.warn('Candles fetch failed:', e); }
             }
 
@@ -1669,18 +1898,40 @@
                 }
             }
 
-            if (data.data.length === 0) {
+            // Apply filter
+            const allData = data.data;
+            const filtered = allData.filter(s => {
+                // Status filter
+                if (currentStratFilter !== 'all') {
+                    const isActive = s.status === 'active' && !s.result;
+                    if (currentStratFilter === 'active' && !isActive) return false;
+                    if (currentStratFilter === 'closed' && isActive) return false;
+                }
+                // Trigger type filter
+                if (currentTriggerFilter !== 'all') {
+                    if ((s.trigger_type || 'news') !== currentTriggerFilter) return false;
+                }
+                return true;
+            });
+
+            if (filtered.length === 0) {
                 if (lwChartInstances.length > 0) { lwChartInstances.forEach(c => { try { c.remove(); } catch(e) {} }); lwChartInstances = []; }
+                const msg = currentStratFilter === 'active' ? 'No hay estrategias activas en este momento.'
+                          : currentStratFilter === 'closed' ? 'No hay estrategias cerradas aún.'
+                          : 'Sin estrategias aún. Se generan desde noticias de alto impacto y estructura de mercado.';
                 grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;">
                     <div class="icon">&#x1F4C8;</div>
-                    <div class="text">Sin estrategias aún. Se generan desde noticias de alto impacto y estructura de mercado (breakouts, S/R, RSI, cruces de MA).</div>
+                    <div class="text">${msg}</div>
                 </div>`;
                 lastStratFingerprint = '';
                 return;
             }
 
             // Only rebuild DOM if data changed (prevents chart flicker)
-            const fingerprint = data.data.map(s => `${s.id}:${s.status}:${s.result || ''}`).join('|');
+            // Include candles availability so charts re-render once candles load
+            const hasCandles = (cachedCandles && cachedCandles.length > 0) ? 'C' : 'N';
+            const hasSnapshots = filtered.some(s => s.candles_snapshot && s.candles_snapshot.length > 0) ? 'S' : 'N';
+            const fingerprint = filtered.map(s => `${s.id}:${s.status}:${s.result || ''}`).join('|') + ':' + currentStratFilter + ':' + currentTriggerFilter + ':' + hasCandles + ':' + hasSnapshots;
             if (fingerprint === lastStratFingerprint) {
                 // Data unchanged, skip re-render
                 loadStrategyPerformance();
@@ -1692,15 +1943,17 @@
             lwChartInstances.forEach(c => { try { c.remove(); } catch(e) {} });
             lwChartInstances = [];
 
-            grid.innerHTML = data.data.map(s => {
+            grid.innerHTML = filtered.map(s => {
                 const dirColor = s.direction === 'CALL' ? 'var(--accent-green)' : 'var(--accent-red)';
                 const dirBg = s.direction === 'CALL' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)';
                 const isExpired = s.status === 'expired' || (s.expires_at && new Date(s.expires_at) < new Date());
-                const isAutoEval = s.status === 'auto_win' || s.status === 'auto_loss';
+                const isAutoEval = s.status === 'auto_win' || s.status === 'auto_loss' || s.status === 'auto_break_even';
                 const autoTag = isAutoEval ? ' <span style="font-size:11px;color:var(--text-muted);font-style:italic;">(auto)</span>' : '';
                 const statusBadge = s.result
                     ? (s.result === 'win'
                         ? '<span style="color:var(--accent-green);font-weight:700;">&#x2705; WIN' + autoTag + '</span>'
+                        : s.result === 'break_even'
+                        ? '<span style="color:#eab308;font-weight:700;">&#x1F7E1; BE' + autoTag + '</span>'
                         : s.result === 'loss'
                         ? '<span style="color:var(--accent-red);font-weight:700;">&#x274C; LOSS' + autoTag + '</span>'
                         : '<span style="color:var(--text-muted);">&#x23ED; SKIP</span>')
@@ -1735,13 +1988,13 @@
                     <div style="padding:4px 12px;font-size:16px;color:var(--text-secondary);border-top:1px solid var(--border-color);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         <span style="white-space:nowrap;color:var(--accent-yellow);font-weight:700;">&#x23F0; ${timeStr}</span>
                         ${s.profile_name ? '<span style="background:var(--accent-cyan,#00bcd4);color:#000;padding:1px 8px;border-radius:8px;font-size:13px;font-weight:700;">&#x2699; ' + escapeHtml(s.profile_name) + '</span>' : ''}
-                        ${s.trigger_type === 'smc'
-                            ? '<span style="background:#e040fb;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">SMC</span>'
-                            : s.trigger_type === 'structure'
-                            ? '<span style="background:var(--accent-purple,#9b59b6);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">ESTRUCTURA</span>'
-                            : '<span style="background:var(--accent-blue);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">NOTICIA</span>'
-                        }
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">${s.trigger_type === 'smc' ? '&#x1F9E0;' : s.trigger_type === 'structure' ? '&#x1F4CA;' : '&#x1F4F0;'} ${escapeHtml(s.news_title)}</span>
+                        ${({
+                            smc: '<span style="background:#e040fb;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F9E0; SMC</span>',
+                            structure: '<span style="background:var(--accent-green,#22c55e);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CA; ESTRUCTURA</span>',
+                            calendar: '<span style="background:#f97316;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4C5; CALENDARIO</span>',
+                            pattern: '<span style="background:var(--accent-yellow,#eab308);color:#000;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F56F; PATRON</span>'
+                        }[s.trigger_type] || '<span style="background:var(--accent-blue);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4F0; NEWS</span>')}
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">${({smc:'&#x1F9E0;',structure:'&#x1F4CA;',calendar:'&#x1F4C5;',pattern:'&#x1F56F;'}[s.trigger_type] || '&#x1F4F0;')} ${escapeHtml(s.news_title)}</span>
                     </div>
                     <div style="padding:8px 12px;display:flex;gap:6px;align-items:center;">
                         ${isAutoEval ? '<span style="font-size:12px;color:var(--text-muted);margin-right:4px;">Corregir:</span>' : ''}
@@ -1752,14 +2005,29 @@
                 </div>`;
             }).join('');
 
-            // Render charts — use frozen snapshot if available, else live candles trimmed to creation time
-            requestAnimationFrame(() => {
-                for (const s of data.data) {
+            // Render charts — use setTimeout to ensure layout is complete before reading clientWidth
+            setTimeout(() => {
+                for (const s of filtered) {
                     let chartCandles = null;
 
                     // 1. Use saved snapshot (frozen at creation time)
                     if (s.candles_snapshot && s.candles_snapshot.length > 0) {
-                        chartCandles = s.candles_snapshot;
+                        // Convert compact format {o,h,l,c,t} to LW format {time,open,high,low,close}
+                        chartCandles = s.candles_snapshot.map(c => {
+                            let ts = c.time || c.t || 0;
+                            if (typeof ts === 'string' && ts.includes('-')) {
+                                ts = Math.floor(new Date(ts + 'Z').getTime() / 1000);
+                            } else {
+                                ts = parseInt(ts) || 0;
+                            }
+                            return {
+                                time: ts,
+                                open: c.open ?? c.o,
+                                high: c.high ?? c.h,
+                                low: c.low ?? c.l,
+                                close: c.close ?? c.c
+                            };
+                        }).filter(c => c.time > 0);
                     }
                     // 2. Fallback: trim live candles to creation time for non-active strategies
                     else if (cachedCandles && cachedCandles.length > 0) {
@@ -1776,7 +2044,7 @@
                         renderStrategyChart('strat-chart-' + s.id, chartCandles, s);
                     }
                 }
-            });
+            }, 150);
 
             // Update perf stats
             loadStrategyPerformance();
@@ -1837,11 +2105,14 @@
                 const wrEl = document.getElementById('stratWR');
                 const wlEl = document.getElementById('stratWL');
                 if (wrEl) wrEl.textContent = d.win_rate + '%';
-                if (wlEl) wlEl.textContent = d.wins + 'W / ' + d.losses + 'L';
+                const be = d.break_evens || 0;
+                const beStr = be > 0 ? ' / ' + be + 'BE' : '';
+                if (wlEl) wlEl.textContent = d.wins + 'W / ' + d.losses + 'L' + beStr;
                 // Also update header strategy stat
                 const hEl = document.getElementById('statStratWR');
                 if (hEl) {
-                    hEl.textContent = d.total > 0 ? d.win_rate + '% (' + d.wins + 'W/' + d.losses + 'L)' : '0%';
+                    const hBe = be > 0 ? '/' + be + 'BE' : '';
+                    hEl.textContent = d.total > 0 ? d.win_rate + '% (' + d.wins + 'W/' + d.losses + 'L' + hBe + ')' : '0%';
                     if (d.total > 0) hEl.className = 'stat-value ' + (d.win_rate >= 55 ? 'green' : d.win_rate >= 45 ? 'yellow' : 'red');
                 }
             }
@@ -1858,7 +2129,8 @@
             max_trades_per_hour: 3,
             stop_loss_pips: parseFloat(document.getElementById('stratSL')?.value) || 5,
             take_profit_pips: parseFloat(document.getElementById('stratTP')?.value) || 10,
-            expiry_minutes: parseInt(document.getElementById('stratExpiry')?.value) || 5
+            expiry_minutes: parseInt(document.getElementById('stratExpiry')?.value) || 5,
+            cooldown_minutes: parseInt(document.getElementById('stratCooldown')?.value) || 2
         };
     }
 
@@ -1903,7 +2175,7 @@
                             </div>
                         </div>
                         <div class="strat-saved-meta">
-                            Score &ge;${c.min_impact} | Conf &ge;${c.min_confidence}% | ${dirLabel} | SL:${c.stop_loss_pips} TP:${c.take_profit_pips} | Exp:${c.expiry_minutes || 5}min
+                            Score &ge;${c.min_impact} | Conf &ge;${c.min_confidence}% | ${dirLabel} | SL:${c.stop_loss_pips} TP:${c.take_profit_pips} | Exp:${c.expiry_minutes || 5}min | CD:${c.cooldown_minutes || 2}min
                         </div>
                     </div>`;
                 }).join('');
@@ -1928,6 +2200,7 @@
             document.getElementById('stratSL').value = c.stop_loss_pips || 5;
             document.getElementById('stratTP').value = c.take_profit_pips || 10;
             if (document.getElementById('stratExpiry')) document.getElementById('stratExpiry').value = c.expiry_minutes || 5;
+            if (document.getElementById('stratCooldown')) document.getElementById('stratCooldown').value = c.cooldown_minutes || 2;
         } catch(e) {}
     }
 
@@ -1947,6 +2220,11 @@
 
     // ===== INIT =====
     function init() {
+        // Load version from server
+        fetch('/version').then(r=>r.json()).then(d=>{
+            const el = document.getElementById('appVersion');
+            if(el && d.version) el.textContent = 'v' + d.version;
+        }).catch(()=>{});
         initChart();
         loadStats();
         loadAlerts();
@@ -1959,13 +2237,17 @@
             Notification.requestPermission();
         }
 
-        // Auto-refresh every 30 seconds
+        // Candle data refresh every 60s
+        setInterval(refreshMainChart, 60000);
+        // Real-time price via WebSocket (tick-by-tick)
+        connectPriceWs();
+        // Fallback polling every 10s in case WS drops
+        setInterval(tickPriceFallback, 10000);
+        // Data refresh every 30 seconds
         setInterval(() => {
             loadStats(); loadAlerts(); loadPerformance();
             loadAutoStrategies();
         }, 30000);
-        // Refresh candle cache every 2 minutes (not every 30s)
-        setInterval(() => { cachedCandles = null; }, 120000);
         // Refresh news every 2 minutes
         setInterval(loadNewsTicker, 120000);
     }
