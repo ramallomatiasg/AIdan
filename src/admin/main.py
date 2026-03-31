@@ -309,6 +309,9 @@ async def get_recent_alerts_endpoint(limit: int = 50):
         for row in alerts:
             alert_id, impact_score, alert_level, sent_at, title, url, explanation, eur_usd_impact, market_implications, analysis_method, should_operate, direction, confidence = row[:13]
             published_at = row[13] if len(row) > 13 else None
+            alert_result = row[14] if len(row) > 14 else None
+            alert_pips = row[15] if len(row) > 15 else None
+            price_at_alert = row[16] if len(row) > 16 else None
             formatted_alerts.append({
                 "id": alert_id,
                 "impact_score": impact_score,
@@ -323,7 +326,10 @@ async def get_recent_alerts_endpoint(limit: int = 50):
                 "analysis_method": analysis_method or 'keywords',
                 "should_operate": bool(should_operate),
                 "direction": direction or 'NEUTRAL',
-                "confidence": confidence or 50
+                "confidence": confidence or 50,
+                "alert_result": alert_result,
+                "alert_pips": alert_pips,
+                "price_at_alert": price_at_alert,
             })
 
         return JSONResponse({

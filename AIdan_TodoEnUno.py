@@ -712,7 +712,9 @@ class AIdan:
             from src.common.logging_setup import setup_logging
             from src.common.db import (init_db, get_unprocessed_news, mark_news_processed,
                                        add_alert, add_auto_strategy, get_news_fetch_time,
-                                       get_strategies_pending_evaluation, auto_evaluate_strategy)
+                                       get_strategies_pending_evaluation, auto_evaluate_strategy,
+                                       get_alerts_pending_evaluation, auto_evaluate_alert,
+                                       record_signal_result, has_recent_similar_strategy)
             from src.analyzer.news_analyzer import NewsAnalyzer
             from src.analyzer.technical import TechnicalAnalyzer
             
@@ -861,6 +863,8 @@ class AIdan:
                     
                     alerts_sent = 0
                     strategies_created = 0
+                    # Get current price for alert auto-evaluation
+                    _alert_price = tech.get_market_state().get('price', 0)
                     # Source conflict resolution: track directions from each source
                     cycle_signals = []  # list of {'source': str, 'direction': str, 'confidence': int}
                     for news_id, url, title, summary, entities, tags in news_items:
@@ -873,7 +877,8 @@ class AIdan:
                                     result.get('analysis_method', 'keywords'),
                                     result.get('should_operate', False),
                                     result.get('direction', 'NEUTRAL'),
-                                    result.get('confidence', 50))
+                                    result.get('confidence', 50),
+                                    price_at_alert=_alert_price)
                             alerts_sent += 1
 
                         # Auto-strategy: check against active profile (independent of should_alert)
@@ -1105,6 +1110,11 @@ class AIdan:
                                         news_title_cal = f"[CALENDARIO] Pre-{evt_name} ({evt_impact} Impact) - {side['label']}"
                                         prof_name = profile.get('name', 'default')
 
+                                        # Dedup: skip if similar calendar strategy exists
+                                        if has_recent_similar_strategy(direction, entry_px, 'calendar', 60):
+                                            logger.info(f"Dedup: skipping {direction} calendar near {entry_px:.5f}")
+                                            continue
+
                                         sid = add_auto_strategy(
                                             alert_id=None,
                                             news_title=news_title_cal,
@@ -1294,6 +1304,11 @@ class AIdan:
                                             conf = max(10, conf - 20)
                                             logger.info(f"Source conflict: structure {direction} vs {prior['source']} {prior['direction']}, conf -20 → {conf}")
 
+                                # Dedup: skip if a similar strategy was created recently
+                                if has_recent_similar_strategy(direction, price, 'structure', 30):
+                                    logger.info(f"Dedup: skipping {direction} structure near {price:.5f}, similar exists within 30min")
+                                    continue
+
                                 sid = add_auto_strategy(
                                     alert_id=None,
                                     news_title=f"[ESTRUCTURA] {sig['reason'][:80]}",
@@ -1366,6 +1381,11 @@ class AIdan:
                                     if conf <= prior['confidence']:
                                         conf = max(10, conf - 20)
                                         logger.info(f"Source conflict: SMC {direction} vs {prior['source']} {prior['direction']}, conf -20 → {conf}")
+
+                            # Dedup: skip if similar SMC strategy exists
+                            if has_recent_similar_strategy(direction, price, 'smc', 30):
+                                logger.info(f"Dedup: skipping {direction} SMC near {price:.5f}")
+                                continue
 
                             sid = add_auto_strategy(
                                 alert_id=None,
@@ -1530,6 +1550,50 @@ class AIdan:
 
                     except Exception as e:
                         logger.error(f"Auto-eval error: {e}", exc_info=True)
+
+                    # ===== AUTO-EVALUATE NEWS ALERTS =====
+                    try:
+                        pending_alerts = get_alerts_pending_evaluation()
+                        if pending_alerts:
+                            current_price = tech.get_market_state().get('price', 0)
+                            if current_price:
+                                pip = 0.0001
+                                min_pips_move = 2.0  # minimum pips to count as win/loss
+                                for arow in pending_alerts:
+                                    aid, a_dir, a_entry, a_conf, a_impact, a_sent, a_title = arow
+                                    if not a_entry or a_entry <= 0:
+                                        continue
+                                    if a_dir == 'CALL':
+                                        pips_move = (current_price - a_entry) / pip
+                                    else:  # PUT
+                                        pips_move = (a_entry - current_price) / pip
+
+                                    if pips_move >= min_pips_move:
+                                        a_result = 'win'
+                                    elif pips_move <= -min_pips_move:
+                                        a_result = 'loss'
+                                    else:
+                                        a_result = 'break_even'
+
+                                    auto_evaluate_alert(aid, a_result, current_price, pips_move)
+
+                                    # Also record in signal_results for learning/performance stats
+                                    record_signal_result(aid, a_result, {
+                                        'entry_price': a_entry,
+                                        'exit_price': current_price,
+                                        'pips': round(pips_move, 1),
+                                        'direction': a_dir,
+                                        'confidence': a_conf,
+                                        'impact_score': a_impact,
+                                        'setup_type': 'news',
+                                        'trigger_type': 'news',
+                                        'market_trend': tech.get_market_state().get('trend', ''),
+                                        'rsi_at_entry': tech.get_market_state().get('rsi', 0),
+                                    })
+                                    logger.info(f"Alert eval #{aid}: {a_result.upper()} | {a_dir} entry={a_entry:.5f} exit={current_price:.5f} | {pips_move:+.1f}p | {a_title[:50]}")
+                                logger.info(f"Evaluated {len(pending_alerts)} pending news alerts")
+                    except Exception as e:
+                        logger.error(f"Alert auto-eval error: {e}", exc_info=True)
 
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")

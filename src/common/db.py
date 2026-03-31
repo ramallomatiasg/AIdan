@@ -185,6 +185,19 @@ def init_db():
         except:
             pass
 
+    # Migration: add price_at_alert for auto-evaluation of news alerts
+    try:
+        cursor.execute("ALTER TABLE alerts ADD COLUMN price_at_alert REAL DEFAULT 0")
+    except:
+        pass
+
+    # Migration: add auto-evaluation columns to alerts
+    for col, coltype in [('alert_result', 'TEXT'), ('alert_exit_price', 'REAL DEFAULT 0'), ('alert_pips', 'REAL DEFAULT 0'), ('alert_evaluated_at', 'TIMESTAMP')]:
+        try:
+            cursor.execute(f"ALTER TABLE alerts ADD COLUMN {col} {coltype}")
+        except:
+            pass
+
     # Migration: add published_at to news
     try:
         cursor.execute("ALTER TABLE news ADD COLUMN published_at TIMESTAMP")
@@ -249,14 +262,14 @@ def mark_news_processed(news_id):
     conn.commit()
     conn.close()
 
-def add_alert(news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method='keywords', should_operate=False, direction='NEUTRAL', confidence=50):
+def add_alert(news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method='keywords', should_operate=False, direction='NEUTRAL', confidence=50, price_at_alert=0):
     """Log an alert with detailed information including AI decision"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO alerts (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, should_operate, direction, confidence, alert_sent_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, 1 if should_operate else 0, direction, confidence, now_ar()))
+        INSERT INTO alerts (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, should_operate, direction, confidence, alert_sent_at, price_at_alert)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, 1 if should_operate else 0, direction, confidence, now_ar(), price_at_alert or 0))
     conn.commit()
     conn.close()
 
@@ -269,17 +282,73 @@ def get_recent_alerts(limit=50):
         SELECT a.id, a.impact_score, a.alert_level, a.alert_sent_at,
                n.title, n.url, a.explanation, a.eur_usd_impact, a.market_implications,
                a.analysis_method, a.should_operate, a.direction, a.confidence,
-               n.published_at
+               n.published_at, a.alert_result, a.alert_pips, a.price_at_alert
         FROM alerts a
         JOIN news n ON a.news_id = n.id
         WHERE a.alert_sent_at >= datetime(?, '-3 days')
         ORDER BY a.alert_sent_at DESC
         LIMIT ?
     """, (today_ar(), min(limit, 50),))
-    
+
     results = cursor.fetchall()
     conn.close()
     return results
+
+def has_recent_similar_strategy(direction, entry_price, trigger_type='structure', minutes=30):
+    """Check if a similar strategy was already created recently (avoid duplicates).
+    Similar = same direction, same trigger type, entry within 3 pips."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cutoff = now_ar() - timedelta(minutes=minutes)
+    cursor.execute("""
+        SELECT id, entry_price FROM auto_strategies
+        WHERE direction = ? AND trigger_type = ? AND created_at > ?
+        ORDER BY created_at DESC LIMIT 5
+    """, (direction, trigger_type, cutoff))
+    rows = cursor.fetchall()
+    conn.close()
+    pip = 0.0001
+    for row in rows:
+        if abs(row[1] - entry_price) < 3 * pip:  # within 3 pips = duplicate
+            return True
+    return False
+
+
+def get_alerts_pending_evaluation():
+    """Get alerts with a directional prediction (CALL/PUT) older than 30 min that haven't been evaluated yet."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cutoff = now_ar() - timedelta(minutes=30)
+    cursor.execute("""
+        SELECT a.id, a.direction, a.price_at_alert, a.confidence, a.impact_score,
+               a.alert_sent_at, n.title
+        FROM alerts a
+        JOIN news n ON a.news_id = n.id
+        WHERE a.direction IN ('CALL', 'PUT')
+          AND a.price_at_alert > 0
+          AND a.alert_result IS NULL
+          AND a.alert_sent_at < ?
+          AND a.alert_sent_at >= datetime(?, '-2 days')
+        ORDER BY a.alert_sent_at ASC
+    """, (cutoff, today_ar()))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def auto_evaluate_alert(alert_id, result, exit_price, pips):
+    """Record an auto-evaluated alert result directly on the alerts table."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE alerts SET alert_result = ?, alert_exit_price = ?, alert_pips = ?, alert_evaluated_at = ?
+            WHERE id = ?
+        """, (result, exit_price, round(pips, 1), now_ar(), alert_id))
+        conn.commit()
+    finally:
+        conn.close()
+
 
 def get_stats():
     """Get system statistics"""

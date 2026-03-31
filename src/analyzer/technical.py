@@ -340,7 +340,7 @@ class TechnicalAnalyzer:
         # Cleanup old triggered levels (every 30 min)
         now = time.time()
         if now - self._last_trigger_cleanup > 120:  # cleanup every 2 min
-            cutoff = now - 300  # forget levels older than 5 min
+            cutoff = now - 1800  # forget levels older than 30 min (avoid duplicate strategies)
             self._triggered_levels = {k: v for k, v in self._triggered_levels.items() if v > cutoff}
             self._last_trigger_cleanup = now
 

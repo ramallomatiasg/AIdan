@@ -4,14 +4,14 @@ import json
 
 load_dotenv()
 
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 
 class Config:
     VERSION = APP_VERSION
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
     COLLECTOR_INTERVAL = int(os.getenv("COLLECTOR_INTERVAL", "600"))  # 10 min
-    ANALYZER_INTERVAL = int(os.getenv("ANALYZER_INTERVAL", "120"))    # 2 min
+    ANALYZER_INTERVAL = int(os.getenv("ANALYZER_INTERVAL", "60"))     # 1 min
     DATA_RETENTION_HOURS = int(os.getenv("DATA_RETENTION_HOURS", "72"))
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "46f407e058674f159a2a176e023ab536")

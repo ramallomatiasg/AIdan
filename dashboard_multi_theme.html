@@ -1421,6 +1421,29 @@
             if (!actionText && !isOperate) actionText = `NO OPERAR - Sin senal clara para scalping`;
             const impactText = escapeHtml(alert.eur_usd_impact || alert.explanation || '');
 
+            // Auto-evaluation result badge
+            const ar = alert.alert_result;
+            const ap = alert.alert_pips;
+            const priceEntry = alert.price_at_alert;
+            let autoEvalHtml = '';
+            if (ar) {
+                const arColor = ar === 'win' ? 'var(--accent-green)' : ar === 'loss' ? 'var(--accent-red)' : 'var(--accent-yellow)';
+                const arIcon = ar === 'win' ? '&#x2705;' : ar === 'loss' ? '&#x274C;' : '&#x2796;';
+                const arLabel = ar === 'win' ? 'WIN' : ar === 'loss' ? 'LOSS' : 'BE';
+                const pipsStr = ap ? (ap > 0 ? `+${ap.toFixed(1)}` : ap.toFixed(1)) + 'p' : '';
+                autoEvalHtml = `<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;margin-top:4px;border-radius:6px;background:color-mix(in srgb, ${arColor} 12%, transparent);border:1px solid color-mix(in srgb, ${arColor} 30%, transparent);">
+                    <span style="font-size:13px;">${arIcon}</span>
+                    <span style="color:${arColor};font-weight:600;font-size:13px;">${arLabel}</span>
+                    <span style="color:${arColor};font-size:12px;">${pipsStr}</span>
+                    ${priceEntry ? `<span style="color:var(--text-muted);font-size:11px;margin-left:auto;">Entry: ${priceEntry.toFixed(5)}</span>` : ''}
+                </div>`;
+            } else if (alert.direction !== 'NEUTRAL' && priceEntry) {
+                autoEvalHtml = `<div style="padding:3px 8px;margin-top:4px;font-size:11px;color:var(--text-muted);">&#x23F3; Evaluando... (entry: ${priceEntry.toFixed(5)})</div>`;
+            }
+
+            // Show manual buttons only if no auto-evaluation yet
+            const showManualBtns = !ar;
+
             return `
                 <div class="alert-card ${dirClass}">
                     <div class="alert-header">
@@ -1443,11 +1466,12 @@
                             </div>
                         </div>
                     </div>
-                    <div class="alert-actions">
+                    ${autoEvalHtml}
+                    ${showManualBtns ? `<div class="alert-actions">
                         <button class="result-btn win ${btnState('win')}" onclick="recordResult(${alert.id},'win')">&#x2705; Win</button>
                         <button class="result-btn loss ${btnState('loss')}" onclick="recordResult(${alert.id},'loss')">&#x274C; Loss</button>
                         <button class="result-btn skip ${btnState('skip')}" onclick="recordResult(${alert.id},'skip')">&#x23ED; Skip</button>
-                    </div>
+                    </div>` : ''}
                 </div>`;
         }).join('');
     }
