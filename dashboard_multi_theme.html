@@ -1961,6 +1961,8 @@
                     ? '<span style="color:var(--text-muted);font-size:16px;">&#x23F3; Evaluando...</span>'
                     : '<span style="color:var(--accent-green);font-size:16px;">&#x25CF; ACTIVA</span>';
                 const timeStr = s.created_at ? new Date(s.created_at).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
+                const expiresStr = s.expires_at ? new Date(s.expires_at).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
+                const expiryTag = !s.result && expiresStr ? `<span style="font-size:12px;color:var(--text-muted);margin-left:4px;" title="Expira a las ${expiresStr} (${s.expiry_minutes || '?'}min)">⏱ ${expiresStr}</span>` : '';
                 const opacity = isExpired && !s.result ? '0.6' : '1';
                 const chartId = 'strat-chart-' + s.id;
 
@@ -1973,6 +1975,7 @@
                             <span style="background:${dirBg};color:${dirColor};padding:3px 10px;border-radius:6px;font-weight:800;font-size:16px;">${s.direction}</span>
                             <span style="font-size:16px;color:var(--text-muted);">${timeStr}</span>
                             ${statusBadge}
+                            ${expiryTag}
                         </div>
                         <div style="text-align:right;">
                             <span style="font-size:16px;color:var(--accent-cyan);">Conf: ${s.confidence.toFixed(1)}%</span>
