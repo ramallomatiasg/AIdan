@@ -314,6 +314,22 @@ def has_recent_similar_strategy(direction, entry_price, trigger_type='structure'
     return False
 
 
+def has_active_opposite_strategy(direction):
+    """Check if there's an active strategy in the OPPOSITE direction.
+    Prevents contradictory CALL+PUT at the same time."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    opposite = 'PUT' if direction == 'CALL' else 'CALL'
+    cursor.execute("""
+        SELECT id, direction, confidence FROM auto_strategies
+        WHERE direction = ? AND status = 'active' AND expires_at > ?
+        LIMIT 1
+    """, (opposite, now_ar()))
+    row = cursor.fetchone()
+    conn.close()
+    return row  # returns (id, direction, confidence) or None
+
+
 def get_alerts_pending_evaluation():
     """Get alerts with a directional prediction (CALL/PUT) older than 30 min that haven't been evaluated yet."""
     conn = sqlite3.connect(DB_PATH)

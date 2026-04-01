@@ -714,7 +714,8 @@ class AIdan:
                                        add_alert, add_auto_strategy, get_news_fetch_time,
                                        get_strategies_pending_evaluation, auto_evaluate_strategy,
                                        get_alerts_pending_evaluation, auto_evaluate_alert,
-                                       record_signal_result, has_recent_similar_strategy)
+                                       record_signal_result, has_recent_similar_strategy,
+                                       has_active_opposite_strategy)
             from src.analyzer.news_analyzer import NewsAnalyzer
             from src.analyzer.technical import TechnicalAnalyzer
             
@@ -947,17 +948,22 @@ class AIdan:
                                                 row = c.fetchone()
                                                 conn.close()
                                                 if row:
-                                                    sid = add_auto_strategy(
-                                                        alert_id=row[0], news_title=title,
-                                                        direction=direction, entry_price=price,
-                                                        stop_loss=sl, take_profit=tp,
-                                                        confidence=result.get('confidence', 50),
-                                                        impact_score=result['impact_score'],
-                                                        expiry_minutes=expiry_min)
-                                                    if sid:
-                                                        strategies_created += 1
-                                                        cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': result.get('confidence', 50)})
-                                                        logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}]")
+                                                    # Anti-contradiction: skip if active opposite strategy
+                                                    opposite = has_active_opposite_strategy(direction)
+                                                    if opposite:
+                                                        logger.info(f"Anti-contradiction: skipping {direction} news, active #{opposite[0]} {opposite[1]}")
+                                                    elif row:
+                                                        sid = add_auto_strategy(
+                                                            alert_id=row[0], news_title=title,
+                                                            direction=direction, entry_price=price,
+                                                            stop_loss=sl, take_profit=tp,
+                                                            confidence=result.get('confidence', 50),
+                                                            impact_score=result['impact_score'],
+                                                            expiry_minutes=expiry_min)
+                                                        if sid:
+                                                            strategies_created += 1
+                                                            cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': result.get('confidence', 50)})
+                                                            logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}]")
                                 except Exception as e:
                                     logger.error(f"Auto-strategy error: {e}")
 
@@ -1113,6 +1119,12 @@ class AIdan:
                                         # Dedup: skip if similar calendar strategy exists
                                         if has_recent_similar_strategy(direction, entry_px, 'calendar', 60):
                                             logger.info(f"Dedup: skipping {direction} calendar near {entry_px:.5f}")
+                                            continue
+
+                                        # Anti-contradiction: skip if active opposite strategy
+                                        opposite = has_active_opposite_strategy(direction)
+                                        if opposite:
+                                            logger.info(f"Anti-contradiction: skipping {direction} calendar, active #{opposite[0]} {opposite[1]}")
                                             continue
 
                                         sid = add_auto_strategy(
@@ -1309,6 +1321,12 @@ class AIdan:
                                     logger.info(f"Dedup: skipping {direction} structure near {price:.5f}, similar exists within 30min")
                                     continue
 
+                                # Anti-contradiction: skip if there's an active strategy in the opposite direction
+                                opposite = has_active_opposite_strategy(direction)
+                                if opposite:
+                                    logger.info(f"Anti-contradiction: skipping {direction} structure, active #{opposite[0]} {opposite[1]} (conf={opposite[2]})")
+                                    continue
+
                                 sid = add_auto_strategy(
                                     alert_id=None,
                                     news_title=f"[ESTRUCTURA] {sig['reason'][:80]}",
@@ -1385,6 +1403,12 @@ class AIdan:
                             # Dedup: skip if similar SMC strategy exists
                             if has_recent_similar_strategy(direction, price, 'smc', 30):
                                 logger.info(f"Dedup: skipping {direction} SMC near {price:.5f}")
+                                continue
+
+                            # Anti-contradiction: skip if active opposite strategy
+                            opposite = has_active_opposite_strategy(direction)
+                            if opposite:
+                                logger.info(f"Anti-contradiction: skipping {direction} SMC, active #{opposite[0]} {opposite[1]}")
                                 continue
 
                             sid = add_auto_strategy(
