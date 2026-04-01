@@ -396,7 +396,7 @@ class NewsAnalyzer:
         except Exception:
             pass
 
-        return f"""Sos analista de trading de opciones binarias EUR/USD. Analizá esta noticia y decidí si OPERAR o NO OPERAR.
+        return f"""Sos analista de trading de opciones binarias EUR/USD con 15 años de experiencia. Tu trabajo es detectar oportunidades operables y dar dirección clara.
 
 TÍTULO: {title}
 CONTENIDO: {summary[:500]}
@@ -415,34 +415,51 @@ Responde SOLO con JSON válido (sin markdown, sin ```json). Cada campo debe ser 
     "market_implications": "<empezar con ACCIÓN: OPERAR o ACCIÓN: NO OPERAR>"
 }}
 
-PASO 1 - EVALUAR RELEVANCIA: Antes de asignar scores, preguntate: ¿esta noticia mueve DIRECTAMENTE el par EUR/USD?
-- DIRECTA: Decisiones de Fed/ECB/BoJ, datos macro (inflación, empleo, PIB), política comercial USD/EUR, crisis bancaria
-- INDIRECTA: Petróleo, geopolítica, commodities (afectan USD indirectamente)
-- NINGUNA: Acciones individuales, earnings, deportes, tech, M&A corporativo, autos, entretenimiento
+PASO 1 - EVALUAR RELEVANCIA: ¿Esta noticia puede mover el par EUR/USD?
+- DIRECTA (operable): Decisiones/discursos Fed/ECB/BoJ, datos macro USA o Eurozona (inflación, CPI, PPI, empleo, NFP, ADP, PIB, GDP, PMI, ISM, Retail Sales, Consumer Confidence, Housing, Jobless Claims, balanza comercial), política comercial/arancelaria USD/EUR, crisis bancaria o financiera, discursos de Powell/Lagarde/miembros FOMC/ECB
+- INDIRECTA (posible): Petróleo/oro/commodities, geopolítica que afecte flujo de capitales, bonos/treasuries, risk-on/risk-off global
+- NINGUNA: Acciones individuales, earnings corporativos, deportes, tech/AI, M&A sin impacto macro, entretenimiento, crypto
 
 PASO 2 - ASIGNAR SCORES según relevancia:
-Si relevance = NINGUNA → impact_score DEBE ser < 20, direction DEBE ser NEUTRAL, confidence < 15
-Si relevance = INDIRECTA → impact_score 20-70, confidence hasta 65, direction puede ser CALL/PUT si el mecanismo hacia EUR/USD es razonable (ej: petróleo sube → USD afectado → EUR/USD se mueve)
-Si relevance = DIRECTA → impact_score y confidence según análisis real
+Si relevance = NINGUNA → impact_score < 20, direction = NEUTRAL, confidence < 15
+Si relevance = INDIRECTA → impact_score 30-70, confidence hasta 70, direction CALL/PUT si hay mecanismo claro
+Si relevance = DIRECTA → impact_score 50-100, confidence según claridad de la señal
 
 GUÍA DE SCORES (impact_score):
-- 90-100: Cambio de tasas Fed/ECB, crisis financiera sistémica
-- 75-89: Datos de inflación/empleo/PIB que sorprenden vs expectativas
-- 50-74: Noticias macro secundarias con impacto moderado
-- 20-49: Noticias con relación indirecta a forex
-- 0-19: Noticias sin relación a EUR/USD
+- 90-100: Cambio de tasas Fed/ECB, crisis sistémica, NFP/CPI con sorpresa grande
+- 75-89: Datos clave (empleo, inflación, PIB, PMI) que sorprenden vs consenso, discursos hawkish/dovish de Powell/Lagarde
+- 60-74: Datos macro relevantes (Retail Sales, ADP, ISM, Housing), discursos de miembros FOMC/ECB
+- 45-59: Datos macro menores pero con dirección clara, geopolítica con impacto en flujos
+- 20-44: Relación indirecta, impacto diluido
+- 0-19: Sin relación a EUR/USD
+
+DIRECCIÓN - REGLAS CLAVE (EUR/USD = EUR arriba / USD abajo):
+- Dato USA fuerte (mejor que consenso): USD sube → EUR/USD baja → PUT
+- Dato USA débil (peor que consenso): USD baja → EUR/USD sube → CALL
+- Dato Eurozona fuerte: EUR sube → EUR/USD sube → CALL
+- Dato Eurozona débil: EUR baja → EUR/USD baja → PUT
+- Fed hawkish (tasas altas más tiempo): USD sube → PUT
+- Fed dovish (recortes pronto): USD baja → CALL
+- ECB hawkish: EUR sube → CALL
+- ECB dovish: EUR baja → PUT
+- Risk-off (miedo, guerra, crisis): USD sube como refugio → PUT
+- Risk-on (optimismo, paz): USD baja → CALL
+- Si el dato es mixto o sin sorpresa clara → NEUTRAL
 
 GUÍA DE CONFIDENCE:
-- 85-100: Mecanismo causal directo y claro (Fed sube tasas → USD fuerte → PUT)
-- 65-84: Mecanismo probable pero con variables
-- 40-64: Dirección incierta, múltiples interpretaciones
-- 0-39: No hay señal clara → direction DEBE ser NEUTRAL
+- 80-100: Dato con sorpresa clara vs consenso + mecanismo directo (ej: NFP +300K vs +180K esperado → PUT claro)
+- 60-79: Dato relevante con dirección probable pero sin sorpresa extrema
+- 40-59: Señal direccional presente pero con variables que pueden diluirla
+- 0-39: No hay señal direccional clara → direction DEBE ser NEUTRAL
 
 REGLAS OBLIGATORIAS:
-- should_operate = true SOLO si direction es CALL o PUT Y relevance es DIRECTA o INDIRECTA
-- Si relevance es NINGUNA: should_operate = false, direction = NEUTRAL, SIEMPRE
-- NO inventes mecanismos causales rebuscados para justificar CALL/PUT en noticias irrelevantes
-- Cada noticia DEBE tener scores ÚNICOS basados en su contenido específico"""
+- Si hay datos macro USA/EUR con resultado conocido: SIEMPRE dar dirección CALL o PUT según la sorpresa, con confidence >= 50
+- Si es discurso de presidente Fed/ECB y hay sesgo claro (hawkish/dovish): dar dirección con confidence >= 55
+- should_operate = true si direction es CALL o PUT Y confidence >= 50
+- Si relevance es NINGUNA: should_operate = false, direction = NEUTRAL
+- NO inventes mecanismos rebuscados para noticias irrelevantes, pero SÍ asigná dirección en noticias macro reales
+- Cada noticia DEBE tener scores ÚNICOS basados en su contenido específico
+- PREFERÍ dar CALL o PUT con confidence moderada (50-65) antes que NEUTRAL cuando hay una señal macro real"""
 
     def _parse_ai_result(self, news_id, result_text, method):
         """Parse JSON result from AI response. Shared by Groq and Ollama."""

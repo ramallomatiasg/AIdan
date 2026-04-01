@@ -990,7 +990,8 @@ class AIdan:
 
                         cal_resp = requests.get('http://localhost:8000/calendar', timeout=5)
                         if cal_resp.status_code == 200:
-                            cal_events = cal_resp.json() if isinstance(cal_resp.json(), list) else cal_resp.json().get('data', [])
+                            cal_json = cal_resp.json()
+                            cal_events = cal_json if isinstance(cal_json, list) else cal_json.get('events', cal_json.get('data', []))
                             utc_now = _cal_dt.now(_cal_tz.utc)
                             entry_rules = get_entry_rules_summary()
 
