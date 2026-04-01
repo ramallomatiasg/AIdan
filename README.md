@@ -20,14 +20,13 @@ Sistema de trading asistido que monitorea noticias financieras en tiempo real, a
 
 ### Usuarios
 
-1. Descomprime `AIdan_Portable.rar`
-2. Ejecuta `AIdan_TodoEnUno.exe`
-3. Listo. Se abre solo en el navegador en `http://localhost:8000`
+1. Ejecuta `AIdan_TodoEnUno.exe`
+2. Se abre solo en el navegador en `http://localhost:8000`
 
 **Requisitos:**
 - Windows 10/11
-- 8GB de RAM minimo (16GB recomendado)
-- Conexion a internet
+- 4GB de RAM minimo
+- Conexion a internet (usa Groq API en la nube, no requiere modelos locales)
 
 ### Desarrolladores
 
@@ -37,6 +36,8 @@ cd AIdan
 pip install -r requirements.txt
 python AIdan_TodoEnUno.py
 ```
+
+Requiere variable de entorno `GROQ_API_KEY` con una API key de [Groq](https://console.groq.com/) (gratis).
 
 ---
 
