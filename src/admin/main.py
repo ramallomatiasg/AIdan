@@ -808,7 +808,11 @@ async def list_auto_strategies():
                 "result": r[13],
                 "trigger_type": r[14] if len(r) > 14 else "news",
                 "candles_snapshot": snapshot,
-                "profile_name": r[16] if len(r) > 16 else None
+                "profile_name": r[16] if len(r) > 16 else None,
+                "mt5_ticket": r[17] if len(r) > 17 else None,
+                "mt5_lot": r[18] if len(r) > 18 else None,
+                "mt5_status": r[19] if len(r) > 19 else None,
+                "mt5_pnl": r[20] if len(r) > 20 else None,
             })
         return JSONResponse({"status": "success", "data": strategies, "count": len(strategies)})
     except Exception as e:
@@ -1549,5 +1553,126 @@ REGLAS: Usá SOLO los datos de arriba. NO inventes eventos ni noticias. Si no te
             "status": "error",
             "message": str(e)
         }, status_code=500)
+
+# ── MT5 Endpoints ──
+
+_mt5_executor = None
+
+def _get_mt5():
+    global _mt5_executor
+    return _mt5_executor
+
+def set_mt5_executor(executor):
+    global _mt5_executor
+    _mt5_executor = executor
+
+@app.get("/mt5/status")
+async def mt5_status():
+    mt5 = _get_mt5()
+    from src.common.db import get_mt5_config, get_mt5_daily_pnl
+    config = get_mt5_config()
+
+    if not mt5 or not mt5.connected:
+        return JSONResponse({"status": "success", "data": {
+            "connected": False, "enabled": False, "kill_switch": False,
+            "account": None, "config": config, "daily_pnl": 0, "positions": 0,
+        }})
+
+    account = mt5.get_account_info()
+    positions = mt5.check_positions()
+    daily_pnl = get_mt5_daily_pnl()
+
+    return JSONResponse({"status": "success", "data": {
+        "connected": mt5.connected,
+        "enabled": not mt5.kill_switch,
+        "kill_switch": mt5.kill_switch,
+        "account": account,
+        "config": config,
+        "daily_pnl": round(daily_pnl, 2),
+        "positions": len(positions),
+    }})
+
+@app.get("/mt5/positions")
+async def mt5_positions():
+    mt5 = _get_mt5()
+    if not mt5 or not mt5.connected:
+        return JSONResponse({"status": "success", "data": []})
+    positions = mt5.check_positions()
+    return JSONResponse({"status": "success", "data": positions})
+
+@app.post("/mt5/toggle")
+async def mt5_toggle(request: Request):
+    mt5 = _get_mt5()
+    if not mt5:
+        return JSONResponse({"status": "error", "message": "MT5 not initialized"}, status_code=400)
+    body = await request.json()
+    enabled = body.get("enabled", True)
+    mt5.toggle(enabled)
+    return JSONResponse({"status": "success", "enabled": not mt5.kill_switch})
+
+@app.post("/mt5/connect")
+async def mt5_connect(request: Request):
+    mt5 = _get_mt5()
+    if not mt5:
+        from src.broker.mt5_executor import MT5Executor
+        mt5 = MT5Executor(logger)
+        set_mt5_executor(mt5)
+
+    body = await request.json()
+    account = body.get("account")
+    password = body.get("password")
+    server = body.get("server", "ICMarketsSC-Demo")
+
+    if not account or not password:
+        return JSONResponse({"status": "error", "message": "account and password required"}, status_code=400)
+
+    success = mt5.reconnect(account, password, server)
+    if success:
+        info = mt5.get_account_info()
+        return JSONResponse({"status": "success", "data": info})
+    else:
+        return JSONResponse({"status": "error", "message": "Connection failed"}, status_code=400)
+
+@app.get("/mt5/config")
+async def mt5_config_get():
+    from src.common.db import get_mt5_config
+    config = get_mt5_config()
+    return JSONResponse({"status": "success", "data": config})
+
+@app.post("/mt5/config")
+async def mt5_config_update(request: Request):
+    from src.common.db import update_mt5_config, get_mt5_config
+    body = await request.json()
+    update_mt5_config(
+        risk_percent=body.get("risk_percent"),
+        max_positions=body.get("max_positions"),
+        max_lot=body.get("max_lot"),
+    )
+    return JSONResponse({"status": "success", "data": get_mt5_config()})
+
+@app.get("/mt5/history")
+async def mt5_history():
+    from src.common.db import DB_PATH, now_ar, today_ar
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, direction, entry_price, mt5_ticket, mt5_lot, mt5_pnl,
+               mt5_close_price, mt5_status, mt5_closed_at, news_title
+        FROM auto_strategies
+        WHERE mt5_status = 'closed' AND date(mt5_closed_at) = date(?)
+        ORDER BY mt5_closed_at DESC
+    """, (now_ar(),))
+    rows = c.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        result.append({
+            "strategy_id": r[0], "direction": r[1], "entry_price": r[2],
+            "ticket": r[3], "lot": r[4], "pnl": r[5],
+            "close_price": r[6], "status": r[7], "closed_at": str(r[8]),
+            "title": r[9]
+        })
+    return JSONResponse({"status": "success", "data": result})
 
 # Run with: uvicorn src.admin.main:app --host 0.0.0.0 --port 8000

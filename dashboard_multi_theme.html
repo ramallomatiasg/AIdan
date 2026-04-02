@@ -867,6 +867,58 @@
 <!-- ===== TAB: ESTRATEGIAS AUTO ===== -->
 <div class="tab-content" id="tab-estrategias">
 <div style="padding:12px;">
+
+    <!-- MT5 Panel -->
+    <div id="mt5Panel" style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;padding:14px;margin-bottom:14px;display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span id="mt5StatusDot" style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
+                <span id="mt5StatusText" style="font-weight:700;color:var(--text-primary);font-size:14px;">MT5 Offline</span>
+                <span id="mt5AccountBadge" style="font-size:12px;color:var(--text-muted);"></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <span id="mt5Balance" style="font-size:13px;color:var(--text-muted);"></span>
+                <span id="mt5DailyPnl" style="font-size:13px;font-weight:600;"></span>
+                <span id="mt5Positions" style="font-size:13px;color:var(--text-muted);"></span>
+                <button id="mt5KillBtn" onclick="mt5Toggle()" style="padding:4px 12px;border-radius:6px;border:1px solid #ef4444;background:transparent;color:#ef4444;font-size:12px;font-weight:600;cursor:pointer;">KILL SWITCH</button>
+            </div>
+        </div>
+        <!-- MT5 Config (collapsible) -->
+        <details style="margin-top:10px;">
+            <summary style="cursor:pointer;font-size:13px;color:var(--accent-cyan);user-select:none;">Configuracion MT5</summary>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;align-items:end;">
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                    <label style="font-size:11px;color:var(--text-muted);">Account</label>
+                    <input id="mt5InputAccount" type="text" style="width:100px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;">
+                </div>
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                    <label style="font-size:11px;color:var(--text-muted);">Password</label>
+                    <input id="mt5InputPassword" type="password" style="width:120px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;">
+                </div>
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                    <label style="font-size:11px;color:var(--text-muted);">Server</label>
+                    <input id="mt5InputServer" type="text" style="width:150px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;" value="ICMarketsSC-Demo">
+                </div>
+                <button onclick="mt5Connect()" style="padding:4px 14px;border-radius:6px;border:1px solid var(--accent-cyan);background:transparent;color:var(--accent-cyan);font-size:12px;font-weight:600;cursor:pointer;">Conectar</button>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;align-items:end;">
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                    <label style="font-size:11px;color:var(--text-muted);">Risk %</label>
+                    <input id="mt5RiskPercent" type="number" step="0.1" min="0.1" max="5" style="width:70px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;" value="1.0">
+                </div>
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                    <label style="font-size:11px;color:var(--text-muted);">Max Posiciones</label>
+                    <input id="mt5MaxPositions" type="number" min="1" max="10" style="width:70px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;" value="3">
+                </div>
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                    <label style="font-size:11px;color:var(--text-muted);">Lot Max</label>
+                    <input id="mt5MaxLot" type="number" step="0.01" min="0.01" max="1" style="width:70px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;" value="0.10">
+                </div>
+                <button onclick="mt5SaveConfig()" style="padding:4px 14px;border-radius:6px;border:1px solid var(--accent-cyan);background:transparent;color:var(--accent-cyan);font-size:12px;font-weight:600;cursor:pointer;">Guardar</button>
+            </div>
+        </details>
+    </div>
+
     <!-- Performance bar -->
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
         <span style="font-size:16px;font-weight:700;color:var(--text-primary);">&#x1F3AF; Estrategias Auto-Generadas</span>
@@ -1993,6 +2045,17 @@
                 // Vote button states
                 const btnState = (r) => s.result === r ? 'active' : (s.result ? 'disabled' : '');
 
+                // MT5 badge
+                let mt5Badge = '';
+                if (s.mt5_ticket && s.mt5_status === 'filled') {
+                    mt5Badge = `<span style="background:rgba(59,130,246,0.2);color:#3b82f6;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;">MT5 #${s.mt5_ticket} | ${s.mt5_lot} lot</span>`;
+                } else if (s.mt5_status === 'closed' && s.mt5_pnl != null) {
+                    const pnlColor = s.mt5_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                    mt5Badge = `<span style="background:rgba(${s.mt5_pnl >= 0 ? '34,197,94' : '239,68,68'},0.15);color:${pnlColor};padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;">MT5 ${s.mt5_pnl >= 0 ? '+' : ''}$${s.mt5_pnl.toFixed(2)}</span>`;
+                } else if (s.mt5_status === 'error') {
+                    mt5Badge = '<span style="background:rgba(234,179,8,0.15);color:#eab308;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;">MT5 Error</span>';
+                }
+
                 return `<div class="card" style="opacity:${opacity};border-left:3px solid ${dirColor};min-width:700px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px 6px;">
                         <div style="display:flex;align-items:center;gap:8px;">
@@ -2000,6 +2063,7 @@
                             <span style="font-size:16px;color:var(--text-muted);">${timeStr}</span>
                             ${statusBadge}
                             ${expiryTag}
+                            ${mt5Badge}
                         </div>
                         <div style="text-align:right;">
                             <span style="font-size:16px;color:var(--accent-cyan);">Conf: ${s.confidence.toFixed(1)}%</span>
@@ -2279,7 +2343,113 @@
         setInterval(loadNewsTicker, 120000);
     }
 
+    // ── MT5 Functions ──
+    async function loadMT5Status() {
+        try {
+            const res = await fetch(`${API_BASE}/mt5/status`);
+            const data = await res.json();
+            if (data.status !== 'success') return;
+            const d = data.data;
+            const panel = document.getElementById('mt5Panel');
+            panel.style.display = 'block';
+
+            const dot = document.getElementById('mt5StatusDot');
+            const text = document.getElementById('mt5StatusText');
+            const badge = document.getElementById('mt5AccountBadge');
+            const bal = document.getElementById('mt5Balance');
+            const pnl = document.getElementById('mt5DailyPnl');
+            const pos = document.getElementById('mt5Positions');
+            const killBtn = document.getElementById('mt5KillBtn');
+
+            if (d.connected && d.account) {
+                dot.style.background = d.enabled ? '#22c55e' : '#eab308';
+                text.textContent = d.enabled ? 'MT5 Conectado' : 'MT5 Pausado';
+                badge.textContent = `${d.account.trade_mode} ${d.account.login}`;
+                bal.textContent = `Balance: $${d.account.balance.toFixed(2)} | Equity: $${d.account.equity.toFixed(2)}`;
+                const pnlVal = d.daily_pnl || 0;
+                pnl.textContent = `P&L: ${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)}`;
+                pnl.style.color = pnlVal >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                pos.textContent = `Pos: ${d.positions}/${d.config.max_positions}`;
+                killBtn.style.borderColor = d.enabled ? '#ef4444' : '#22c55e';
+                killBtn.style.color = d.enabled ? '#ef4444' : '#22c55e';
+                killBtn.textContent = d.enabled ? 'KILL SWITCH' : 'ACTIVAR';
+            } else {
+                dot.style.background = '#ef4444';
+                text.textContent = 'MT5 Offline';
+                badge.textContent = '';
+                bal.textContent = '';
+                pnl.textContent = '';
+                pos.textContent = '';
+            }
+
+            // Fill config inputs
+            if (d.config) {
+                document.getElementById('mt5RiskPercent').value = d.config.risk_percent;
+                document.getElementById('mt5MaxPositions').value = d.config.max_positions;
+                document.getElementById('mt5MaxLot').value = d.config.max_lot;
+            }
+            if (d.account) {
+                document.getElementById('mt5InputAccount').value = d.account.login;
+                document.getElementById('mt5InputServer').value = d.account.server || '';
+            }
+        } catch(e) {
+            // MT5 not available, hide panel
+        }
+    }
+
+    async function mt5Toggle() {
+        try {
+            const res = await fetch(`${API_BASE}/mt5/status`);
+            const data = await res.json();
+            const currentEnabled = data.data?.enabled ?? true;
+            await fetch(`${API_BASE}/mt5/toggle`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: !currentEnabled})
+            });
+            loadMT5Status();
+        } catch(e) {}
+    }
+
+    async function mt5Connect() {
+        const account = document.getElementById('mt5InputAccount').value;
+        const password = document.getElementById('mt5InputPassword').value;
+        const server = document.getElementById('mt5InputServer').value;
+        if (!account || !password) { alert('Ingresa account y password'); return; }
+        try {
+            const res = await fetch(`${API_BASE}/mt5/connect`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({account: parseInt(account), password, server})
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                loadMT5Status();
+            } else {
+                alert('Error: ' + (data.message || 'Connection failed'));
+            }
+        } catch(e) { alert('Error de conexion'); }
+    }
+
+    async function mt5SaveConfig() {
+        try {
+            await fetch(`${API_BASE}/mt5/config`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    risk_percent: parseFloat(document.getElementById('mt5RiskPercent').value),
+                    max_positions: parseInt(document.getElementById('mt5MaxPositions').value),
+                    max_lot: parseFloat(document.getElementById('mt5MaxLot').value)
+                })
+            });
+            loadMT5Status();
+        } catch(e) {}
+    }
+
     init();
+    // MT5 status refresh
+    loadMT5Status();
+    setInterval(loadMT5Status, 15000);
 </script>
 
 </body>

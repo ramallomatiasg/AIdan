@@ -742,6 +742,41 @@ class AIdan:
             # Calendar pre-news: track already-traded events across cycles
             _traded_calendar_events = set()
 
+            # MT5 Executor initialization
+            mt5_exec = None
+            self._mt5_exec = None  # expose for API endpoints
+            if Config.MT5_ENABLED:
+                try:
+                    from src.broker.mt5_executor import MT5Executor
+                    mt5_exec = MT5Executor(logger)
+                    if mt5_exec.connect():
+                        logger.info("MT5 execution enabled")
+                        self._mt5_exec = mt5_exec
+                        # Expose to API endpoints
+                        try:
+                            from src.admin.main import set_mt5_executor
+                            set_mt5_executor(mt5_exec)
+                        except Exception:
+                            pass
+                    else:
+                        logger.warning("MT5 connection failed - paper mode only")
+                        mt5_exec = None
+                except ImportError:
+                    logger.warning("MetaTrader5 not installed - paper mode only")
+                except Exception as e:
+                    logger.error(f"MT5 init error: {e}")
+
+            def _try_mt5_execute(sid, direction, entry_price, sl, tp, confidence):
+                if mt5_exec and mt5_exec.is_ready():
+                    try:
+                        ticket = mt5_exec.open_position(sid, direction, entry_price, sl, tp, confidence)
+                        if ticket:
+                            logger.info(f"MT5 executed: ticket #{ticket} for strategy #{sid}")
+                        return ticket
+                    except Exception as e:
+                        logger.error(f"MT5 execution error for #{sid}: {e}")
+                return None
+
             # ── Startup: expire and evaluate pending strategies from previous session ──
             try:
                 import sqlite3 as _sq3
@@ -964,6 +999,7 @@ class AIdan:
                                                             strategies_created += 1
                                                             cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': result.get('confidence', 50)})
                                                             logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}]")
+                                                            _try_mt5_execute(sid, direction, price, sl, tp, result.get('confidence', 50))
                                 except Exception as e:
                                     logger.error(f"Auto-strategy error: {e}")
 
@@ -1145,6 +1181,7 @@ class AIdan:
                                             strategies_created += 1
                                             cycle_signals.append({'source': 'calendar', 'direction': direction, 'confidence': conf})
                                             logger.info(f"Calendar strategy #{sid}: {direction} @ {entry_px:.5f} SL={sl:.5f} TP={tp:.5f} | {evt_name} in {minutes_until:.0f}min")
+                                            _try_mt5_execute(sid, direction, entry_px, sl, tp, conf)
 
                                     # Mark this event as traded so we don't create duplicates next cycle
                                     _traded_calendar_events.add(evt_key)
@@ -1342,6 +1379,7 @@ class AIdan:
                                     strategies_created += 1
                                     cycle_signals.append({'source': 'structure', 'direction': direction, 'confidence': conf})
                                     logger.info(f"Structure strategy #{sid}: {direction} @ {price:.5f} | {sig['setup_type']} | {sig['reason'][:60]}")
+                                    _try_mt5_execute(sid, direction, price, sl, tp, conf)
                     except Exception as e:
                         logger.error(f"Structure scanner error: {e}", exc_info=True)
 
@@ -1424,6 +1462,7 @@ class AIdan:
                                 strategies_created += 1
                                 cycle_signals.append({'source': 'smc', 'direction': direction, 'confidence': conf})
                                 logger.info(f"SMC strategy #{sid}: {direction} @ {price:.5f} | {setup['reason'][:60]}")
+                                _try_mt5_execute(sid, direction, price, sl, tp, conf)
                     except Exception as e:
                         logger.error(f"SMC scanner error: {e}", exc_info=True)
 
@@ -1619,6 +1658,13 @@ class AIdan:
                                 logger.info(f"Evaluated {len(pending_alerts)} pending news alerts")
                     except Exception as e:
                         logger.error(f"Alert auto-eval error: {e}", exc_info=True)
+
+                    # ── MT5: sync closed positions ──
+                    if mt5_exec and mt5_exec.is_ready():
+                        try:
+                            mt5_exec.sync_closed_positions()
+                        except Exception as e:
+                            logger.error(f"MT5 sync error: {e}")
 
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")

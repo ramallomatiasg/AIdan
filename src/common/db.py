@@ -204,6 +204,28 @@ def init_db():
     except:
         pass
 
+    # Migration: MT5 execution columns on auto_strategies
+    for col, coltype in [
+        ('mt5_ticket', 'INTEGER'), ('mt5_lot', 'REAL'),
+        ('mt5_status', 'TEXT'), ('mt5_pnl', 'REAL'),
+        ('mt5_close_price', 'REAL'), ('mt5_closed_at', 'TIMESTAMP'),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE auto_strategies ADD COLUMN {col} {coltype}")
+        except:
+            pass
+
+    # MT5 risk config table (singleton)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mt5_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            risk_percent REAL DEFAULT 1.0,
+            max_positions INTEGER DEFAULT 3,
+            max_lot REAL DEFAULT 0.10
+        )
+    """)
+    cursor.execute("INSERT OR IGNORE INTO mt5_config (id) VALUES (1)")
+
     # SMC state persistence table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS smc_state (
@@ -600,11 +622,14 @@ def get_active_strategies(limit=6):
     tt_col = ', s.trigger_type' if has_trigger_type else ", 'news' as trigger_type"
     prof_col = ', s.profile_name' if has_profile else ", NULL as profile_name"
 
+    has_mt5 = 'mt5_ticket' in columns
+    mt5_cols = ', s.mt5_ticket, s.mt5_lot, s.mt5_status, s.mt5_pnl' if has_mt5 else ', NULL, NULL, NULL, NULL'
+
     cursor.execute(f"""
         SELECT s.id, s.alert_id, s.news_title, s.direction, s.entry_price,
                s.stop_loss, s.take_profit, s.confidence, s.impact_score,
                s.expiry_minutes, s.status, s.created_at, s.expires_at,
-               sr.result {tt_col} {snap_col} {prof_col}
+               sr.result {tt_col} {snap_col} {prof_col} {mt5_cols}
         FROM auto_strategies s
         LEFT JOIN strategy_results sr ON s.id = sr.strategy_id
         WHERE date(s.created_at) = date(?)
@@ -922,3 +947,79 @@ def get_learned_lessons():
             lines.append(f"  - Confianza {bracket}: {wr}% acierto ({total} trades)")
 
     return '\n'.join(lines) if len(lines) > 1 else ""
+
+
+# ── MT5 helper functions ──
+
+def update_mt5_ticket(strategy_id, ticket, lot, status):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE auto_strategies SET mt5_ticket = ?, mt5_lot = ?, mt5_status = ?
+            WHERE id = ?
+        """, (ticket, lot, status, strategy_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+def update_mt5_close(strategy_id, pnl, close_price, status='closed'):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE auto_strategies SET mt5_pnl = ?, mt5_close_price = ?, mt5_status = ?, mt5_closed_at = ?
+            WHERE id = ?
+        """, (round(pnl, 2), close_price, status, now_ar(), strategy_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_mt5_daily_pnl():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COALESCE(SUM(mt5_pnl), 0) FROM auto_strategies
+        WHERE mt5_status = 'closed' AND date(mt5_closed_at) = date(?)
+    """, (now_ar(),))
+    result = cursor.fetchone()[0]
+    conn.close()
+    return result
+
+def get_strategies_with_open_mt5():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, mt5_ticket, direction, entry_price, stop_loss, take_profit,
+               mt5_lot, created_at, news_title
+        FROM auto_strategies
+        WHERE mt5_status = 'filled' AND mt5_ticket IS NOT NULL
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_mt5_config():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT risk_percent, max_positions, max_lot FROM mt5_config WHERE id = 1")
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {'risk_percent': row[0], 'max_positions': row[1], 'max_lot': row[2]}
+    return {'risk_percent': 1.0, 'max_positions': 3, 'max_lot': 0.10}
+
+def update_mt5_config(risk_percent=None, max_positions=None, max_lot=None):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    current = get_mt5_config()
+    cursor.execute("""
+        UPDATE mt5_config SET risk_percent = ?, max_positions = ?, max_lot = ?
+        WHERE id = 1
+    """, (
+        risk_percent if risk_percent is not None else current['risk_percent'],
+        max_positions if max_positions is not None else current['max_positions'],
+        max_lot if max_lot is not None else current['max_lot'],
+    ))
+    conn.commit()
+    conn.close()

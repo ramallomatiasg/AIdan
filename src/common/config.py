@@ -4,7 +4,7 @@ import json
 
 load_dotenv()
 
-APP_VERSION = "3.2.2"
+APP_VERSION = "3.3.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -21,7 +21,14 @@ class Config:
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
     GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     GOOGLE_SHEETS_WEBHOOK = os.getenv("GOOGLE_SHEETS_WEBHOOK", "https://script.google.com/macros/s/AKfycbzZqRaz_37eSjky1I4F1-2bnQQtRPC15_wDGA5ohxUvzTPq38ez74mbc7oYoNb4NvfyFw/exec")
-    
+
+    # MT5 Broker Integration
+    MT5_ENABLED = os.getenv("MT5_ENABLED", "false").lower() == "true"
+    MT5_ACCOUNT = int(os.getenv("MT5_ACCOUNT", "0"))
+    MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
+    MT5_SERVER = os.getenv("MT5_SERVER", "ICMarketsSC-Demo")
+    MT5_SYMBOL = os.getenv("MT5_SYMBOL", "EURUSD")
+
     @staticmethod
     def get_sources():
         """Load news sources from config file"""
