@@ -873,9 +873,9 @@ _candles_cache = {"data": [], "last_fetch": 0}
 
 def _convert_candles_to_lw(candles):
     """Convert raw candles to Lightweight Charts format.
-    All timestamps treated as UTC to avoid timezone misalignment.
-    Smooths gaps: each candle opens where the previous one closed."""
+    Timestamps shifted to Argentina (UTC-3) for display."""
     from datetime import datetime as _dt, timezone as _tz
+    AR_OFFSET = -3 * 3600  # UTC-3 Argentina
     lw_candles = []
     for c in candles:
         ts = c.get('datetime', c.get('timestamp', 0))
@@ -887,7 +887,7 @@ def _convert_candles_to_lw(candles):
                 ts_int = int(dt.timestamp())
             except Exception:
                 continue
-        ts_aligned = (ts_int // 300) * 300
+        ts_aligned = (ts_int // 300) * 300 + AR_OFFSET
         lw_candles.append({
             "time": ts_aligned,
             "open": round(c['open'], 6), "high": round(c['high'], 6),
@@ -898,28 +898,40 @@ def _convert_candles_to_lw(candles):
     for candle in lw_candles:
         seen[candle['time']] = candle
     result = sorted(seen.values(), key=lambda x: x['time'])
-    # Smooth gaps: set open = previous close so candles connect visually
-    for i in range(1, len(result)):
-        prev_close = result[i - 1]['close']
-        cur = result[i]
-        cur['open'] = prev_close
-        # Adjust high/low to include the smoothed open
-        if prev_close > cur['high']:
-            cur['high'] = prev_close
-        if prev_close < cur['low']:
-            cur['low'] = prev_close
     return result
 
 @app.get("/candles")
 async def get_candles():
-    """Get EUR/USD candle data for Lightweight Charts (cached, refreshes every 2 min)"""
+    """Get EUR/USD candle data for Lightweight Charts (cached, refreshes every 60s).
+    Priority: MT5 (best quality) → Yahoo Finance fallback."""
     import time as _time
     try:
         now = _time.time()
-        # Refresh every 60s (Yahoo has no strict rate limit)
+        # Refresh every 60s
         if now - _candles_cache["last_fetch"] > 60 or not _candles_cache["data"]:
-            tech = get_tech()
-            candles = tech._fetch_candles()
+            candles = None
+
+            # 1. Try MT5 first (best quality, real broker data)
+            MIN_GOOD_CANDLES = 40  # Minimum for a useful chart
+            try:
+                mt5 = _get_mt5()
+                if mt5 and mt5.is_ready():
+                    candles = mt5.get_candles(timeframe='5min', count=100)
+                    if candles and len(candles) >= MIN_GOOD_CANDLES:
+                        logger.info(f"Candles from MT5: {len(candles)}")
+                    elif candles:
+                        logger.info(f"MT5 returned only {len(candles)} candles (warming up), trying Yahoo supplement")
+                        candles = None  # Force Yahoo fallback for now
+            except Exception as e:
+                logger.warning(f"MT5 candles failed: {e}")
+
+            # 2. Fallback to Yahoo/price_feed
+            if not candles:
+                tech = get_tech()
+                candles = tech._fetch_candles()
+                if candles:
+                    logger.info(f"Candles from price_feed: {len(candles)}")
+
             if candles and len(candles) > 5:
                 _candles_cache["data"] = _convert_candles_to_lw(candles)
                 _candles_cache["last_fetch"] = now
@@ -1608,6 +1620,47 @@ async def mt5_toggle(request: Request):
     body = await request.json()
     enabled = body.get("enabled", True)
     mt5.toggle(enabled)
+    # When kill switch activated: evaluate strategies using real MT5 PnL
+    if not enabled:
+        try:
+            import sqlite3, MetaTrader5 as _mt5_mod
+            from src.common.db import DB_PATH, now_ar
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            # Find strategies with open MT5 positions
+            cursor.execute("""
+                SELECT id, mt5_ticket, direction, entry_price FROM auto_strategies
+                WHERE mt5_status = 'filled' AND status IN ('active', 'expired')
+            """)
+            for sid, ticket, direction, entry_price in cursor.fetchall():
+                pnl = 0.0
+                close_price = 0.0
+                try:
+                    deals = _mt5_mod.history_deals_get(position=ticket)
+                    if deals:
+                        for d in deals:
+                            if d.entry == 1:
+                                pnl += d.profit + d.swap + d.commission
+                                close_price = d.price
+                except Exception:
+                    pass
+                result = 'auto_win' if pnl > 0 else 'auto_loss'
+                conn.execute("""
+                    UPDATE auto_strategies SET status=?, mt5_status='closed', mt5_pnl=?, mt5_close_price=?
+                    WHERE id=?
+                """, (result, round(pnl, 2), close_price, sid))
+                logger.info(f"Kill switch eval: #{sid} → {result} PnL=${pnl:.2f}")
+            # Cancel unexecuted active strategies (never reached MT5)
+            cancelled = conn.execute("""
+                UPDATE auto_strategies SET status = 'cancelled'
+                WHERE status = 'active' AND (mt5_status IS NULL OR mt5_ticket IS NULL)
+            """).rowcount
+            if cancelled:
+                logger.info(f"Kill switch: cancelled {cancelled} unexecuted strategies")
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Kill switch strategy cleanup error: {e}")
     return JSONResponse({"status": "success", "enabled": not mt5.kill_switch})
 
 @app.post("/mt5/connect")
@@ -1626,12 +1679,73 @@ async def mt5_connect(request: Request):
     if not account or not password:
         return JSONResponse({"status": "error", "message": "account and password required"}, status_code=400)
 
-    success = mt5.reconnect(account, password, server)
-    if success:
-        info = mt5.get_account_info()
-        return JSONResponse({"status": "success", "data": info})
-    else:
-        return JSONResponse({"status": "error", "message": "Connection failed"}, status_code=400)
+    try:
+        success = mt5.reconnect(account, password, server)
+        if success:
+            info = mt5.get_account_info()
+            return JSONResponse({"status": "success", "data": info})
+        else:
+            # Try to get more details
+            err_detail = ""
+            try:
+                import MetaTrader5 as _mt5
+                err_detail = str(_mt5.last_error())
+            except:
+                pass
+            return JSONResponse({"status": "error", "message": f"Connection failed: {err_detail}"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": f"Exception: {e}"}, status_code=500)
+
+@app.get("/mt5/diagnose")
+async def mt5_diagnose():
+    """Diagnostic endpoint — tests each MT5 step independently."""
+    steps = []
+    try:
+        import MetaTrader5 as mt5mod
+        steps.append({"step": "import", "ok": True})
+    except Exception as e:
+        steps.append({"step": "import", "ok": False, "error": str(e)})
+        return JSONResponse({"status": "error", "steps": steps})
+
+    # Find terminal path
+    from src.broker.mt5_executor import _find_mt5_terminal
+    term_path = _find_mt5_terminal()
+    steps.append({"step": "find_terminal", "path": term_path or "NOT FOUND"})
+
+    # Try initialize with path
+    try:
+        mt5mod.shutdown()  # clean state
+        if term_path:
+            init_ok = mt5mod.initialize(term_path)
+            steps.append({"step": "initialize(path)", "ok": init_ok, "error": str(mt5mod.last_error())})
+        else:
+            init_ok = mt5mod.initialize()
+            steps.append({"step": "initialize()", "ok": init_ok, "error": str(mt5mod.last_error())})
+    except Exception as e:
+        steps.append({"step": "initialize", "ok": False, "error": str(e)})
+        return JSONResponse({"status": "error", "steps": steps})
+
+    if not init_ok:
+        return JSONResponse({"status": "error", "steps": steps})
+
+    # Try login
+    try:
+        from src.common.config import Config
+        acct = Config.MT5_ACCOUNT or 52823409
+        pwd = Config.MT5_PASSWORD or ""
+        srv = Config.MT5_SERVER or "ICMarketsSC-Demo"
+        login_ok = mt5mod.login(acct, pwd, srv)
+        steps.append({"step": "login", "ok": login_ok, "error": str(mt5mod.last_error()), "account": acct, "server": srv})
+    except Exception as e:
+        steps.append({"step": "login", "ok": False, "error": str(e)})
+
+    if login_ok:
+        info = mt5mod.account_info()
+        if info:
+            steps.append({"step": "account_info", "ok": True, "balance": info.balance, "login": info.login})
+        mt5mod.shutdown()
+
+    return JSONResponse({"status": "success" if login_ok else "error", "steps": steps})
 
 @app.get("/mt5/config")
 async def mt5_config_get():
@@ -1674,5 +1788,291 @@ async def mt5_history():
             "title": r[9]
         })
     return JSONResponse({"status": "success", "data": result})
+
+# ===== LEARNING ENGINE ENDPOINTS =====
+
+_learning_engine = None
+
+def set_learning_engine(engine):
+    global _learning_engine
+    _learning_engine = engine
+
+def _get_learner():
+    global _learning_engine
+    return _learning_engine
+
+@app.get("/learning/status")
+async def learning_status():
+    learner = _get_learner()
+    if not learner:
+        from src.common.db import get_archive_stats
+        stats = get_archive_stats()
+        return JSONResponse({"status": "success", "data": {
+            "mode": "offline", "market_open": False,
+            "archive_total": stats['total'], "overall_wr": stats['win_rate'],
+            "avg_pips": stats['avg_pips'], "total_pips": stats['total_pips'],
+            "recent_insights_count": 0,
+        }})
+    return JSONResponse({"status": "success", "data": learner.get_status()})
+
+@app.get("/learning/insights")
+async def learning_insights():
+    from src.common.db import get_learning_insights
+    insights = get_learning_insights(30)
+    return JSONResponse({"status": "success", "data": insights})
+
+@app.get("/learning/metrics")
+async def learning_metrics(period: str = 'daily', metric: str = None):
+    from src.common.db import get_learning_metrics
+    metrics = get_learning_metrics(metric_name=metric, period=period, limit=60)
+    return JSONResponse({"status": "success", "data": metrics})
+
+@app.get("/learning/report")
+async def learning_report():
+    from src.common.db import get_learning_insights
+    reports = [i for i in get_learning_insights(50) if i.get('category') == 'report']
+    latest = reports[0] if reports else None
+    return JSONResponse({"status": "success", "data": latest})
+
+@app.get("/learning/session-analysis")
+async def learning_session_analysis():
+    learner = _get_learner()
+    if not learner:
+        return JSONResponse({"status": "success", "data": {}})
+    return JSONResponse({"status": "success", "data": learner.get_session_heatmap()})
+
+@app.get("/learning/sl-tp-analysis")
+async def learning_sl_tp_analysis():
+    learner = _get_learner()
+    if not learner:
+        return JSONResponse({"status": "success", "data": {}})
+    return JSONResponse({"status": "success", "data": learner.get_sl_tp_analysis()})
+
+@app.get("/learning/archive")
+async def learning_archive():
+    from src.common.db import get_archive_stats
+    stats = get_archive_stats()
+    return JSONResponse({"status": "success", "data": stats})
+
+# ===== AUTH ENDPOINTS =====
+
+_logged_in_user = None
+
+def get_logged_in_user():
+    global _logged_in_user
+    return _logged_in_user
+
+@app.post("/auth/login")
+async def auth_login(request: Request):
+    global _logged_in_user
+    body = await request.json()
+    username = (body.get('username') or '').strip()
+    password = body.get('password') or ''
+    if not username or not password:
+        return JSONResponse({"status": "error", "message": "Usuario y clave requeridos"})
+    try:
+        from src.cloud.shared_learning import authenticate_user
+        ok, msg, user_data = authenticate_user(username, password)
+        if ok:
+            _logged_in_user = {'username': username, 'id': user_data.get('id')}
+            # Auto-enable shared learning with this username
+            from src.common.db import update_shared_learning_config
+            update_shared_learning_config(instance_name=f"AIdan-{username}", enabled=True)
+            # Reload shared learning config
+            learner = _get_learner()
+            if learner:
+                shared = learner.get_shared_learning()
+                if shared:
+                    shared.reload_config()
+                    shared.register_instance()
+            return JSONResponse({"status": "success", "message": msg, "data": {"username": username}})
+        else:
+            return JSONResponse({"status": "error", "message": msg})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": f"Error: {str(e)}"})
+
+@app.get("/auth/status")
+async def auth_status():
+    global _logged_in_user
+    if _logged_in_user:
+        return JSONResponse({"status": "success", "data": {"logged_in": True, "username": _logged_in_user['username']}})
+    return JSONResponse({"status": "success", "data": {"logged_in": False}})
+
+@app.post("/auth/change-password")
+async def auth_change_password(request: Request):
+    global _logged_in_user
+    if not _logged_in_user:
+        return JSONResponse({"status": "error", "message": "No hay sesion activa"})
+    body = await request.json()
+    old_pwd = body.get('old_password', '')
+    new_pwd = body.get('new_password', '')
+    try:
+        from src.cloud.shared_learning import change_password
+        ok, msg = change_password(_logged_in_user['username'], old_pwd, new_pwd)
+        return JSONResponse({"status": "success" if ok else "error", "message": msg})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
+
+@app.post("/auth/logout")
+async def auth_logout():
+    global _logged_in_user
+    _logged_in_user = None
+    return JSONResponse({"status": "success", "message": "Sesion cerrada"})
+
+# ===== SHARED LEARNING ENDPOINTS =====
+
+@app.get("/shared-learning/config")
+async def shared_learning_config_get():
+    from src.common.db import get_shared_learning_config
+    config = get_shared_learning_config()
+    # Mask the key for security (show first 8 + last 4 chars)
+    key = config.get('supabase_key', '')
+    if key and len(key) > 12:
+        config['supabase_key_masked'] = key[:8] + '...' + key[-4:]
+    else:
+        config['supabase_key_masked'] = key
+    return JSONResponse({"status": "success", "data": config})
+
+
+@app.post("/shared-learning/config")
+async def shared_learning_config_update(request: Request):
+    from src.common.db import update_shared_learning_config, get_shared_learning_config
+    body = await request.json()
+    update_shared_learning_config(
+        supabase_url=body.get("supabase_url"),
+        supabase_key=body.get("supabase_key"),
+        instance_name=body.get("instance_name"),
+        enabled=body.get("enabled"),
+    )
+    # Reload config in shared learning instance
+    learner = _get_learner()
+    if learner:
+        shared = learner.get_shared_learning()
+        if shared:
+            shared.reload_config()
+            # Test connection if enabling
+            if body.get("enabled"):
+                ok, msg = shared.test_connection()
+                if ok:
+                    shared.register_instance()
+                config = get_shared_learning_config()
+                return JSONResponse({"status": "success", "data": config, "connection": {"ok": ok, "message": msg}})
+    config = get_shared_learning_config()
+    return JSONResponse({"status": "success", "data": config})
+
+
+@app.get("/shared-learning/status")
+async def shared_learning_status():
+    learner = _get_learner()
+    if learner:
+        shared = learner.get_shared_learning()
+        if shared:
+            return JSONResponse({"status": "success", "data": shared.get_status()})
+    # Fallback: return config-only status
+    from src.common.db import get_shared_learning_config
+    config = get_shared_learning_config()
+    return JSONResponse({"status": "success", "data": {
+        "enabled": config.get('enabled', False),
+        "configured": bool(config.get('supabase_url')),
+        "instance_id": config.get('instance_id', ''),
+        "instance_name": config.get('instance_name', ''),
+        "last_sync": config.get('last_sync', ''),
+        "tables_ok": False,
+        "trades_synced": 0,
+        "trades_remote": 0,
+    }})
+
+
+@app.post("/shared-learning/sync")
+async def shared_learning_sync():
+    learner = _get_learner()
+    if not learner:
+        return JSONResponse({"status": "error", "message": "Learning engine not available"})
+    shared = learner.get_shared_learning()
+    if not shared or not shared.enabled:
+        return JSONResponse({"status": "error", "message": "Shared learning not enabled"})
+    try:
+        synced = shared.sync_trades()
+        return JSONResponse({"status": "success", "data": {"trades_synced": synced}})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
+
+
+@app.post("/shared-learning/test-connection")
+async def shared_learning_test():
+    learner = _get_learner()
+    if learner:
+        shared = learner.get_shared_learning()
+        if shared:
+            shared.reload_config()
+            ok, msg = shared.test_connection()
+            return JSONResponse({"status": "success", "data": {"ok": ok, "message": msg}})
+    return JSONResponse({"status": "error", "message": "Shared learning not initialized"})
+
+
+@app.post("/shared-learning/setup-tables")
+async def shared_learning_setup_tables():
+    learner = _get_learner()
+    if learner:
+        shared = learner.get_shared_learning()
+        if shared:
+            shared.reload_config()
+            ok, msg = shared.setup_tables()
+            return JSONResponse({"status": "success", "data": {"ok": ok, "message": msg}})
+    return JSONResponse({"status": "error", "message": "Shared learning not initialized"})
+
+
+@app.get("/shared-learning/sql-script")
+async def shared_learning_sql_script():
+    """Return the SQL script for creating Supabase tables (for manual setup)."""
+    sql = """-- AIdan Shared Learning Tables
+-- Run this in Supabase SQL Editor (https://supabase.com/dashboard → SQL Editor)
+
+CREATE TABLE IF NOT EXISTS instances (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    last_sync TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS shared_trades (
+    id BIGSERIAL PRIMARY KEY,
+    instance_id UUID REFERENCES instances(id),
+    local_strategy_id INTEGER,
+    direction TEXT,
+    result TEXT,
+    pips REAL,
+    sl_pips REAL,
+    tp_pips REAL,
+    sl_hit BOOLEAN,
+    tp_hit BOOLEAN,
+    confidence REAL,
+    trigger_type TEXT,
+    setup_type TEXT,
+    session TEXT,
+    hour_utc INTEGER,
+    day_of_week INTEGER,
+    htf_bias TEXT,
+    market_trend TEXT,
+    trend_strength REAL,
+    rsi_at_entry REAL,
+    volatility REAL,
+    news_category TEXT,
+    mt5_pnl REAL,
+    created_at TIMESTAMPTZ,
+    synced_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(instance_id, local_strategy_id)
+);
+
+CREATE TABLE IF NOT EXISTS shared_insights (
+    id BIGSERIAL PRIMARY KEY,
+    category TEXT,
+    insight TEXT,
+    data JSONB,
+    min_trades INTEGER,
+    created_at TIMESTAMPTZ DEFAULT now()
+);"""
+    return JSONResponse({"status": "success", "data": {"sql": sql}})
+
 
 # Run with: uvicorn src.admin.main:app --host 0.0.0.0 --port 8000

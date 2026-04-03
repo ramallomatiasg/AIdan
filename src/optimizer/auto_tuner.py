@@ -63,6 +63,12 @@ DEFAULT_PARAMS = {
 
     # Auto-eval minimum movement
     'min_pips_for_win': 1.5,        # don't count as win if moved < this
+
+    # SL/TP learning params (updated by LearningEngine)
+    'sl_atr_multiplier': 1.2,       # ATR multiplier for SL calculation
+    'tp_rr_ratio': 2.0,             # minimum risk:reward ratio
+    'sl_min_pips_high_vol': 5.0,    # min SL pips in high volatility
+    'sl_min_pips_low_vol': 3.0,     # min SL pips in low volatility
 }
 
 # Parameter variations to test (relative to current value)
@@ -86,6 +92,10 @@ VARIATIONS = {
     'conf_level_bounce': [50, 52, 55, 58, 60],
     'min_pips_for_win': [0.5, 1.0, 1.5, 2.0, 3.0],
     'block_win_rate_threshold': [30, 35, 40, 45],
+    'sl_atr_multiplier': [1.0, 1.2, 1.5, 1.8, 2.0],
+    'tp_rr_ratio': [1.5, 2.0, 2.5, 3.0],
+    'sl_min_pips_high_vol': [4.0, 5.0, 6.0, 7.0],
+    'sl_min_pips_low_vol': [2.0, 3.0, 4.0, 5.0],
 }
 
 

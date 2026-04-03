@@ -28,3 +28,7 @@
 
 Mantene la ventana de AIdan abierta mientras lo uses.
 Mas info: https://github.com/ramallomatiasg/AIdan
+
+## Aprendizaje Compartido (Opcional)
+AIdan puede aprender de otros usuarios. Configuralo desde el panel "Aprendizaje Compartido" en el dashboard (pestana Estrategias).
+Necesitas una cuenta gratis en supabase.com. Mas info en el README principal.

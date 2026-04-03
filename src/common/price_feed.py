@@ -171,7 +171,7 @@ def _map_interval_to_yahoo(interval, count):
     """Map generic interval to Yahoo Finance interval+range params."""
     mapping = {
         '1min':  ('1m',  '1d'),
-        '5min':  ('5m',  '1d'),
+        '5min':  ('5m',  '5d'),
         '15min': ('15m', '5d'),
         '30min': ('30m', '5d'),
         '1h':    ('1h',  '5d'),

@@ -1,9 +1,32 @@
 """
 MT5 Executor — Connects to MetaTrader 5 and executes trades for AIdan strategies.
 """
+import os
+import glob
 import time
 
 MAGIC_NUMBER = 20260402  # Identifies AIdan orders in MT5
+
+
+def _find_mt5_terminal():
+    """Auto-detect MT5 terminal64.exe path."""
+    # Check known IC Markets path first
+    known = r'C:\Program Files\MetaTrader 5 IC Markets Global\terminal64.exe'
+    if os.path.isfile(known):
+        return known
+
+    candidates = []
+    for base in [
+        os.environ.get('PROGRAMFILES', 'C:\\Program Files'),
+        os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)'),
+    ]:
+        pattern = os.path.join(base, 'MetaTrader*', 'terminal64.exe')
+        candidates.extend(glob.glob(pattern))
+    # Prefer IC Markets path
+    for c in candidates:
+        if 'ICMarkets' in c or 'IC Markets' in c:
+            return c
+    return candidates[0] if candidates else None
 
 
 class MT5Executor:
@@ -12,13 +35,26 @@ class MT5Executor:
         self.connected = False
         self.kill_switch = False
         self._mt5 = None
+        self._terminal_path = None
 
     def connect(self):
         try:
             import MetaTrader5 as mt5
             self._mt5 = mt5
 
-            if not mt5.initialize():
+            # Try to find terminal path for frozen exe compatibility
+            if not self._terminal_path:
+                self._terminal_path = _find_mt5_terminal()
+                if self._terminal_path:
+                    self.logger.info(f"MT5 terminal found: {self._terminal_path}")
+
+            # Initialize with explicit path if available
+            init_ok = False
+            if self._terminal_path:
+                init_ok = mt5.initialize(self._terminal_path)
+            if not init_ok:
+                init_ok = mt5.initialize()
+            if not init_ok:
                 err = mt5.last_error()
                 self.logger.error(f"MT5 initialize failed: {err}")
                 return False
@@ -177,6 +213,43 @@ class MT5Executor:
             update_mt5_ticket(strategy_id, None, 0, 'error')
             return None
 
+    def get_candles(self, timeframe='5min', count=100):
+        """Get candle data directly from MT5 (highest quality for chart)."""
+        if not self.connected or not self._mt5:
+            return None
+        try:
+            from src.common.config import Config
+            symbol = Config.MT5_SYMBOL
+
+            tf_map = {
+                '1min': self._mt5.TIMEFRAME_M1,
+                '5min': self._mt5.TIMEFRAME_M5,
+                '15min': self._mt5.TIMEFRAME_M15,
+                '30min': self._mt5.TIMEFRAME_M30,
+                '1h': self._mt5.TIMEFRAME_H1,
+                '4h': self._mt5.TIMEFRAME_H4,
+                '1day': self._mt5.TIMEFRAME_D1,
+            }
+            tf = tf_map.get(timeframe, self._mt5.TIMEFRAME_M5)
+
+            rates = self._mt5.copy_rates_from_pos(symbol, tf, 0, count)
+            if rates is None or len(rates) == 0:
+                return None
+
+            candles = []
+            for r in rates:
+                candles.append({
+                    'open': round(float(r['open']), 5),
+                    'high': round(float(r['high']), 5),
+                    'low': round(float(r['low']), 5),
+                    'close': round(float(r['close']), 5),
+                    'datetime': str(int(r['time'])),
+                })
+            return candles
+        except Exception as e:
+            self.logger.warning(f"MT5 get_candles error: {e}")
+            return None
+
     def check_positions(self):
         if not self.connected or not self._mt5:
             return []
@@ -208,6 +281,40 @@ class MT5Executor:
         from src.common.db import get_strategies_with_open_mt5, update_mt5_close
         open_strategies = get_strategies_with_open_mt5()
 
+        # Detect orphaned MT5 positions (AIdan magic but no matching strategy in DB)
+        try:
+            all_positions = self._mt5.positions_get(group="*") or []
+            aidan_positions = [p for p in all_positions if p.magic == MAGIC_NUMBER]
+            tracked_tickets = {row[1] for row in open_strategies}  # set of tracked tickets
+            for p in aidan_positions:
+                if p.ticket not in tracked_tickets:
+                    # Orphaned position — close it
+                    close_type = self._mt5.ORDER_TYPE_SELL if p.type == 0 else self._mt5.ORDER_TYPE_BUY
+                    tick = self._mt5.symbol_info_tick(p.symbol)
+                    if not tick:
+                        continue
+                    close_price = tick.bid if p.type == 0 else tick.ask
+                    request = {
+                        "action": self._mt5.TRADE_ACTION_DEAL,
+                        "symbol": p.symbol,
+                        "volume": p.volume,
+                        "type": close_type,
+                        "position": p.ticket,
+                        "price": close_price,
+                        "deviation": 20,
+                        "magic": MAGIC_NUMBER,
+                        "comment": "AIdan orphan close",
+                        "type_time": self._mt5.ORDER_TIME_GTC,
+                        "type_filling": self._mt5.ORDER_FILLING_IOC,
+                    }
+                    result = self._mt5.order_send(request)
+                    if result and result.retcode == self._mt5.TRADE_RETCODE_DONE:
+                        self.logger.info(f"MT5 orphan closed: #{p.ticket} ({p.comment}) @ {close_price:.5f}")
+                    else:
+                        self.logger.warning(f"MT5 orphan close failed: #{p.ticket} retcode={result.retcode if result else 'None'}")
+        except Exception as e:
+            self.logger.error(f"MT5 orphan check error: {e}")
+
         for row in open_strategies:
             sid, ticket, direction, entry_price, sl, tp, lot, created_at, news_title = row
 
@@ -216,29 +323,86 @@ class MT5Executor:
             if position and len(position) > 0:
                 continue  # Still open
 
-            # Position closed — get deal history
-            from datetime import datetime, timezone, timedelta
-            time_from = datetime.now(timezone.utc) - timedelta(days=2)
-            time_to = datetime.now(timezone.utc) + timedelta(hours=1)
-
-            deals = self._mt5.history_deals_get(time_from, time_to, group="*")
+            # Position closed — get deal history by position ID (most reliable)
             pnl = 0.0
             close_price = 0.0
 
+            deals = self._mt5.history_deals_get(position=ticket)
             if deals:
                 for deal in deals:
-                    if deal.position_id == ticket and deal.entry == 1:  # entry=1 means close deal
+                    if deal.entry == 1:  # entry=1 means close deal
                         pnl += deal.profit + deal.swap + deal.commission
                         close_price = deal.price
 
+            if not deals or close_price == 0:
+                # Fallback: time-based search
+                from datetime import datetime, timezone, timedelta
+                time_from = datetime.now(timezone.utc) - timedelta(days=3)
+                time_to = datetime.now(timezone.utc) + timedelta(hours=1)
+                deals_fb = self._mt5.history_deals_get(time_from, time_to)
+                if deals_fb:
+                    for deal in deals_fb:
+                        if deal.position_id == ticket and deal.entry == 1:
+                            pnl += deal.profit + deal.swap + deal.commission
+                            close_price = deal.price
+
             if close_price == 0:
-                # Fallback: estimate from current price
+                # Last resort: estimate from current price
                 tick = self._mt5.symbol_info_tick("EURUSD")
                 if tick:
                     close_price = tick.bid if direction == 'CALL' else tick.ask
 
             update_mt5_close(sid, pnl, close_price)
             self.logger.info(f"MT5 position closed: #{ticket} Strategy #{sid} P&L=${pnl:.2f} @ {close_price:.5f}")
+
+    def close_strategy_position(self, strategy_id):
+        """Close the MT5 position associated with a strategy after auto-evaluation."""
+        if not self.connected or not self._mt5:
+            return False
+
+        from src.common.db import get_strategies_with_open_mt5
+        open_strats = get_strategies_with_open_mt5()
+        for row in open_strats:
+            sid = row[0]
+            ticket = row[1]
+            direction = row[2]
+            if sid != strategy_id:
+                continue
+
+            # Check if position still exists
+            position = self._mt5.positions_get(ticket=ticket)
+            if not position or len(position) == 0:
+                return False  # Already closed by SL/TP
+
+            p = position[0]
+            close_type = self._mt5.ORDER_TYPE_SELL if p.type == 0 else self._mt5.ORDER_TYPE_BUY
+            tick = self._mt5.symbol_info_tick(p.symbol)
+            if not tick:
+                return False
+            close_price = tick.bid if p.type == 0 else tick.ask
+
+            request = {
+                "action": self._mt5.TRADE_ACTION_DEAL,
+                "symbol": p.symbol,
+                "volume": p.volume,
+                "type": close_type,
+                "position": p.ticket,
+                "price": close_price,
+                "deviation": 20,
+                "magic": MAGIC_NUMBER,
+                "comment": f"AIdan close #{strategy_id}",
+                "type_time": self._mt5.ORDER_TIME_GTC,
+                "type_filling": self._mt5.ORDER_FILLING_IOC,
+            }
+
+            result = self._mt5.order_send(request)
+            if result and result.retcode == self._mt5.TRADE_RETCODE_DONE:
+                self.logger.info(f"MT5 auto-close: strategy #{strategy_id} ticket #{ticket} closed @ {close_price:.5f}")
+                return True
+            else:
+                self.logger.error(f"MT5 auto-close failed: strategy #{strategy_id} retcode={result.retcode if result else 'None'}")
+                return False
+        return False
 
     def close_all_positions(self):
         if not self.connected or not self._mt5:

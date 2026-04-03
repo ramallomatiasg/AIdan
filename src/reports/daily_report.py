@@ -157,12 +157,14 @@ def generate_daily_report():
         logger.error(f"Error uploading summary: {e}")
         return {'status': 'error', 'message': f'Error subiendo resumen: {e}'}
 
-    # 2. Upload trades
+    # 2. Upload trades (only unreported ones to avoid duplicates)
     trades_added = 0
-    if data['trades']:
+    from src.common.db import get_unreported_trades, mark_trades_reported
+    unreported = get_unreported_trades(data['date'])
+    if unreported:
         try:
             trade_rows = []
-            for t in data['trades']:
+            for t in unreported:
                 rec_at = str(t.get('recorded_at', ''))
                 hora = rec_at.split(' ')[1] if ' ' in rec_at else rec_at
                 comment = _generate_comment(t)
@@ -171,8 +173,8 @@ def generate_daily_report():
                     'time': hora,
                     'direction': t.get('direction', ''),
                     'entry': t.get('entry_price', ''),
-                    'tp': t.get('take_profit', ''),
-                    'sl': t.get('stop_loss', ''),
+                    'tp': '',
+                    'sl': '',
                     'pips': t.get('pips', ''),
                     'result': t.get('result', ''),
                     'confidence': t.get('confidence', ''),
@@ -186,10 +188,16 @@ def generate_daily_report():
                 'trades': trade_rows,
             }
             r = requests.post(webhook_url, json=trades_payload, timeout=15)
-            trades_added = len(trade_rows)
-            logger.info(f"Trades uploaded: {trades_added} rows, status {r.status_code}")
+            if r.status_code == 200:
+                mark_trades_reported(unreported)
+                trades_added = len(trade_rows)
+                logger.info(f"Trades uploaded: {trades_added} new rows, status {r.status_code}")
+            else:
+                logger.error(f"Trades upload failed: status {r.status_code}")
         except Exception as e:
             logger.error(f"Error uploading trades: {e}")
+    else:
+        logger.info("No new unreported trades to upload.")
 
     # 3. Upload setup analysis
     if data['setup_rates']:

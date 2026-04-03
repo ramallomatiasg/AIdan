@@ -142,6 +142,16 @@ def init_db():
     except:
         pass  # column already exists
 
+    # Migration: add reported_to_sheets flag to prevent duplicate uploads
+    for tbl in ['signal_results', 'strategy_results']:
+        try:
+            cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN reported_to_sheets INTEGER DEFAULT 0")
+            # Mark all existing trades as already reported (they were uploaded before this fix)
+            cursor.execute(f"UPDATE {tbl} SET reported_to_sheets = 1 WHERE result IN ('win', 'loss')")
+            print(f"[DB] Migration: marked existing {tbl} as reported_to_sheets")
+        except:
+            pass
+
     # Migration: add trigger_type to auto_strategies (news vs structure)
     try:
         cursor.execute("ALTER TABLE auto_strategies ADD COLUMN trigger_type TEXT DEFAULT 'news'")
@@ -238,6 +248,118 @@ def init_db():
             updated_at TIMESTAMP
         )
     """)
+
+    # ── Learning System Tables ──
+
+    # Permanent trade archive (never deleted, enriched context)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS trade_archive (
+            id INTEGER PRIMARY KEY,
+            strategy_id INTEGER,
+            direction TEXT,
+            result TEXT,
+            entry_price REAL,
+            exit_price REAL,
+            pips REAL,
+            stop_loss REAL,
+            take_profit REAL,
+            sl_pips REAL,
+            tp_pips REAL,
+            sl_hit INTEGER DEFAULT 0,
+            tp_hit INTEGER DEFAULT 0,
+            confidence REAL,
+            impact_score INTEGER,
+            setup_type TEXT,
+            trigger_type TEXT,
+            market_trend TEXT,
+            trend_strength TEXT,
+            rsi_at_entry REAL,
+            htf_bias TEXT,
+            volatility TEXT,
+            avg_range_pips REAL,
+            session TEXT,
+            hour_utc INTEGER,
+            day_of_week INTEGER,
+            profile_name TEXT,
+            mt5_pnl REAL,
+            news_title TEXT,
+            created_at TIMESTAMP,
+            archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Learning insights (what AIdan discovered)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS learning_insights (
+            id INTEGER PRIMARY KEY,
+            category TEXT,
+            insight TEXT,
+            data TEXT,
+            action_taken TEXT,
+            created_at TIMESTAMP
+        )
+    """)
+
+    # Learning metrics (periodic snapshots for trend tracking)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS learning_metrics (
+            id INTEGER PRIMARY KEY,
+            metric_name TEXT,
+            value REAL,
+            period TEXT,
+            recorded_at TIMESTAMP
+        )
+    """)
+
+    # Shared Learning config table (singleton)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shared_learning_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            supabase_url TEXT DEFAULT '',
+            supabase_key TEXT DEFAULT '',
+            instance_id TEXT DEFAULT '',
+            instance_name TEXT DEFAULT '',
+            enabled INTEGER DEFAULT 0,
+            last_sync TEXT
+        )
+    """)
+    cursor.execute("INSERT OR IGNORE INTO shared_learning_config (id) VALUES (1)")
+
+    # Migration: auto-generate instance_id if empty
+    cursor.execute("SELECT instance_id FROM shared_learning_config WHERE id = 1")
+    row = cursor.fetchone()
+    if row and not row[0]:
+        import uuid
+        cursor.execute("UPDATE shared_learning_config SET instance_id = ? WHERE id = 1", (str(uuid.uuid4()),))
+
+    # Migration: add synced_to_cloud column to trade_archive
+    try:
+        cursor.execute("ALTER TABLE trade_archive ADD COLUMN synced_to_cloud INTEGER DEFAULT 0")
+    except:
+        pass
+
+    # Backfill: copy existing strategy_results into trade_archive if not already done
+    cursor.execute("SELECT COUNT(*) FROM trade_archive")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO trade_archive
+                (strategy_id, direction, result, entry_price, exit_price, pips,
+                 stop_loss, take_profit, sl_pips, tp_pips,
+                 confidence, setup_type, trigger_type, market_trend,
+                 rsi_at_entry, htf_bias, news_title, created_at, archived_at)
+            SELECT
+                sr.strategy_id, sr.direction, sr.result, sr.entry_price, sr.exit_price, sr.pips,
+                s.stop_loss, s.take_profit,
+                CASE WHEN s.direction='CALL' THEN round((s.entry_price - s.stop_loss)/0.0001, 1)
+                     ELSE round((s.stop_loss - s.entry_price)/0.0001, 1) END,
+                CASE WHEN s.direction='CALL' THEN round((s.take_profit - s.entry_price)/0.0001, 1)
+                     ELSE round((s.entry_price - s.take_profit)/0.0001, 1) END,
+                sr.confidence, sr.setup_type, sr.trigger_type, sr.market_trend,
+                sr.rsi_at_entry, sr.htf_bias, s.news_title, s.created_at, sr.recorded_at
+            FROM strategy_results sr
+            JOIN auto_strategies s ON sr.strategy_id = s.id
+            WHERE sr.result IN ('win', 'loss', 'break_even')
+        """)
 
     conn.commit()
     conn.close()
@@ -814,6 +936,94 @@ def get_detailed_trade_history(limit=30):
     return trades[:limit]
 
 
+def get_unreported_trades(today_str):
+    """Get trades that haven't been reported to Google Sheets yet (today only)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    trades = []
+
+    # Unreported signal results
+    try:
+        cursor.execute("""
+            SELECT sr.id, 'signal' as src, sr.result, sr.direction, sr.confidence, sr.impact_score,
+                   sr.setup_type, sr.trigger_type, sr.market_trend, sr.rsi_at_entry,
+                   sr.htf_bias, sr.entry_price, sr.exit_price, sr.pips,
+                   sr.recorded_at, n.title
+            FROM signal_results sr
+            LEFT JOIN alerts a ON sr.alert_id = a.id
+            LEFT JOIN news n ON a.news_id = n.id
+            WHERE sr.result IN ('win', 'loss')
+              AND sr.recorded_at LIKE ?
+              AND COALESCE(sr.reported_to_sheets, 0) = 0
+            ORDER BY sr.recorded_at ASC
+        """, (f"{today_str}%",))
+        for row in cursor.fetchall():
+            trades.append({
+                '_id': row[0], '_src': row[1],
+                'result': row[2], 'direction': row[3] or '', 'confidence': row[4] or 0,
+                'impact_score': row[5] or 0, 'setup_type': row[6] or 'news',
+                'trigger_type': row[7] or 'news', 'market_trend': row[8] or '',
+                'rsi': row[9] or 0, 'htf_bias': row[10] or '',
+                'entry_price': row[11] or 0, 'exit_price': row[12] or 0,
+                'pips': row[13] or 0, 'recorded_at': row[14], 'title': row[15] or '',
+                'source': 'alert'
+            })
+    except Exception:
+        pass
+
+    # Unreported strategy results
+    try:
+        cursor.execute("""
+            SELECT sr.id, 'strategy' as src, sr.result, sr.direction, sr.confidence,
+                   sr.setup_type, sr.trigger_type, sr.market_trend, sr.rsi_at_entry,
+                   sr.htf_bias, sr.entry_price, sr.exit_price, sr.pips,
+                   sr.recorded_at, s.news_title
+            FROM strategy_results sr
+            LEFT JOIN auto_strategies s ON sr.strategy_id = s.id
+            WHERE sr.result IN ('win', 'loss')
+              AND sr.recorded_at LIKE ?
+              AND COALESCE(sr.reported_to_sheets, 0) = 0
+            ORDER BY sr.recorded_at ASC
+        """, (f"{today_str}%",))
+        for row in cursor.fetchall():
+            trades.append({
+                '_id': row[0], '_src': row[1],
+                'result': row[2], 'direction': row[3] or '', 'confidence': row[4] or 0,
+                'impact_score': 0, 'setup_type': row[5] or '',
+                'trigger_type': row[6] or '', 'market_trend': row[7] or '',
+                'rsi': row[8] or 0, 'htf_bias': row[9] or '',
+                'entry_price': row[10] or 0, 'exit_price': row[11] or 0,
+                'pips': row[12] or 0, 'recorded_at': row[13], 'title': row[14] or '',
+                'source': 'strategy'
+            })
+    except Exception:
+        pass
+
+    conn.close()
+    trades.sort(key=lambda t: t.get('recorded_at', ''))
+    return trades
+
+
+def mark_trades_reported(trades):
+    """Mark trades as reported to Google Sheets so they aren't uploaded again."""
+    if not trades:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    for t in trades:
+        src = t.get('_src', '')
+        tid = t.get('_id', 0)
+        if not tid:
+            continue
+        table = 'signal_results' if src == 'signal' else 'strategy_results'
+        try:
+            cursor.execute(f"UPDATE {table} SET reported_to_sheets = 1 WHERE id = ?", (tid,))
+        except Exception:
+            pass
+    conn.commit()
+    conn.close()
+
+
 def get_setup_win_rates():
     """Get win rate per setup_type for dynamic confidence adjustment.
     Returns dict: {setup_type: {wins, losses, total, win_rate}}"""
@@ -986,6 +1196,23 @@ def get_mt5_daily_pnl():
     conn.close()
     return result
 
+def get_active_unexecuted_strategies():
+    """Get active strategies that were never executed in MT5 (no ticket)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, direction, entry_price, stop_loss, take_profit, confidence
+        FROM auto_strategies
+        WHERE status = 'active'
+          AND expires_at > ?
+          AND (mt5_ticket IS NULL AND (mt5_status IS NULL OR mt5_status = 'error'))
+    """, (now_ar(),))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{'id': r[0], 'direction': r[1], 'entry_price': r[2],
+             'stop_loss': r[3], 'take_profit': r[4], 'confidence': r[5]} for r in rows]
+
+
 def get_strategies_with_open_mt5():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -1023,3 +1250,355 @@ def update_mt5_config(risk_percent=None, max_positions=None, max_lot=None):
     ))
     conn.commit()
     conn.close()
+
+
+# ── Learning System Functions ──
+
+def archive_trade(strategy_id, result, exit_price, pips, context=None):
+    """Archive a completed trade with enriched context for learning."""
+    ctx = context or {}
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        # Get strategy data for enrichment
+        cursor.execute("""
+            SELECT direction, entry_price, stop_loss, take_profit, confidence,
+                   impact_score, trigger_type, news_title, profile_name, created_at,
+                   mt5_pnl
+            FROM auto_strategies WHERE id = ?
+        """, (strategy_id,))
+        row = cursor.fetchone()
+        if not row:
+            return
+        direction, entry, sl, tp, conf, impact, trigger, title, profile, created, mt5_pnl = row
+
+        # Calculate SL/TP distances in pips
+        pip = 0.0001
+        if direction == 'CALL':
+            sl_pips = round((entry - sl) / pip, 1) if sl else 0
+            tp_pips = round((tp - entry) / pip, 1) if tp else 0
+        else:
+            sl_pips = round((sl - entry) / pip, 1) if sl else 0
+            tp_pips = round((entry - tp) / pip, 1) if tp else 0
+
+        # Determine if SL/TP was hit
+        sl_hit = 1 if result == 'loss' and pips < 0 else 0
+        tp_hit = 1 if result == 'win' and pips > 0 else 0
+
+        # Determine trading session from creation time
+        try:
+            from datetime import datetime as dt
+            created_dt = dt.strptime(str(created).split('.')[0], '%Y-%m-%d %H:%M:%S')
+            # Convert AR time to UTC (+3h)
+            hour_utc = (created_dt.hour + 3) % 24
+            day_of_week = created_dt.weekday()
+            if 7 <= hour_utc < 12:
+                session = 'london'
+            elif 12 <= hour_utc < 14:
+                session = 'overlap'
+            elif 14 <= hour_utc < 17:
+                session = 'ny'
+            elif 17 <= hour_utc < 21:
+                session = 'late_ny'
+            else:
+                session = 'off'
+        except:
+            hour_utc, day_of_week, session = 0, 0, 'unknown'
+
+        cursor.execute("""
+            INSERT INTO trade_archive
+                (strategy_id, direction, result, entry_price, exit_price, pips,
+                 stop_loss, take_profit, sl_pips, tp_pips, sl_hit, tp_hit,
+                 confidence, impact_score, setup_type, trigger_type,
+                 market_trend, trend_strength, rsi_at_entry, htf_bias,
+                 volatility, avg_range_pips, session, hour_utc, day_of_week,
+                 profile_name, mt5_pnl, news_title, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            strategy_id, direction, result, entry, exit_price, pips,
+            sl, tp, sl_pips, tp_pips, sl_hit, tp_hit,
+            conf, impact, ctx.get('setup_type', ''), trigger,
+            ctx.get('market_trend', ''), ctx.get('trend_strength', ''),
+            ctx.get('rsi_at_entry', 0), ctx.get('htf_bias', ''),
+            ctx.get('volatility', ''), ctx.get('avg_range_pips', 0),
+            session, hour_utc, day_of_week,
+            profile, mt5_pnl, title, created
+        ))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_trade_archive(limit=500):
+    """Get trades from archive for learning analysis."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM trade_archive
+        ORDER BY created_at DESC LIMIT ?
+    """, (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_archive_stats():
+    """Get aggregate stats from trade archive."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins,
+            SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) as losses,
+            COALESCE(AVG(pips), 0) as avg_pips,
+            COALESCE(SUM(pips), 0) as total_pips,
+            MIN(created_at) as first_trade,
+            MAX(created_at) as last_trade
+        FROM trade_archive WHERE result IN ('win', 'loss')
+    """)
+    row = cursor.fetchone()
+    conn.close()
+    total, wins, losses = row[0] or 0, row[1] or 0, row[2] or 0
+    return {
+        'total': total, 'wins': wins, 'losses': losses,
+        'win_rate': round(wins / max(total, 1) * 100, 1),
+        'avg_pips': round(row[3], 2), 'total_pips': round(row[4], 2),
+        'first_trade': row[5], 'last_trade': row[6]
+    }
+
+
+def save_learning_insight(category, insight, data=None, action_taken=None):
+    """Save a learning insight."""
+    import json
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO learning_insights (category, insight, data, action_taken, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (category, insight, json.dumps(data) if data else None, action_taken, now_ar()))
+    conn.commit()
+    conn.close()
+
+
+def get_learning_insights(limit=20):
+    """Get recent learning insights."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM learning_insights ORDER BY created_at DESC LIMIT ?
+    """, (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_learning_adjustments():
+    """Get actionable learning adjustments for strategy generation.
+    Returns dict with confidence penalties/bonuses by trigger, session, and blocked patterns."""
+    import json
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    adjustments = {
+        'session_penalties': {},      # e.g. {'off': -15, 'london': +5}
+        'trigger_penalties': {},      # e.g. {'news': -10, 'smc': +5}
+        'blocked_patterns': [],       # patterns to avoid
+        'sl_tp_advice': {},           # e.g. {'news': 'increase_sl', 'structure': 'ok'}
+    }
+    try:
+        # Get most recent insights by category (last 48h)
+        cutoff = (datetime.now(TZ_AR) - timedelta(hours=48)).strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute("""
+            SELECT category, insight, data FROM learning_insights
+            WHERE created_at > ? ORDER BY created_at DESC
+        """, (cutoff,))
+        for row in cursor.fetchall():
+            cat, insight, raw_data = row[0], row[1], row[2]
+            data = json.loads(raw_data) if raw_data else {}
+
+            # Shared insights have reduced weight (prefixed with 'shared_')
+            is_shared = cat.startswith('shared_')
+            weight = 0.5 if is_shared else 1.0
+            base_cat = cat.replace('shared_', '') if is_shared else cat
+            # Shared insights require more trades for significance
+            min_trades = 10 if is_shared else 3
+
+            if base_cat == 'session':
+                session = data.get('session', '')
+                wr = data.get('win_rate', 50)
+                total = data.get('total', 0) or data.get('trades', 0)
+                if total >= min_trades:
+                    if wr < 35:
+                        penalty = int(-15 * weight)
+                        # Local insights override shared
+                        if session not in adjustments['session_penalties'] or not is_shared:
+                            adjustments['session_penalties'][session] = penalty
+                    elif wr > 65:
+                        bonus = int(5 * weight)
+                        if session not in adjustments['session_penalties'] or not is_shared:
+                            adjustments['session_penalties'][session] = bonus
+
+            elif base_cat == 'sl_tp':
+                trigger = data.get('trigger_type', '')
+                rec = data.get('recommendation', '')
+                if trigger and rec:
+                    if trigger not in adjustments['sl_tp_advice'] or not is_shared:
+                        adjustments['sl_tp_advice'][trigger] = rec
+
+            elif base_cat == 'pattern':
+                if 'losing' in insight.lower() or 'bloquear' in insight.lower() or 'perdedor' in insight.lower():
+                    # Reconstruct pattern key from individual fields
+                    _d = data.get('direction', '')
+                    _h = data.get('htf_bias', 'unknown')
+                    _s = data.get('session', 'unknown')
+                    _t = data.get('trigger', 'unknown')
+                    if _d:
+                        pattern_key = f"{_d}|{_h}|{_s}|{_t}"
+                        if pattern_key not in adjustments['blocked_patterns']:
+                            adjustments['blocked_patterns'].append(pattern_key)
+
+            elif base_cat == 'trigger_type':
+                trigger = data.get('trigger_type', '')
+                wr = data.get('win_rate', 50)
+                total = data.get('total', 0)
+                if total >= min_trades:
+                    if wr < 35:
+                        penalty = int(-15 * weight)
+                        if trigger not in adjustments['trigger_penalties'] or not is_shared:
+                            adjustments['trigger_penalties'][trigger] = penalty
+                    elif wr > 65:
+                        bonus = int(5 * weight)
+                        if trigger not in adjustments['trigger_penalties'] or not is_shared:
+                            adjustments['trigger_penalties'][trigger] = bonus
+    except Exception:
+        pass
+    conn.close()
+    return adjustments
+
+
+def save_learning_metric(metric_name, value, period='daily'):
+    """Save a periodic metric snapshot."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO learning_metrics (metric_name, value, period, recorded_at)
+        VALUES (?, ?, ?, ?)
+    """, (metric_name, value, period, now_ar()))
+    conn.commit()
+    conn.close()
+
+
+def get_learning_metrics(metric_name=None, period='daily', limit=60):
+    """Get metric history for trend analysis."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if metric_name:
+        cursor.execute("""
+            SELECT * FROM learning_metrics
+            WHERE metric_name = ? AND period = ?
+            ORDER BY recorded_at DESC LIMIT ?
+        """, (metric_name, period, limit))
+    else:
+        cursor.execute("""
+            SELECT * FROM learning_metrics
+            WHERE period = ?
+            ORDER BY recorded_at DESC LIMIT ?
+        """, (period, limit))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+# ── Shared Learning Functions ──
+
+def get_shared_learning_config():
+    """Get shared learning configuration."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT supabase_url, supabase_key, instance_id, instance_name, enabled, last_sync
+        FROM shared_learning_config WHERE id = 1
+    """)
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            'supabase_url': row[0] or '',
+            'supabase_key': row[1] or '',
+            'instance_id': row[2] or '',
+            'instance_name': row[3] or '',
+            'enabled': bool(row[4]),
+            'last_sync': row[5] or '',
+        }
+    return {'supabase_url': '', 'supabase_key': '', 'instance_id': '', 'instance_name': '', 'enabled': False, 'last_sync': ''}
+
+
+def update_shared_learning_config(supabase_url=None, supabase_key=None, instance_name=None, enabled=None):
+    """Update shared learning configuration from dashboard."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    current = get_shared_learning_config()
+    cursor.execute("""
+        UPDATE shared_learning_config SET
+            supabase_url = ?,
+            supabase_key = ?,
+            instance_name = ?,
+            enabled = ?
+        WHERE id = 1
+    """, (
+        supabase_url if supabase_url is not None else current['supabase_url'],
+        supabase_key if supabase_key is not None else current['supabase_key'],
+        instance_name if instance_name is not None else current['instance_name'],
+        int(enabled) if enabled is not None else int(current['enabled']),
+    ))
+    conn.commit()
+    conn.close()
+
+
+def update_shared_learning_last_sync(timestamp):
+    """Update last sync timestamp."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE shared_learning_config SET last_sync = ? WHERE id = 1", (timestamp,))
+    conn.commit()
+    conn.close()
+
+
+def get_unsynced_trades(limit=50):
+    """Get trades that haven't been synced to cloud yet."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM trade_archive
+        WHERE synced_to_cloud = 0 AND result IN ('win', 'loss')
+        ORDER BY created_at ASC LIMIT ?
+    """, (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def mark_trades_synced(trade_ids):
+    """Mark trades as synced to cloud."""
+    if not trade_ids:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    placeholders = ','.join('?' * len(trade_ids))
+    cursor.execute(f"UPDATE trade_archive SET synced_to_cloud = 1 WHERE id IN ({placeholders})", trade_ids)
+    conn.commit()
+    conn.close()
+
+
+def get_synced_trade_count():
+    """Get count of trades synced to cloud."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM trade_archive WHERE synced_to_cloud = 1")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count

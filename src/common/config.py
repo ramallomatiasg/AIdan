@@ -1,10 +1,25 @@
 import os
+import sys
 from dotenv import load_dotenv
 import json
 
-load_dotenv()
+# For PyInstaller exe: find .env relative to the executable or script location
+_base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+# Walk up from src/common/ to project root (or from dist/ to project root)
+_env_candidates = [
+    os.path.join(_base_dir, '.env'),
+    os.path.join(_base_dir, '..', '.env'),
+    os.path.join(_base_dir, '..', '..', '.env'),
+    os.path.join(os.getcwd(), '.env'),
+]
+for _env_path in _env_candidates:
+    if os.path.isfile(_env_path):
+        load_dotenv(_env_path)
+        break
+else:
+    load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.3.0"
+APP_VERSION = "3.4.0"
 
 class Config:
     VERSION = APP_VERSION

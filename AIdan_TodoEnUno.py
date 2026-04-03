@@ -737,7 +737,16 @@ class AIdan:
             tuner = AutoTuner(logger)
             # Run initial optimization on startup
             tuner.run_optimization(force=True)
-            logger.info("Analyzer + SMC + AutoTuner ready")
+
+            # Learning Engine initialization
+            from src.optimizer.learning_engine import LearningEngine
+            learner = LearningEngine(logger, tuner)
+            try:
+                from src.admin.main import set_learning_engine
+                set_learning_engine(learner)
+            except Exception:
+                pass
+            logger.info("Analyzer + SMC + AutoTuner + LearningEngine ready")
 
             # Calendar pre-news: track already-traded events across cycles
             _traded_calendar_events = set()
@@ -775,6 +784,52 @@ class AIdan:
                         return ticket
                     except Exception as e:
                         logger.error(f"MT5 execution error for #{sid}: {e}")
+                return None
+
+            def _apply_learning_adjustments(conf, trigger_type, session=None, direction=None, htf_bias=None):
+                """Apply learning engine confidence adjustments including blocked patterns."""
+                adj = 0
+                if not _learn_adj:
+                    return conf
+                # Trigger-based penalty/bonus
+                tp = _learn_adj.get('trigger_penalties', {}).get(trigger_type, 0)
+                adj += tp
+                # Session-based penalty/bonus
+                if session:
+                    sp = _learn_adj.get('session_penalties', {}).get(session, 0)
+                    adj += sp
+                # Blocked pattern penalty: if this exact combo was identified as a loser
+                blocked = _learn_adj.get('blocked_patterns', [])
+                if blocked and direction and session:
+                    _htf = htf_bias or 'unknown'
+                    pattern_key = f"{direction}|{_htf}|{session}|{trigger_type}"
+                    if pattern_key in blocked:
+                        adj -= 25
+                        logger.info(f"Learning BLOCKED PATTERN: {pattern_key} → conf -{25}")
+                new_conf = max(5, min(95, conf + adj))
+                if adj != 0:
+                    logger.info(f"Learning adj: {trigger_type} conf {conf}→{new_conf} (trigger={tp}, session={_learn_adj.get('session_penalties', {}).get(session, 0) if session else 0}, pattern={'blocked' if adj <= -25 else 'ok'})")
+                return new_conf
+
+            def _fetch_candles_snapshot(count=30):
+                """Get candles for snapshot: MT5 first, Yahoo fallback."""
+                try:
+                    if mt5_exec and mt5_exec.is_ready():
+                        raw = mt5_exec.get_candles(timeframe='5min', count=count)
+                        if raw and len(raw) > 5:
+                            return [{'o': round(c['open'], 5), 'h': round(c['high'], 5),
+                                     'l': round(c['low'], 5), 'c': round(c['close'], 5),
+                                     't': c['datetime']} for c in raw[-count:]]
+                except Exception:
+                    pass
+                try:
+                    raw = tech._fetch_candles()
+                    if raw:
+                        return [{'o': round(c['open'], 5), 'h': round(c['high'], 5),
+                                 'l': round(c['low'], 5), 'c': round(c['close'], 5),
+                                 't': c['datetime']} for c in raw[-count:]]
+                except Exception:
+                    pass
                 return None
 
             # ── Startup: expire and evaluate pending strategies from previous session ──
@@ -886,6 +941,16 @@ class AIdan:
                                'market_trend': tech.get_market_state().get('trend', ''),
                                'rsi_at_entry': tech.get_market_state().get('rsi', 0)}
                         auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
+                        try:
+                            from src.common.db import archive_trade
+                            ms = tech.get_market_state()
+                            ctx['volatility'] = ms.get('volatility', '')
+                            ctx['trend_strength'] = ms.get('trend_strength', '')
+                            ctx['avg_range_pips'] = ms.get('avg_range_pips', 0)
+                            ctx['htf_bias'] = ctx.get('htf_bias', '')
+                            archive_trade(sid, result, exit_px, round(pips_result, 1), ctx)
+                        except Exception:
+                            pass
                         logger.info(f"Startup eval #{sid}: {result.upper()} | {direction} entry={entry_price:.5f} exit={exit_px:.5f} | {pips_result:+.1f}p")
                     logger.info(f"Startup: evaluated {len(pending)} pending strategies")
             except Exception as e:
@@ -901,6 +966,13 @@ class AIdan:
                     strategies_created = 0
                     # Get current price for alert auto-evaluation
                     _alert_price = tech.get_market_state().get('price', 0)
+                    # Load learning adjustments (confidence penalties from learning engine)
+                    _learn_adj = {}
+                    try:
+                        from src.common.db import get_learning_adjustments
+                        _learn_adj = get_learning_adjustments()
+                    except Exception:
+                        pass
                     # Source conflict resolution: track directions from each source
                     cycle_signals = []  # list of {'source': str, 'direction': str, 'confidence': int}
                     for news_id, url, title, summary, entities, tags in news_items:
@@ -950,6 +1022,43 @@ class AIdan:
                                         market = tech.get_market_state()
                                         price = market.get('price', 0)
                                         if price > 0:
+                                            # AutoTuner block: skip if news setup type has poor win rate
+                                            if tuner.is_setup_blocked('news'):
+                                                logger.info(f"AutoTuner: blocking news {direction}, setup type blocked")
+                                                price = 0  # skip creation
+
+                                            # Market hours check: skip outside active sessions
+                                            if price > 0:
+                                                _news_tp = tuner.get_params()
+                                                if _news_tp.get('block_outside_sessions', False):
+                                                    from datetime import datetime as _ndt, timezone as _ntz
+                                                    _n_utc_h = _ndt.now(_ntz.utc).hour
+                                                    _n_london = _news_tp.get('session_london_start', 8) <= _n_utc_h < _news_tp.get('session_london_end', 16)
+                                                    _n_ny = _news_tp.get('session_ny_start', 13) <= _n_utc_h < _news_tp.get('session_ny_end', 21)
+                                                    if not _n_london and not _n_ny:
+                                                        logger.info(f"Session filter: skipping news {direction}, outside active sessions (UTC {_n_utc_h}h)")
+                                                        price = 0
+
+                                            # HTF bias filter: block news signals against H1 trend
+                                            if price > 0:
+                                                try:
+                                                    _news_htf = None
+                                                    if smc:
+                                                        _news_smc_st = smc.get_status()
+                                                        _news_htf = _news_smc_st.get('htf_bias', None)
+                                                    if _news_htf and _news_htf != 'neutral':
+                                                        if (direction == 'CALL' and _news_htf == 'bearish') or (direction == 'PUT' and _news_htf == 'bullish'):
+                                                            logger.info(f"HTF filter: blocking news {direction} — H1 bias is {_news_htf}")
+                                                            price = 0
+                                                except Exception:
+                                                    pass
+
+                                            # Dedup: skip if similar news strategy exists recently
+                                            if price > 0 and has_recent_similar_strategy(direction, price, 'news', 30):
+                                                logger.info(f"Dedup: skipping {direction} news near {price:.5f}, similar exists within 30min")
+                                                price = 0
+
+                                        if price > 0:
                                             # Adaptive SL/TP based on ATR + structure levels
                                             adaptive = tech.compute_adaptive_sl_tp(direction, price, market, profile)
                                             sl = adaptive['sl']
@@ -988,18 +1097,22 @@ class AIdan:
                                                     if opposite:
                                                         logger.info(f"Anti-contradiction: skipping {direction} news, active #{opposite[0]} {opposite[1]}")
                                                     elif row:
+                                                        news_snap = _fetch_candles_snapshot(30)
+                                                        _news_session = tech.get_session_info().get('session', '')
+                                                        _news_conf = _apply_learning_adjustments(result.get('confidence', 50), 'news', _news_session, direction=direction)
                                                         sid = add_auto_strategy(
                                                             alert_id=row[0], news_title=title,
                                                             direction=direction, entry_price=price,
                                                             stop_loss=sl, take_profit=tp,
-                                                            confidence=result.get('confidence', 50),
+                                                            confidence=_news_conf,
                                                             impact_score=result['impact_score'],
+                                                            candles_snapshot=news_snap,
                                                             expiry_minutes=expiry_min)
                                                         if sid:
                                                             strategies_created += 1
-                                                            cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': result.get('confidence', 50)})
+                                                            cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': _news_conf})
                                                             logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}]")
-                                                            _try_mt5_execute(sid, direction, price, sl, tp, result.get('confidence', 50))
+                                                            _try_mt5_execute(sid, direction, price, sl, tp, _news_conf)
                                 except Exception as e:
                                     logger.error(f"Auto-strategy error: {e}")
 
@@ -1018,6 +1131,17 @@ class AIdan:
                             logger.info(f"[{iteration}] AutoTuner: skipped (interval not reached yet)")
                     except Exception as e:
                         logger.error(f"AutoTuner error: {e}", exc_info=True)
+
+                    # ── Learning Engine tick ──
+                    try:
+                        learner.tick()
+                        # Reload learning adjustments after tick so strategies use fresh insights
+                        try:
+                            _learn_adj = get_learning_adjustments()
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        logger.error(f"LearningEngine error: {e}", exc_info=True)
 
                     # ── Calendar Pre-News Trading: straddle before high-impact events ──
                     try:
@@ -1084,19 +1208,8 @@ class AIdan:
                                     else:
                                         cal_conf_bonus = 5
 
-                                    # Capture candles snapshot for chart
-                                    cal_candles_snap = None
-                                    try:
-                                        raw_candles = tech._fetch_candles()
-                                        if raw_candles:
-                                            cal_candles_snap = [
-                                                {'o': round(c['open'], 5), 'h': round(c['high'], 5),
-                                                 'l': round(c['low'], 5), 'c': round(c['close'], 5),
-                                                 't': c['datetime']}
-                                                for c in raw_candles[-30:]
-                                            ]
-                                    except Exception:
-                                        pass
+                                    # Capture candles snapshot for chart (MT5 priority)
+                                    cal_candles_snap = _fetch_candles_snapshot(30)
 
                                     # STRADDLE: generate CALL above resistance and PUT below support
                                     straddle_sides = [
@@ -1104,9 +1217,41 @@ class AIdan:
                                         {'direction': 'PUT',  'zone': support,    'label': f'PUT zona {support:.4f}'},
                                     ]
 
+                                    # AutoTuner block: skip if calendar setup type has poor win rate
+                                    if tuner.is_setup_blocked('calendar'):
+                                        logger.info(f"AutoTuner: blocking calendar straddle for {evt_name}, setup type blocked")
+                                        _traded_calendar_events.add(evt_key)
+                                        continue
+
+                                    # Market hours / session awareness for calendar
+                                    _cal_tp = tuner.get_params()
+                                    _cal_session_penalty = 0
+                                    if _cal_tp.get('block_outside_sessions', False):
+                                        _cal_utc_h = utc_now.hour
+                                        _cal_in_london = _cal_tp.get('session_london_start', 8) <= _cal_utc_h < _cal_tp.get('session_london_end', 16)
+                                        _cal_in_ny = _cal_tp.get('session_ny_start', 13) <= _cal_utc_h < _cal_tp.get('session_ny_end', 21)
+                                        if not _cal_in_london and not _cal_in_ny:
+                                            _cal_session_penalty = 10
+                                            logger.info(f"Session awareness: calendar outside active sessions (UTC {_cal_utc_h}h), conf -10")
+
+                                    # HTF bias: reduce confidence if going against H1 trend (don't block entirely)
+                                    _cal_htf = None
+                                    try:
+                                        if smc:
+                                            _cal_smc_st = smc.get_status()
+                                            _cal_htf = _cal_smc_st.get('htf_bias', None)
+                                    except Exception:
+                                        _cal_htf = None
+
                                     for side in straddle_sides:
                                         direction = side['direction']
-                                        conf = base_conf + cal_conf_bonus
+                                        conf = base_conf + cal_conf_bonus - _cal_session_penalty
+
+                                        # HTF bias penalty: reduce confidence by 15 if against trend
+                                        if _cal_htf and _cal_htf != 'neutral':
+                                            if (direction == 'CALL' and _cal_htf == 'bearish') or (direction == 'PUT' and _cal_htf == 'bullish'):
+                                                conf = max(10, conf - 15)
+                                                logger.info(f"HTF penalty: calendar {direction} against {_cal_htf} bias, conf -15 → {conf}")
 
                                         # Adaptive SL/TP
                                         adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
@@ -1164,6 +1309,8 @@ class AIdan:
                                             logger.info(f"Anti-contradiction: skipping {direction} calendar, active #{opposite[0]} {opposite[1]}")
                                             continue
 
+                                        _cal_session = tech.get_session_info().get('session', '')
+                                        conf = _apply_learning_adjustments(conf, 'calendar', _cal_session, direction=direction, htf_bias=_cal_htf)
                                         sid = add_auto_strategy(
                                             alert_id=None,
                                             news_title=news_title_cal,
@@ -1269,19 +1416,8 @@ class AIdan:
                             elif put_sigs:
                                 structure_signals = [max(put_sigs, key=lambda s: s['confidence'])]
 
-                            # Capture candles snapshot for frozen chart display
-                            candles_snap = None
-                            try:
-                                raw_candles = tech._fetch_candles()
-                                if raw_candles:
-                                    candles_snap = [
-                                        {'o': round(c['open'], 5), 'h': round(c['high'], 5),
-                                         'l': round(c['low'], 5), 'c': round(c['close'], 5),
-                                         't': c['datetime']}
-                                        for c in raw_candles[-30:]
-                                    ]
-                            except Exception:
-                                pass
+                            # Capture candles snapshot for frozen chart display (MT5 priority)
+                            candles_snap = _fetch_candles_snapshot(30)
 
                             for sig in structure_signals:
                                 direction = sig['direction']
@@ -1365,6 +1501,8 @@ class AIdan:
                                     logger.info(f"Anti-contradiction: skipping {direction} structure, active #{opposite[0]} {opposite[1]} (conf={opposite[2]})")
                                     continue
 
+                                _struct_session = tech.get_session_info().get('session', '')
+                                conf = _apply_learning_adjustments(conf, 'structure', _struct_session, direction=direction, htf_bias=htf_bias)
                                 sid = add_auto_strategy(
                                     alert_id=None,
                                     news_title=f"[ESTRUCTURA] {sig['reason'][:80]}",
@@ -1388,13 +1526,40 @@ class AIdan:
                         smc.update()
                         smc_setups = smc.check_confirmations()
                         logger.info(f"[{iteration}] SMC setups: {len(smc_setups)}")
+                        # AutoTuner: block SMC setup types with poor win rates
+                        _smc_before = len(smc_setups)
+                        smc_setups = [s for s in smc_setups
+                                      if not tuner.is_setup_blocked(s.get('setup_type', 'smc'))]
+                        _smc_blocked = _smc_before - len(smc_setups)
+                        if _smc_blocked > 0:
+                            logger.info(f"[{iteration}] AutoTuner blocked {_smc_blocked} SMC setup(s)")
+
+                        # Market hours check for SMC: skip all if outside active sessions
+                        _smc_tp = tuner.get_params()
+                        _smc_skip_session = False
+                        if _smc_tp.get('block_outside_sessions', False):
+                            from datetime import datetime as _sdt, timezone as _stz
+                            _s_utc_h = _sdt.now(_stz.utc).hour
+                            _s_london = _smc_tp.get('session_london_start', 8) <= _s_utc_h < _smc_tp.get('session_london_end', 16)
+                            _s_ny = _smc_tp.get('session_ny_start', 13) <= _s_utc_h < _smc_tp.get('session_ny_end', 21)
+                            if not _s_london and not _s_ny:
+                                _smc_skip_session = True
+                                logger.info(f"[{iteration}] Session filter: skipping SMC scan, outside active sessions (UTC {_s_utc_h}h)")
+
                         for setup in smc_setups:
+                            if _smc_skip_session:
+                                break
                             direction = setup['direction']
                             conf = setup['confidence']
                             ms = tech.get_market_state()
                             price = ms.get('price', 0)
                             if price <= 0:
                                 break
+
+                            # Confidence minimum check: skip if below profile minimum
+                            if conf < prof_min_conf:
+                                logger.info(f"Min confidence: skipping SMC {direction}, conf {conf} < profile min {prof_min_conf}")
+                                continue
 
                             # Adaptive SL/TP
                             adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
@@ -1439,6 +1604,16 @@ class AIdan:
                                         conf = max(10, conf - 20)
                                         logger.info(f"Source conflict: SMC {direction} vs {prior['source']} {prior['direction']}, conf -20 → {conf}")
 
+                            # HTF bias filter: block SMC signals against H1 trend
+                            try:
+                                smc_htf = setup.get('htf_bias') or (smc_status.get('htf_bias') if smc_status else None)
+                                if smc_htf and smc_htf != 'neutral':
+                                    if (direction == 'CALL' and smc_htf == 'bearish') or (direction == 'PUT' and smc_htf == 'bullish'):
+                                        logger.info(f"HTF filter: blocking SMC {direction} — H1 bias is {smc_htf}")
+                                        continue
+                            except Exception:
+                                pass
+
                             # Dedup: skip if similar SMC strategy exists
                             if has_recent_similar_strategy(direction, price, 'smc', 30):
                                 logger.info(f"Dedup: skipping {direction} SMC near {price:.5f}")
@@ -1450,6 +1625,10 @@ class AIdan:
                                 logger.info(f"Anti-contradiction: skipping {direction} SMC, active #{opposite[0]} {opposite[1]}")
                                 continue
 
+                            smc_snap = _fetch_candles_snapshot(30)
+                            _smc_session = tech.get_session_info().get('session', '')
+                            _smc_htf_val = setup.get('htf_bias') or (smc_status.get('htf_bias') if 'smc_status' in dir() and smc_status else None)
+                            conf = _apply_learning_adjustments(conf, 'smc', _smc_session, direction=direction, htf_bias=_smc_htf_val)
                             sid = add_auto_strategy(
                                 alert_id=None,
                                 news_title=f"[SMC] {setup['reason'][:80]}",
@@ -1457,6 +1636,7 @@ class AIdan:
                                 stop_loss=sl, take_profit=tp,
                                 confidence=conf, impact_score=smc_impact,
                                 trigger_type='smc',
+                                candles_snapshot=smc_snap,
                                 expiry_minutes=expiry_min)
                             if sid:
                                 strategies_created += 1
@@ -1609,6 +1789,24 @@ class AIdan:
                                     'rsi_at_entry': tech.get_market_state().get('rsi', 0),
                                 }
                                 auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
+                                try:
+                                    from src.common.db import archive_trade
+                                    ms = tech.get_market_state()
+                                    ctx['volatility'] = ms.get('volatility', '')
+                                    ctx['trend_strength'] = ms.get('trend_strength', '')
+                                    ctx['avg_range_pips'] = ms.get('avg_range_pips', 0)
+                                    ctx['htf_bias'] = ctx.get('htf_bias', '')
+                                    archive_trade(sid, result, exit_px, round(pips_result, 1), ctx)
+                                except Exception:
+                                    pass
+
+                                # Close MT5 position if strategy has one open
+                                if mt5_exec and mt5_exec.is_ready():
+                                    try:
+                                        mt5_exec.close_strategy_position(sid)
+                                    except Exception as e:
+                                        logger.error(f"MT5 close on eval error: {e}")
+
                                 method = 'TP hit' if hit_tp else ('BE hit' if hit_be else ('SL hit' if hit_sl else f'price eval {current_price:.5f}'))
                                 logger.info(f"Auto-eval #{sid}: {result.upper()} | {direction} entry={entry_price:.5f} exit={exit_px:.5f} | {pips_result:+.1f}p | {method}")
 
@@ -1658,6 +1856,57 @@ class AIdan:
                                 logger.info(f"Evaluated {len(pending_alerts)} pending news alerts")
                     except Exception as e:
                         logger.error(f"Alert auto-eval error: {e}", exc_info=True)
+
+                    # ── MT5: reconnect if disconnected ──
+                    if Config.MT5_ENABLED and mt5_exec and not mt5_exec.connected:
+                        try:
+                            logger.info("MT5 disconnected — attempting reconnect...")
+                            if mt5_exec.connect():
+                                logger.info("MT5 reconnected successfully")
+                                try:
+                                    from src.admin.main import set_mt5_executor
+                                    set_mt5_executor(mt5_exec)
+                                except Exception:
+                                    pass
+                            else:
+                                logger.debug("MT5 reconnect failed, will retry next cycle")
+                        except Exception as e:
+                            logger.error(f"MT5 reconnect error: {e}")
+                    elif Config.MT5_ENABLED and mt5_exec is None:
+                        try:
+                            from src.broker.mt5_executor import MT5Executor
+                            mt5_exec = MT5Executor(logger)
+                            if mt5_exec.connect():
+                                logger.info("MT5 late-connect succeeded")
+                                self._mt5_exec = mt5_exec
+                                try:
+                                    from src.admin.main import set_mt5_executor
+                                    set_mt5_executor(mt5_exec)
+                                except Exception:
+                                    pass
+                            else:
+                                mt5_exec = None
+                        except Exception as e:
+                            logger.error(f"MT5 late-connect error: {e}")
+                            mt5_exec = None
+
+                    # ── MT5: retry execution for active strategies without tickets ──
+                    if mt5_exec and mt5_exec.is_ready():
+                        try:
+                            from src.common.db import get_active_unexecuted_strategies
+                            unexecuted = get_active_unexecuted_strategies()
+                            for strat in unexecuted:
+                                sid = strat['id']
+                                ticket = _try_mt5_execute(
+                                    sid, strat['direction'], strat['entry_price'],
+                                    strat['stop_loss'], strat['take_profit'], strat['confidence']
+                                )
+                                if ticket:
+                                    logger.info(f"MT5 retry SUCCESS: ticket #{ticket} for strategy #{sid}")
+                                else:
+                                    logger.debug(f"MT5 retry: no fill for strategy #{sid}")
+                        except Exception as e:
+                            logger.error(f"MT5 retry execution error: {e}")
 
                     # ── MT5: sync closed positions ──
                     if mt5_exec and mt5_exec.is_ready():

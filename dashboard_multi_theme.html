@@ -5,33 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIdan - Trading Intelligence</title>
     <style>
-        /* ===== CSS VARIABLES - DARK THEME ===== */
+        /* ===== CSS VARIABLES - DARK THEME (Clean Minimal + Neon Glow) ===== */
         :root {
-            --bg-primary: #080c14;
-            --bg-secondary: #0f1520;
-            --bg-card: #141c2b;
-            --bg-card-hover: #1a2436;
-            --bg-input: #0b1018;
-            --border: #1a2535;
-            --border-light: #243045;
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #111111;
+            --bg-card: #111111;
+            --bg-card-hover: #161616;
+            --bg-input: #0e0e0e;
+            --border: #1a1a1a;
+            --border-light: #252525;
             --text-primary: #e8ecf2;
-            --text-secondary: #8a95a8;
-            --text-muted: #4a5568;
+            --text-secondary: #999;
+            --text-muted: #555;
             --accent-blue: #4f8ff7;
-            --accent-blue-dim: #1a3a6e;
-            --accent-green: #22c55e;
-            --accent-green-dim: rgba(34, 197, 94, 0.12);
-            --accent-red: #ef4444;
-            --accent-red-dim: rgba(239, 68, 68, 0.12);
-            --accent-yellow: #eab308;
-            --accent-yellow-dim: rgba(234, 179, 8, 0.12);
+            --accent-blue-dim: rgba(79, 143, 247, 0.1);
+            --accent-green: #00f5a0;
+            --accent-green-dim: rgba(0, 245, 160, 0.08);
+            --accent-red: #ff4466;
+            --accent-red-dim: rgba(255, 68, 102, 0.08);
+            --accent-yellow: #ffcc00;
+            --accent-yellow-dim: rgba(255, 204, 0, 0.08);
             --accent-purple: #a78bfa;
-            --accent-cyan: #22d3ee;
-            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-            --shadow-glow: 0 0 20px rgba(79, 143, 247, 0.08);
-            --radius: 12px;
-            --radius-sm: 8px;
-            --transition: all 0.2s ease;
+            --accent-cyan: #00f5d4;
+            --shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+            --shadow-glow: none;
+            --radius: 14px;
+            --radius-sm: 10px;
+            --transition: all 0.3s ease;
+            /* Neon glow tokens */
+            --glow-blue: 0 0 8px rgba(79,143,247,0.4), 0 0 20px rgba(79,143,247,0.15);
+            --glow-green: 0 0 8px rgba(0,245,160,0.4), 0 0 20px rgba(0,245,160,0.15);
+            --glow-red: 0 0 8px rgba(255,68,102,0.4), 0 0 20px rgba(255,68,102,0.15);
+            --glow-cyan: 0 0 8px rgba(0,245,212,0.4), 0 0 20px rgba(0,245,212,0.15);
+            --glow-yellow: 0 0 8px rgba(255,204,0,0.3), 0 0 20px rgba(255,204,0,0.1);
         }
 
         /* ===== LIGHT THEME ===== */
@@ -74,8 +80,8 @@
 
         /* ===== HEADER ===== */
         .header {
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border);
+            background: rgba(10,10,10,0.92);
+            border-bottom: 1px solid #1a1a1a;
             padding: 0 28px;
             height: 52px;
             display: flex;
@@ -84,7 +90,7 @@
             position: sticky;
             top: 0;
             z-index: 100;
-            backdrop-filter: blur(12px);
+            backdrop-filter: blur(16px);
         }
 
         .header-left { display: flex; align-items: center; gap: 14px; }
@@ -92,10 +98,11 @@
         .logo {
             font-size: 24px;
             font-weight: 800;
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             letter-spacing: -0.5px;
+            filter: drop-shadow(0 0 8px rgba(0,245,212,0.3));
         }
 
         .logo-sub {
@@ -119,7 +126,7 @@
             transition: var(--transition);
             line-height: 1;
         }
-        .theme-toggle:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+        .theme-toggle:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); box-shadow: 0 0 10px rgba(0,245,212,0.15); }
 
         .status-indicator {
             display: flex; align-items: center; gap: 6px;
@@ -143,12 +150,12 @@
         }
 
         @keyframes pulse {
-            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-            50% { opacity: 0.7; box-shadow: 0 0 0 5px rgba(34, 197, 94, 0); }
+            0%, 100% { opacity: 1; box-shadow: 0 0 4px rgba(0,245,160,0.6), 0 0 12px rgba(0,245,160,0.2); }
+            50% { opacity: 0.6; box-shadow: 0 0 2px rgba(0,245,160,0.3); }
         }
 
-        .status-text { font-size: 17px; font-weight: 600; color: var(--accent-green); }
-        .status-indicator.offline .status-text { color: var(--accent-red); }
+        .status-text { font-size: 17px; font-weight: 600; color: var(--accent-green); text-shadow: 0 0 8px rgba(0,245,160,0.4); }
+        .status-indicator.offline .status-text { color: var(--accent-red); text-shadow: 0 0 8px rgba(255,68,102,0.4); }
 
         .clock {
             font-size: 16px; color: var(--text-muted);
@@ -184,11 +191,11 @@
             text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
         }
         .stat-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
-        .stat-value.blue { color: var(--accent-blue); }
-        .stat-value.green { color: var(--accent-green); }
-        .stat-value.yellow { color: var(--accent-yellow); }
-        .stat-value.red { color: var(--accent-red); }
-        .stat-value.cyan { color: var(--accent-cyan); }
+        .stat-value.blue { color: var(--accent-blue); text-shadow: 0 0 6px rgba(79,143,247,0.4); }
+        .stat-value.green { color: var(--accent-green); text-shadow: 0 0 6px rgba(0,245,160,0.4); }
+        .stat-value.yellow { color: var(--accent-yellow); text-shadow: 0 0 6px rgba(255,204,0,0.3); }
+        .stat-value.red { color: var(--accent-red); text-shadow: 0 0 6px rgba(255,68,102,0.4); }
+        .stat-value.cyan { color: var(--accent-cyan); text-shadow: 0 0 6px rgba(0,245,212,0.4); }
 
         /* ===== MAIN LAYOUT ===== */
         .main-grid {
@@ -207,10 +214,17 @@
             border: 1px solid var(--border);
             border-radius: var(--radius);
             overflow: hidden;
-            transition: var(--transition);
-            box-shadow: var(--shadow-glow);
+            transition: all 0.35s ease;
+            box-shadow: none;
         }
-        .card:hover { border-color: var(--border-light); }
+        .card:hover { border-color: #2a2a2a; box-shadow: 0 4px 24px rgba(0,0,0,0.4); }
+        /* FadeIn only on non-chart cards to avoid sizing issues with chart library */
+        .card:not(.chart-section) { animation: cardFadeIn 0.5s ease both; }
+        .card:not(.chart-section):hover { transform: translateY(-1px); }
+        @keyframes cardFadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
         .card-header {
             padding: 12px 16px;
@@ -233,8 +247,8 @@
             border-radius: 10px; font-weight: 700;
             text-transform: uppercase; letter-spacing: 0.5px;
         }
-        .badge-live { background: var(--accent-green-dim); color: var(--accent-green); border: 1px solid rgba(34,197,94,0.2); }
-        .badge-count { background: rgba(79, 143, 247, 0.12); color: var(--accent-blue); border: 1px solid rgba(79,143,247,0.2); }
+        .badge-live { background: var(--accent-green-dim); color: var(--accent-green); border: 1px solid rgba(0,245,160,0.2); text-shadow: 0 0 6px rgba(0,245,160,0.4); }
+        .badge-count { background: var(--accent-blue-dim); color: var(--accent-blue); border: 1px solid rgba(79,143,247,0.2); text-shadow: 0 0 6px rgba(79,143,247,0.3); }
 
         .card-body { padding: 14px 16px; }
 
@@ -273,8 +287,9 @@
             font-size: 16px; font-weight: 800;
         }
         .chat-msg.assistant .chat-avatar {
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-            color: white;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+            color: #0a0a0a;
+            box-shadow: 0 0 10px rgba(0,245,212,0.3);
         }
         .chat-msg.user .chat-avatar { background: var(--border-light); color: var(--text-secondary); }
 
@@ -290,8 +305,8 @@
             background: var(--accent-blue-dim); border: 1px solid rgba(79, 143, 247, 0.25); color: var(--text-primary);
             border-top-right-radius: 4px;
         }
-        .chat-bubble strong, .chat-bubble b { color: var(--accent-green); font-weight: 700; }
-        .chat-bubble em, .chat-bubble i { color: var(--accent-yellow); font-style: italic; }
+        .chat-bubble strong, .chat-bubble b { color: var(--accent-green); font-weight: 700; text-shadow: 0 0 6px rgba(0,245,160,0.3); }
+        .chat-bubble em, .chat-bubble i { color: var(--accent-yellow); font-style: italic; text-shadow: 0 0 6px rgba(255,204,0,0.25); }
 
         .chat-img-preview {
             max-width: 200px; max-height: 150px; border-radius: 8px;
@@ -312,7 +327,7 @@
             transition: var(--transition); flex-shrink: 0;
             color: var(--text-muted);
         }
-        .chat-attach-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+        .chat-attach-btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); box-shadow: 0 0 10px rgba(0,245,212,0.15); }
         .chat-attach-btn svg { width: 16px; height: 16px; }
 
         .chat-input-wrapper {
@@ -337,17 +352,18 @@
             color: var(--text-primary); font-size: 17px; font-family: inherit;
             resize: none; outline: none; transition: var(--transition);
         }
-        .chat-input:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(79, 143, 247, 0.08); }
+        .chat-input:focus { border-color: var(--accent-cyan); box-shadow: 0 0 0 3px rgba(0,245,212,0.08), 0 0 12px rgba(0,245,212,0.1); }
         .chat-input::placeholder { color: var(--text-muted); }
 
         .chat-send-btn {
-            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
             border: none; border-radius: 10px; width: 38px; height: 38px;
             cursor: pointer; display: flex;
             align-items: center; justify-content: center;
-            transition: var(--transition); flex-shrink: 0;
+            transition: all 0.3s ease; flex-shrink: 0;
+            box-shadow: 0 0 8px rgba(0,245,212,0.2);
         }
-        .chat-send-btn:hover { transform: scale(1.05); opacity: 0.9; }
+        .chat-send-btn:hover { transform: scale(1.08); box-shadow: 0 0 16px rgba(0,245,212,0.4), 0 0 30px rgba(0,245,212,0.15); }
         .chat-send-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; }
         .chat-send-btn svg { width: 16px; height: 16px; fill: white; }
 
@@ -361,7 +377,7 @@
             padding: 4px 10px; font-size: 17px; cursor: pointer;
             transition: all 0.15s; white-space: nowrap;
         }
-        .chat-quick-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); background: var(--bg-primary); }
+        .chat-quick-btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); background: var(--bg-primary); text-shadow: 0 0 8px rgba(0,245,212,0.3); }
 
         .chat-typing {
             display: flex; align-items: center; gap: 6px;
@@ -369,7 +385,7 @@
         }
         .typing-dots span {
             display: inline-block; width: 5px; height: 5px;
-            border-radius: 50%; background: var(--accent-blue);
+            border-radius: 50%; background: var(--accent-cyan); box-shadow: 0 0 6px rgba(0,245,212,0.4);
             animation: typing 1.4s ease-in-out infinite; margin: 0 1px;
         }
         .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
@@ -400,7 +416,7 @@
             color: var(--text-primary); font-size: 17px;
             outline: none; cursor: pointer;
         }
-        .filter-select:focus { border-color: var(--accent-blue); }
+        .filter-select:focus { border-color: var(--accent-cyan); box-shadow: 0 0 8px rgba(0,245,212,0.1); }
         .filter-range { width: 70px; padding: 0; accent-color: var(--accent-blue); }
 
         .alerts-grid {
@@ -412,22 +428,25 @@
         .alert-card {
             background: var(--bg-secondary); border: 1px solid var(--border);
             border-radius: var(--radius-sm); padding: 12px 14px;
-            transition: var(--transition); border-left: 3px solid transparent;
-            position: relative;
+            transition: all 0.3s ease; border-left: 3px solid transparent;
+            position: relative; animation: cardFadeIn 0.4s ease both;
         }
-        .alert-card:hover { background: var(--bg-card-hover); border-color: var(--border-light); }
+        .alert-card:hover { background: var(--bg-card-hover); }
         .alert-card.call { border-left-color: var(--accent-green); }
+        .alert-card.call:hover { box-shadow: -2px 0 12px rgba(0,245,160,0.15), 0 4px 16px rgba(0,0,0,0.3); }
         .alert-card.put { border-left-color: var(--accent-red); }
+        .alert-card.put:hover { box-shadow: -2px 0 12px rgba(255,68,102,0.15), 0 4px 16px rgba(0,0,0,0.3); }
         .alert-card.neutral { border-left-color: var(--accent-yellow); }
+        .alert-card.neutral:hover { box-shadow: -2px 0 12px rgba(255,204,0,0.12), 0 4px 16px rgba(0,0,0,0.3); }
 
         .alert-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
         .alert-direction {
             font-size: 17px; font-weight: 800; padding: 2px 10px;
             border-radius: 6px; text-transform: uppercase; letter-spacing: 1px;
         }
-        .direction-call { background: var(--accent-green-dim); color: var(--accent-green); border: 1px solid rgba(34,197,94,0.2); }
-        .direction-put { background: var(--accent-red-dim); color: var(--accent-red); border: 1px solid rgba(239,68,68,0.2); }
-        .direction-neutral { background: var(--accent-yellow-dim); color: var(--accent-yellow); border: 1px solid rgba(234,179,8,0.2); }
+        .direction-call { background: var(--accent-green-dim); color: var(--accent-green); border: 1px solid rgba(0,245,160,0.2); text-shadow: 0 0 6px rgba(0,245,160,0.4); }
+        .direction-put { background: var(--accent-red-dim); color: var(--accent-red); border: 1px solid rgba(255,68,102,0.2); text-shadow: 0 0 6px rgba(255,68,102,0.4); }
+        .direction-neutral { background: var(--accent-yellow-dim); color: var(--accent-yellow); border: 1px solid rgba(255,204,0,0.2); text-shadow: 0 0 6px rgba(255,204,0,0.3); }
 
         .alert-meta { display: flex; align-items: center; gap: 8px; }
         .alert-confidence {
@@ -539,7 +558,7 @@
             margin-right: 36px; font-size: 17px; color: var(--text-secondary);
         }
         .ticker-item a { color: var(--text-secondary); text-decoration: none; transition: var(--transition); }
-        .ticker-item a:hover { color: var(--accent-blue); }
+        .ticker-item a:hover { color: var(--accent-cyan); text-shadow: 0 0 8px rgba(0,245,212,0.3); }
         .ticker-sep { color: var(--border-light); font-size: 11px; }
         .ticker-time { color: var(--text-muted); font-size: 17px; font-variant-numeric: tabular-nums; }
 
@@ -560,7 +579,7 @@
             transition: var(--transition); display: flex; align-items: center; gap: 4px;
             font-weight: 600;
         }
-        .refresh-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+        .refresh-btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); text-shadow: 0 0 8px rgba(0,245,212,0.3); box-shadow: 0 0 10px rgba(0,245,212,0.1); }
         .refresh-btn.spinning svg { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -589,10 +608,11 @@
             background: none; border: none; border-bottom: 2px solid transparent;
             padding: 10px 20px; cursor: pointer; font-size: 16px; font-weight: 700;
             text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted);
-            transition: var(--transition); font-family: 'Inter', sans-serif;
+            transition: all 0.3s ease; font-family: 'Inter', sans-serif;
+            position: relative;
         }
-        .tab-btn:hover { color: var(--text-secondary); }
-        .tab-btn.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+        .tab-btn:hover { color: var(--accent-cyan); text-shadow: 0 0 10px rgba(0,245,212,0.3); }
+        .tab-btn.active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); text-shadow: 0 0 12px rgba(0,245,212,0.5), 0 0 30px rgba(0,245,212,0.15); }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
 
@@ -668,6 +688,44 @@
 </head>
 <body>
 
+<!-- ===== LOGIN OVERLAY ===== -->
+<div id="loginOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;">
+    <div style="background:var(--card-bg,#1a1a2e);border:1px solid var(--border-color,#333);border-radius:16px;padding:40px;width:360px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+        <div style="font-size:32px;font-weight:800;color:#fff;margin-bottom:4px;">AIdan</div>
+        <div style="font-size:14px;color:#888;margin-bottom:24px;">Scalping EUR/USD con IA</div>
+        <div style="margin-bottom:12px;">
+            <input id="loginUser" type="text" placeholder="Usuario" autofocus
+                style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid #444;background:#111;color:#fff;font-size:15px;box-sizing:border-box;"
+                onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+        </div>
+        <div style="margin-bottom:16px;">
+            <input id="loginPass" type="password" placeholder="Clave"
+                style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid #444;background:#111;color:#fff;font-size:15px;box-sizing:border-box;"
+                onkeydown="if(event.key==='Enter')doLogin()">
+        </div>
+        <button onclick="doLogin()" id="loginBtn"
+            style="width:100%;padding:10px;border-radius:8px;border:none;background:linear-gradient(135deg,#00d4ff,#0099cc);color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:opacity 0.2s;">
+            Ingresar
+        </button>
+        <div id="loginMsg" style="margin-top:12px;font-size:13px;color:#ef4444;min-height:20px;"></div>
+    </div>
+</div>
+
+<!-- ===== CHANGE PASSWORD MODAL ===== -->
+<div id="pwdModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:99998;display:none;align-items:center;justify-content:center;">
+    <div style="background:var(--card-bg,#1a1a2e);border:1px solid var(--border-color,#333);border-radius:12px;padding:30px;width:320px;text-align:center;">
+        <div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:16px;">Cambiar Clave</div>
+        <input id="pwdOld" type="password" placeholder="Clave actual" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#111;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:8px;" onkeydown="if(event.key==='Enter')document.getElementById('pwdNew').focus()">
+        <input id="pwdNew" type="password" placeholder="Nueva clave" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#111;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:8px;" onkeydown="if(event.key==='Enter')document.getElementById('pwdNew2').focus()">
+        <input id="pwdNew2" type="password" placeholder="Repetir nueva clave" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#111;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:12px;" onkeydown="if(event.key==='Enter')doChangePwd()">
+        <div style="display:flex;gap:8px;">
+            <button onclick="togglePwdModal()" style="flex:1;padding:8px;border-radius:6px;border:1px solid #555;background:transparent;color:#aaa;font-size:14px;cursor:pointer;">Cancelar</button>
+            <button onclick="doChangePwd()" style="flex:1;padding:8px;border-radius:6px;border:none;background:var(--accent-cyan,#00d4ff);color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Guardar</button>
+        </div>
+        <div id="pwdMsg" style="margin-top:10px;font-size:13px;min-height:18px;"></div>
+    </div>
+</div>
+
 <!-- ===== HEADER ===== -->
 <header class="header">
     <div class="header-left">
@@ -677,6 +735,7 @@
         </div>
     </div>
     <div class="header-right">
+        <span id="userBadge" style="font-size:13px;color:var(--accent-cyan,#00d4ff);font-weight:600;padding:2px 10px;border:1px solid var(--accent-cyan,#00d4ff);border-radius:12px;cursor:pointer;" onclick="togglePwdModal()" title="Cambiar clave"></span>
         <span class="clock" id="clock">--:--:--</span>
         <div class="status-indicator" id="statusIndicator">
             <div class="status-dot" id="statusDot"></div>
@@ -714,6 +773,7 @@
 <nav class="tab-nav">
     <button class="tab-btn active" onclick="switchTab('dashboard', this)">Dashboard</button>
     <button class="tab-btn" onclick="switchTab('estrategias', this)">Estrategias</button>
+    <button class="tab-btn" onclick="switchTab('aprendizaje', this)">Aprendizaje</button>
 </nav>
 
 <!-- ===== TAB: DASHBOARD ===== -->
@@ -919,6 +979,18 @@
         </details>
     </div>
 
+    <!-- Shared Learning Panel -->
+    <div id="sharedLearningPanel" style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;padding:14px;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:16px;font-weight:700;color:var(--text-primary);">&#x1F9E0; Aprendizaje Compartido</span>
+            <span id="slStatusDot" style="width:10px;height:10px;border-radius:50%;background:#6b7280;display:inline-block;"></span>
+            <span id="slStatusText" style="font-size:12px;color:var(--text-muted);">No configurado</span>
+            <span id="slStats" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
+            <button onclick="slSyncNow()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent-purple,#9b59b6);background:transparent;color:var(--accent-purple,#9b59b6);font-size:11px;font-weight:600;cursor:pointer;">Sync Ahora</button>
+            <span id="slMessage" style="font-size:12px;"></span>
+        </div>
+    </div>
+
     <!-- Performance bar -->
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
         <span style="font-size:16px;font-weight:700;color:var(--text-primary);">&#x1F3AF; Estrategias Auto-Generadas</span>
@@ -1016,6 +1088,66 @@
 </div>
 </div><!-- /tab-estrategias -->
 
+<!-- ===== TAB: APRENDIZAJE ===== -->
+<div class="tab-content" id="tab-aprendizaje" style="display:none">
+
+<!-- Learning Status -->
+<div class="card" style="margin-bottom:1rem">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span id="learning-dot" style="width:12px;height:12px;border-radius:50%;background:#666;display:inline-block"></span>
+        <strong id="learning-mode" style="font-size:1.1rem">Cargando...</strong>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
+        <div class="stat-box"><div class="stat-label">Trades Analizados</div><div class="stat-value" id="learn-total">-</div></div>
+        <div class="stat-box"><div class="stat-label">Win Rate Global</div><div class="stat-value" id="learn-wr">-</div></div>
+        <div class="stat-box"><div class="stat-label">Pips Promedio</div><div class="stat-value" id="learn-avg-pips">-</div></div>
+        <div class="stat-box"><div class="stat-label">Pips Totales</div><div class="stat-value" id="learn-total-pips">-</div></div>
+    </div>
+</div>
+
+<!-- Win Rate Trend -->
+<div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 12px 0">Tendencia Win Rate</h3>
+    <canvas id="wr-trend-chart" height="180" style="width:100%"></canvas>
+    <div id="wr-trend-empty" style="display:none;text-align:center;padding:30px;opacity:0.5">
+        Sin datos suficientes aun. Se completara con el tiempo.
+    </div>
+</div>
+
+<!-- Session Heatmap -->
+<div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 12px 0">Heatmap: Setup x Session</h3>
+    <div id="session-heatmap" style="overflow-x:auto">
+        <div style="text-align:center;padding:20px;opacity:0.5">Cargando...</div>
+    </div>
+</div>
+
+<!-- SL/TP Analysis -->
+<div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 12px 0">Analisis SL/TP</h3>
+    <div id="sltp-analysis" style="overflow-x:auto">
+        <div style="text-align:center;padding:20px;opacity:0.5">Cargando...</div>
+    </div>
+</div>
+
+<!-- Insights Feed -->
+<div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 12px 0">Insights Recientes</h3>
+    <div id="insights-feed" style="max-height:400px;overflow-y:auto">
+        <div style="text-align:center;padding:20px;opacity:0.5">Cargando...</div>
+    </div>
+</div>
+
+<!-- Self-Evaluation Report -->
+<div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 12px 0">Auto-Evaluacion</h3>
+    <div id="self-eval-report" style="white-space:pre-wrap;font-family:monospace;font-size:0.85rem;max-height:500px;overflow-y:auto">
+        <div style="text-align:center;padding:20px;opacity:0.5">Sin reporte aun. Se genera automaticamente cuando el mercado esta cerrado.</div>
+    </div>
+</div>
+
+</div><!-- /tab-aprendizaje -->
+
 <!-- ===== CHART LIBRARY ===== -->
 <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 <script type="text/javascript">
@@ -1094,15 +1226,30 @@
         refreshMainChart();
     }
 
+    let _chartWarmRetries = 0;
     async function refreshMainChart() {
         try {
             const res = await fetch(`${typeof API_BASE !== 'undefined' ? API_BASE : ''}/candles`);
             const data = await res.json();
-            if (data.status !== 'success' || !data.data || !data.data.length) return;
+            if (data.status !== 'success' || !data.data || !data.data.length) {
+                // If no data yet, retry faster during warm-up
+                if (_chartWarmRetries < 10) { _chartWarmRetries++; setTimeout(refreshMainChart, 8000); }
+                return;
+            }
             if (cachedCandles && data.data.length < cachedCandles.length * 0.5) return;
 
             const candles = data.data;
             if (!mainSeries) return;
+
+            // Reject bad data: if >40% of candles are flat (high==low), schedule faster retry
+            const flatCount = candles.filter(c => c.high === c.low).length;
+            if (flatCount / candles.length > 0.4) {
+                console.warn(`Chart: ${flatCount}/${candles.length} flat candles, retrying in 10s`);
+                if (_chartWarmRetries < 10) { _chartWarmRetries++; setTimeout(refreshMainChart, 10000); }
+                // Still render if we have nothing better
+                if (cachedCandles && cachedCandles.length >= candles.length) return;
+            }
+            _chartWarmRetries = 0;
             mainSeries.setData(candles);
 
             const ma9 = [], ma20 = [];
@@ -1734,12 +1881,16 @@
 
     // ===== TAB NAVIGATION =====
     function switchTab(tabName, btn) {
-        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => { t.classList.remove('active'); t.style.display = 'none'; t.style.opacity = '0'; });
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('tab-' + tabName).classList.add('active');
+        const target = document.getElementById('tab-' + tabName);
+        target.classList.add('active');
+        target.style.display = 'block';
+        requestAnimationFrame(() => { target.style.transition = 'opacity 0.35s ease'; target.style.opacity = '1'; });
         if (btn) btn.classList.add('active');
         if (tabName === 'dashboard') window.dispatchEvent(new Event('resize'));
         if (tabName === 'estrategias') { lastStratFingerprint = ''; loadAutoStrategies(); loadStrategies(); }
+        if (tabName === 'aprendizaje') { loadLearningData(); }
     }
 
     // ===== STRATEGY CREATOR =====
@@ -2119,9 +2270,16 @@
                                 close: c.close ?? c.c
                             };
                         }).filter(c => c.time > 0);
+                        // Check if snapshot has bad data (many flat candles = Yahoo garbage)
+                        if (chartCandles.length > 3) {
+                            const flat = chartCandles.filter(c => c.high === c.low).length;
+                            if (flat / chartCandles.length > 0.4) {
+                                chartCandles = null; // discard bad snapshot, use live fallback
+                            }
+                        }
                     }
-                    // 2. Fallback: trim live candles to creation time for non-active strategies
-                    else if (cachedCandles && cachedCandles.length > 0) {
+                    // 2. Fallback: use live MT5 candles when no snapshot or bad snapshot
+                    if (!chartCandles && cachedCandles && cachedCandles.length > 0) {
                         chartCandles = cachedCandles;
                         if (s.created_at && s.status !== 'active') {
                             const createdTs = Math.floor(new Date(s.created_at).getTime() / 1000);
@@ -2446,10 +2604,367 @@
         } catch(e) {}
     }
 
-    init();
-    // MT5 status refresh
-    loadMT5Status();
-    setInterval(loadMT5Status, 15000);
+    // ===== AUTH / LOGIN =====
+    async function checkAuth() {
+        try {
+            const r = await fetch(`${API_BASE}/auth/status`);
+            const data = (await r.json()).data || {};
+            if (data.logged_in) {
+                document.getElementById('loginOverlay').style.display = 'none';
+                // Show username in header
+                const badge = document.getElementById('userBadge');
+                if (badge) badge.textContent = data.username;
+                return true;
+            }
+        } catch(e) {}
+        document.getElementById('loginOverlay').style.display = 'flex';
+        return false;
+    }
+
+    async function doLogin() {
+        const user = document.getElementById('loginUser').value.trim();
+        const pass = document.getElementById('loginPass').value;
+        const msg = document.getElementById('loginMsg');
+        const btn = document.getElementById('loginBtn');
+        if (!user || !pass) { msg.textContent = 'Ingresa usuario y clave'; return; }
+        btn.disabled = true; btn.textContent = 'Verificando...';
+        msg.textContent = '';
+        try {
+            const r = await fetch(`${API_BASE}/auth/login`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: user, password: pass})
+            });
+            const result = await r.json();
+            if (result.status === 'success') {
+                document.getElementById('loginOverlay').style.display = 'none';
+                const badge = document.getElementById('userBadge');
+                if (badge) badge.textContent = user;
+                loadSharedLearningStatus();
+            } else {
+                msg.textContent = result.message || 'Error de login';
+            }
+        } catch(e) {
+            msg.textContent = 'Sin conexion al servidor';
+        }
+        btn.disabled = false; btn.textContent = 'Ingresar';
+    }
+
+    function togglePwdModal() {
+        const m = document.getElementById('pwdModal');
+        m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
+        if (m.style.display === 'flex') {
+            document.getElementById('pwdOld').value = '';
+            document.getElementById('pwdNew').value = '';
+            document.getElementById('pwdNew2').value = '';
+            document.getElementById('pwdMsg').textContent = '';
+            document.getElementById('pwdOld').focus();
+        }
+    }
+
+    async function doChangePwd() {
+        const old_pwd = document.getElementById('pwdOld').value;
+        const new_pwd = document.getElementById('pwdNew').value;
+        const new_pwd2 = document.getElementById('pwdNew2').value;
+        const msg = document.getElementById('pwdMsg');
+        if (!old_pwd || !new_pwd) { msg.textContent = 'Completa todos los campos'; msg.style.color = '#ef4444'; return; }
+        if (new_pwd !== new_pwd2) { msg.textContent = 'Las claves nuevas no coinciden'; msg.style.color = '#ef4444'; return; }
+        if (new_pwd.length < 4) { msg.textContent = 'Minimo 4 caracteres'; msg.style.color = '#ef4444'; return; }
+        try {
+            const r = await fetch(`${API_BASE}/auth/change-password`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({old_password: old_pwd, new_password: new_pwd})
+            });
+            const result = await r.json();
+            msg.textContent = result.message;
+            msg.style.color = result.status === 'success' ? '#22c55e' : '#ef4444';
+            if (result.status === 'success') {
+                setTimeout(() => { togglePwdModal(); }, 1500);
+            }
+        } catch(e) {
+            msg.textContent = 'Error de conexion';
+            msg.style.color = '#ef4444';
+        }
+    }
+
+    // ===== SHARED LEARNING =====
+    async function loadSharedLearningStatus() {
+        try {
+            const r = await fetch(`${API_BASE}/shared-learning/status`);
+            const data = (await r.json()).data || {};
+            const dot = document.getElementById('slStatusDot');
+            const text = document.getElementById('slStatusText');
+            const stats = document.getElementById('slStats');
+
+            if (data.enabled && data.tables_ok) {
+                dot.style.background = '#22c55e';
+                text.textContent = 'Conectado';
+                text.style.color = '#22c55e';
+            } else if (data.enabled) {
+                dot.style.background = '#f59e0b';
+                text.textContent = 'Conectando...';
+                text.style.color = '#f59e0b';
+            } else {
+                dot.style.background = '#6b7280';
+                text.textContent = 'Inactivo';
+                text.style.color = 'var(--text-muted)';
+            }
+
+            if (data.trades_synced || data.trades_remote) {
+                stats.textContent = `Subidos: ${data.trades_synced || 0} | De otros: ${data.trades_remote || 0}${data.last_sync ? ' | Sync: ' + _timeAgo(data.last_sync) : ''}`;
+            } else {
+                stats.textContent = '';
+            }
+        } catch(e) {}
+    }
+
+    function _timeAgo(ts) {
+        if (!ts) return '';
+        try {
+            const d = new Date(ts);
+            const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+            if (mins < 1) return 'ahora';
+            if (mins < 60) return `hace ${mins}m`;
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return `hace ${hrs}h`;
+            return `hace ${Math.floor(hrs/24)}d`;
+        } catch(e) { return ts; }
+    }
+
+    async function slSyncNow() {
+        const msg = document.getElementById('slMessage');
+        msg.textContent = 'Sincronizando...';
+        msg.style.color = 'var(--accent-cyan)';
+        try {
+            const r = await fetch(`${API_BASE}/shared-learning/sync`, {method:'POST'});
+            const result = await r.json();
+            if (result.status === 'success') {
+                msg.textContent = `Sync OK: ${result.data.trades_synced} trades subidos`;
+                msg.style.color = '#22c55e';
+            } else {
+                msg.textContent = result.message || 'Error en sync';
+                msg.style.color = '#ef4444';
+            }
+            setTimeout(() => { msg.textContent = ''; }, 5000);
+            loadSharedLearningStatus();
+        } catch(e) {
+            msg.textContent = 'Error: ' + e.message;
+            msg.style.color = '#ef4444';
+        }
+    }
+
+    // Check auth first, then init
+    checkAuth().then(loggedIn => {
+        init();
+        loadMT5Status();
+        setInterval(loadMT5Status, 15000);
+        loadSharedLearningStatus();
+        setInterval(loadSharedLearningStatus, 60000);
+    });
+
+    // ===== LEARNING TAB =====
+    async function loadLearningData() {
+        try {
+            const [statusR, insightsR, reportR, sessionR, sltpR] = await Promise.all([
+                fetch('/learning/status').then(r=>r.json()),
+                fetch('/learning/insights').then(r=>r.json()),
+                fetch('/learning/report').then(r=>r.json()),
+                fetch('/learning/session-analysis').then(r=>r.json()),
+                fetch('/learning/sl-tp-analysis').then(r=>r.json()),
+            ]);
+
+            // Status
+            const s = statusR.data || {};
+            const dot = document.getElementById('learning-dot');
+            const modeEl = document.getElementById('learning-mode');
+            if (s.market_open) {
+                dot.style.background = '#4caf50';
+                modeEl.textContent = 'Monitoreando (mercado abierto)';
+            } else {
+                dot.style.background = '#2196f3';
+                modeEl.textContent = 'Aprendiendo (mercado cerrado)';
+            }
+            document.getElementById('learn-total').textContent = s.archive_total || 0;
+            document.getElementById('learn-wr').textContent = (s.overall_wr || 0) + '%';
+            document.getElementById('learn-avg-pips').textContent = (s.avg_pips || 0) + 'p';
+            document.getElementById('learn-total-pips').textContent = (s.total_pips || 0) + 'p';
+
+            // WR Trend chart
+            loadWRTrend();
+
+            // Session heatmap
+            renderHeatmap(sessionR.data || {});
+
+            // SL/TP analysis
+            renderSLTP(sltpR.data || {});
+
+            // Insights
+            renderInsights(insightsR.data || []);
+
+            // Report
+            const report = reportR.data;
+            const reportEl = document.getElementById('self-eval-report');
+            if (report && report.insight) {
+                reportEl.textContent = report.insight;
+            } else {
+                reportEl.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5">Sin reporte aun. Se genera automaticamente cuando el mercado esta cerrado.</div>';
+            }
+        } catch(e) {
+            console.error('Learning load error:', e);
+        }
+    }
+
+    async function loadWRTrend() {
+        try {
+            const r = await fetch('/learning/metrics?metric=overall_wr&period=daily');
+            const data = (await r.json()).data || [];
+            const canvas = document.getElementById('wr-trend-chart');
+            const emptyMsg = document.getElementById('wr-trend-empty');
+            if (data.length < 2) {
+                canvas.style.display = 'none';
+                emptyMsg.style.display = 'block';
+                return;
+            }
+            canvas.style.display = 'block';
+            emptyMsg.style.display = 'none';
+
+            const ctx = canvas.getContext('2d');
+            const w = canvas.parentElement.clientWidth - 20;
+            canvas.width = w;
+            canvas.height = 180;
+            ctx.clearRect(0, 0, w, 180);
+
+            const points = data.slice(0, 30).reverse();
+            const values = points.map(p => p.value);
+            const minV = Math.max(0, Math.min(...values) - 5);
+            const maxV = Math.min(100, Math.max(...values) + 5);
+            const range = maxV - minV || 1;
+
+            const padL = 40, padR = 10, padT = 10, padB = 30;
+            const chartW = w - padL - padR;
+            const chartH = 180 - padT - padB;
+
+            // Grid
+            const isDark = document.body.classList.contains('dark-theme') || document.body.classList.contains('midnight-theme');
+            ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+            ctx.fillStyle = isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)';
+            ctx.font = '11px monospace';
+            for (let i = 0; i <= 4; i++) {
+                const y = padT + (chartH / 4) * i;
+                const val = maxV - (range / 4) * i;
+                ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+                ctx.fillText(val.toFixed(0) + '%', 2, y + 4);
+            }
+
+            // Line
+            ctx.beginPath();
+            ctx.strokeStyle = '#4caf50';
+            ctx.lineWidth = 2;
+            points.forEach((p, i) => {
+                const x = padL + (chartW / Math.max(points.length - 1, 1)) * i;
+                const y = padT + chartH - ((p.value - minV) / range) * chartH;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Dots
+            ctx.fillStyle = '#4caf50';
+            points.forEach((p, i) => {
+                const x = padL + (chartW / Math.max(points.length - 1, 1)) * i;
+                const y = padT + chartH - ((p.value - minV) / range) * chartH;
+                ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+            });
+        } catch(e) {}
+    }
+
+    function renderHeatmap(data) {
+        const el = document.getElementById('session-heatmap');
+        const triggers = Object.keys(data);
+        if (triggers.length === 0) {
+            el.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5">Sin datos suficientes. Se completara con trades evaluados.</div>';
+            return;
+        }
+        const sessions = ['london', 'ny', 'overlap', 'off'];
+        const sessionLabels = {london:'London', ny:'New York', overlap:'Overlap', off:'Off-hours'};
+
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+        html += '<tr><th style="padding:6px;text-align:left">Setup</th>';
+        sessions.forEach(s => html += `<th style="padding:6px;text-align:center">${sessionLabels[s]||s}</th>`);
+        html += '</tr>';
+
+        triggers.forEach(trigger => {
+            html += `<tr><td style="padding:6px;font-weight:600">${trigger}</td>`;
+            sessions.forEach(s => {
+                const cell = (data[trigger] || {})[s];
+                if (!cell || cell.trades < 3) {
+                    html += '<td style="padding:6px;text-align:center;background:rgba(128,128,128,0.1)">-</td>';
+                } else {
+                    const wr = cell.wr;
+                    let bg, color;
+                    if (wr >= 60) { bg = 'rgba(76,175,80,0.3)'; color = '#4caf50'; }
+                    else if (wr >= 40) { bg = 'rgba(255,193,7,0.3)'; color = '#ffc107'; }
+                    else { bg = 'rgba(244,67,54,0.3)'; color = '#f44336'; }
+                    html += `<td style="padding:6px;text-align:center;background:${bg}"><span style="color:${color};font-weight:700">${wr}%</span><br><small>${cell.trades}t</small></td>`;
+                }
+            });
+            html += '</tr>';
+        });
+        html += '</table>';
+        el.innerHTML = html;
+    }
+
+    function renderSLTP(data) {
+        const el = document.getElementById('sltp-analysis');
+        const triggers = Object.keys(data);
+        if (triggers.length === 0) {
+            el.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5">Sin datos suficientes.</div>';
+            return;
+        }
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+        html += '<tr><th style="padding:6px;text-align:left">Tipo</th><th>Trades</th><th>SL Hit%</th><th>TP Hit%</th><th>Avg SL</th><th>Avg TP</th><th>Avg Win</th><th>Avg Loss</th></tr>';
+        triggers.forEach(t => {
+            const d = data[t];
+            const slColor = d.sl_hit_rate > 60 ? '#f44336' : (d.sl_hit_rate > 40 ? '#ffc107' : '#4caf50');
+            const tpColor = d.tp_hit_rate > 50 ? '#4caf50' : (d.tp_hit_rate > 30 ? '#ffc107' : '#f44336');
+            html += `<tr>
+                <td style="padding:6px;font-weight:600">${t}</td>
+                <td style="text-align:center">${d.total}</td>
+                <td style="text-align:center;color:${slColor};font-weight:700">${d.sl_hit_rate}%</td>
+                <td style="text-align:center;color:${tpColor};font-weight:700">${d.tp_hit_rate}%</td>
+                <td style="text-align:center">${d.avg_sl_pips}p</td>
+                <td style="text-align:center">${d.avg_tp_pips}p</td>
+                <td style="text-align:center;color:#4caf50">+${d.avg_pips_win}p</td>
+                <td style="text-align:center;color:#f44336">${d.avg_pips_loss}p</td>
+            </tr>`;
+        });
+        html += '</table>';
+        el.innerHTML = html;
+    }
+
+    function renderInsights(insights) {
+        const el = document.getElementById('insights-feed');
+        if (!insights.length) {
+            el.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5">Sin insights aun. Se generan cuando el mercado esta cerrado y hay trades para analizar.</div>';
+            return;
+        }
+        const icons = {sl_tp:'🎯', session:'🕐', setup:'🔧', confidence:'📊', pattern:'🧩', news_category:'📰', report:'📋'};
+        let html = '';
+        insights.filter(i => i.category !== 'report').slice(0, 20).forEach(i => {
+            const icon = icons[i.category] || '💡';
+            const date = i.created_at ? new Date(i.created_at).toLocaleString('es-AR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+            html += `<div style="padding:8px 0;border-bottom:1px solid rgba(128,128,128,0.15)">
+                <div style="display:flex;align-items:center;gap:8px">
+                    <span style="font-size:1.2rem">${icon}</span>
+                    <span style="font-size:0.75rem;opacity:0.5">${date}</span>
+                    <span style="font-size:0.7rem;background:rgba(128,128,128,0.15);padding:2px 6px;border-radius:4px">${i.category}</span>
+                </div>
+                <div style="margin-top:4px;font-size:0.85rem">${i.insight}</div>
+                ${i.action_taken ? `<div style="margin-top:2px;font-size:0.75rem;opacity:0.6">Accion: ${i.action_taken}</div>` : ''}
+            </div>`;
+        });
+        el.innerHTML = html;
+    }
 </script>
 
 </body>

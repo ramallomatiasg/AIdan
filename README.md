@@ -1,4 +1,4 @@
-# AIdan v3.2 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.4 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
@@ -6,13 +6,14 @@ Sistema de trading asistido que monitorea noticias financieras en tiempo real, a
 
 ---
 
-## Que hay de nuevo en v3.2
+## Que hay de nuevo en v3.4
 
-- **Auto-evaluacion de alertas de noticias**: las alertas con direccion (CALL/PUT) se evaluan automaticamente 30 min despues comparando el precio actual con el de entrada (>=2 pips a favor = win, en contra = loss)
-- **Deduplicacion de estrategias**: no genera estrategias duplicadas sobre el mismo nivel/direccion en 30 minutos (evita 3-4 estrategias identicas sobre el mismo breakout)
-- **Reporte diario a Google Sheets**: sube resumen, trades con comentarios en espanol y analisis de setups via webhook (sin GCP ni credenciales)
-- **Escaneo cada 1 minuto** (antes 2 min): detecta senales mas rapido para scalping
-- **Expiración visible en dashboard**: cada estrategia muestra hora de expiracion y duracion
+- **Login de usuarios**: pantalla de ingreso con usuario y clave al abrir AIdan. Solo usuarios autorizados pueden acceder
+- **Cambio de clave**: cada usuario puede cambiar su clave desde el dashboard (clic en su nombre)
+- **Aprendizaje Compartido**: multiples instancias de AIdan sincronizan trades anonimizados a la nube (Supabase) para aprender entre todos
+- **Conexion automatica**: al loguearse, el shared learning se activa automaticamente sin configuracion extra
+- **Datos anonimizados**: no se comparten precios exactos, titulos de noticias ni datos de cuenta MT5
+- **Ejecucion MT5 mejorada**: sync de posiciones, cierre automatico, deteccion de huerfanas, reconexion automatica
 
 ---
 
@@ -20,8 +21,10 @@ Sistema de trading asistido que monitorea noticias financieras en tiempo real, a
 
 ### Usuarios
 
-1. Ejecuta `AIdan_TodoEnUno.exe`
+1. Ejecuta `AIdan.exe`
 2. Se abre solo en el navegador en `http://localhost:8000`
+3. Ingresa con tu usuario y clave
+4. El aprendizaje compartido se activa automaticamente al loguearse
 
 **Requisitos:**
 - Windows 10/11
@@ -203,6 +206,36 @@ Configuracion: setear `GOOGLE_SHEETS_WEBHOOK` en las variables de entorno o en c
 
 ---
 
+## Aprendizaje Compartido
+
+AIdan comparte lo que aprende entre todas las instancias conectadas.
+Cuando vos y otros usuarios usan AIdan, cada uno aporta trades y el sistema aprende de todos.
+
+### Como funciona
+
+1. Al abrir AIdan, ingresa con tu usuario y clave
+2. El aprendizaje compartido se activa automaticamente
+3. Cada 2 horas, AIdan sube tus trades (anonimizados) a la nube
+4. Al mismo tiempo, descarga insights de otros usuarios
+5. Los insights remotos tienen peso reducido (0.5x) para que tu aprendizaje local tenga prioridad
+
+No requiere configuracion extra — todo se conecta automaticamente al loguearse.
+
+### Que se comparte y que NO
+
+| Se comparte | NO se comparte |
+|-------------|----------------|
+| Direccion (CALL/PUT) | Precios exactos de entrada/salida |
+| Resultado (win/loss) | Titulo de la noticia |
+| Pips ganados/perdidos | Datos de tu cuenta MT5 |
+| Tipo de setup | Tu nombre o datos personales |
+| Sesion horaria | Tickets de operacion |
+| Indicadores (RSI, tendencia) | Balance o equity |
+
+Si no configuras Supabase, AIdan funciona 100% igual que siempre (solo aprendizaje local).
+
+---
+
 ## Arquitectura
 
 ```
@@ -245,6 +278,20 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.4.0 (03 Abr 2026)
+- **Login de usuarios**: pantalla de ingreso con autenticacion contra Supabase. Solo usuarios autorizados
+- **Cambio de clave**: desde el dashboard, clic en tu nombre de usuario
+- **Aprendizaje Compartido**: se activa automaticamente al loguearse. Sync cada 2 horas
+- Credenciales de Supabase hardcodeadas — zero configuracion para el usuario
+- Datos anonimizados: no se comparten precios, titulos ni datos de cuenta
+
+### v3.3.0 (03 Abr 2026)
+- **Integracion MT5 mejorada**: sync de posiciones con deal history, cierre automatico al evaluar
+- **Kill switch inteligente**: evalua estrategias con P&L real de MT5 en vez de cancelarlas
+- **Deteccion de huerfanas**: cierra posiciones MT5 sin estrategia asociada
+- **Reconexion MT5 automatica**: si se pierde conexion, reconecta sin reiniciar
+- **Learning Engine mejorado**: deep analysis cada 2h online, trigger_type insights, pattern blocking
 
 ### v3.2.0 (31 Mar 2026)
 - Auto-evaluacion de alertas de noticias (CALL/PUT se evaluan a los 30 min)
