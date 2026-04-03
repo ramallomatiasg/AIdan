@@ -1226,6 +1226,20 @@ def get_strategies_with_open_mt5():
     conn.close()
     return rows
 
+def get_evaluated_open_mt5():
+    """Get strategies that were evaluated (auto_win/auto_loss) but MT5 position still marked as filled."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, result, mt5_ticket
+        FROM auto_strategies
+        WHERE mt5_status = 'filled' AND mt5_ticket IS NOT NULL
+          AND status IN ('auto_win', 'auto_loss')
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [{'id': r[0], 'result': r[1], 'mt5_ticket': r[2]} for r in rows]
+
 def get_mt5_config():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()

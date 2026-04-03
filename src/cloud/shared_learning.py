@@ -109,6 +109,14 @@ class SharedLearning:
         # Always use hardcoded Supabase credentials
         self._config['supabase_url'] = SUPABASE_URL
         self._config['supabase_key'] = SUPABASE_KEY
+        # Auto-verify tables on first load if enabled
+        if not self._tables_verified and self._config.get('enabled'):
+            try:
+                ok, _ = self.test_connection()
+                if ok:
+                    self._tables_verified = True
+            except Exception:
+                pass
         return self._config
 
     @property

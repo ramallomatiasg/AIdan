@@ -774,6 +774,15 @@ class AIdan:
 
             def _try_mt5_execute(sid, direction, entry_price, sl, tp, confidence):
                 if mt5_exec and mt5_exec.is_ready():
+                    # Block new trades 10min before market close (Friday 21:50+ UTC)
+                    try:
+                        from datetime import datetime, timezone
+                        utc_now = datetime.now(timezone.utc)
+                        if utc_now.weekday() == 4 and utc_now.hour == 20 and utc_now.minute >= 50:
+                            logger.info(f"MT5 blocked: market closing soon, skipping #{sid}")
+                            return None
+                    except Exception:
+                        pass
                     try:
                         ticket = mt5_exec.open_position(sid, direction, entry_price, sl, tp, confidence)
                         if ticket:
@@ -1785,6 +1794,24 @@ class AIdan:
                                     'market_trend': tech.get_market_state().get('trend', ''),
                                     'rsi_at_entry': tech.get_market_state().get('rsi', 0),
                                 }
+                                # Close MT5 position FIRST, then evaluate
+                                mt5_closed_price = None
+                                if mt5_exec and mt5_exec.is_ready():
+                                    try:
+                                        mt5_closed_price = mt5_exec.close_strategy_position(sid)
+                                    except Exception as e:
+                                        logger.error(f"MT5 close on eval error: {e}")
+
+                                # If MT5 closed, use the actual close price for evaluation
+                                if mt5_closed_price and isinstance(mt5_closed_price, (int, float)) and mt5_closed_price > 0:
+                                    exit_px = mt5_closed_price
+                                    if direction == 'CALL':
+                                        pips_result = (exit_px - entry_price) / pip - est_spread
+                                    else:
+                                        pips_result = (entry_price - exit_px) / pip - est_spread
+                                    min_pips = tuner.get_params().get('min_pips_for_win', 1.5)
+                                    result = 'win' if pips_result >= min_pips else 'loss'
+
                                 auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
                                 try:
                                     from src.common.db import archive_trade
@@ -1796,13 +1823,6 @@ class AIdan:
                                     archive_trade(sid, result, exit_px, round(pips_result, 1), ctx)
                                 except Exception:
                                     pass
-
-                                # Close MT5 position if strategy has one open
-                                if mt5_exec and mt5_exec.is_ready():
-                                    try:
-                                        mt5_exec.close_strategy_position(sid)
-                                    except Exception as e:
-                                        logger.error(f"MT5 close on eval error: {e}")
 
                                 method = 'TP hit' if hit_tp else ('BE hit' if hit_be else ('SL hit' if hit_sl else f'price eval {current_price:.5f}'))
                                 logger.info(f"Auto-eval #{sid}: {result.upper()} | {direction} entry={entry_price:.5f} exit={exit_px:.5f} | {pips_result:+.1f}p | {method}")
@@ -1854,8 +1874,20 @@ class AIdan:
                     except Exception as e:
                         logger.error(f"Alert auto-eval error: {e}", exc_info=True)
 
+                    # ── MT5: pick up executor connected via dashboard ──
+                    if mt5_exec is None:
+                        try:
+                            from src.admin.main import _get_mt5
+                            api_mt5 = _get_mt5()
+                            if api_mt5 and api_mt5.connected:
+                                mt5_exec = api_mt5
+                                self._mt5_exec = mt5_exec
+                                logger.info("MT5 adopted from dashboard connection")
+                        except Exception:
+                            pass
+
                     # ── MT5: reconnect if disconnected ──
-                    if Config.MT5_ENABLED and mt5_exec and not mt5_exec.connected:
+                    if mt5_exec and not mt5_exec.connected:
                         try:
                             logger.info("MT5 disconnected — attempting reconnect...")
                             if mt5_exec.connect():
@@ -1904,6 +1936,34 @@ class AIdan:
                                     logger.debug(f"MT5 retry: no fill for strategy #{sid}")
                         except Exception as e:
                             logger.error(f"MT5 retry execution error: {e}")
+
+                    # ── MT5: close positions for evaluated strategies ──
+                    if mt5_exec and mt5_exec.is_ready():
+                        try:
+                            from src.common.db import get_evaluated_open_mt5
+                            for row in get_evaluated_open_mt5():
+                                try:
+                                    mt5_exec.close_strategy_position(row['id'])
+                                    logger.info(f"MT5 late-close: strategy #{row['id']} (evaluated as {row['result']})")
+                                except Exception as e:
+                                    logger.error(f"MT5 late-close error #{row['id']}: {e}")
+                        except Exception as e:
+                            logger.debug(f"MT5 evaluated-close check: {e}")
+
+                    # ── MT5: pre-market-close — close all positions 10min before Friday close ──
+                    if mt5_exec and mt5_exec.is_ready():
+                        try:
+                            from datetime import datetime, timezone, timedelta
+                            utc_now = datetime.now(timezone.utc)
+                            # Forex closes Friday ~21:00 UTC (18:00 AR), close positions at 20:50 UTC (17:50 AR)
+                            if utc_now.weekday() == 4 and utc_now.hour == 20 and utc_now.minute >= 50:
+                                positions = mt5_exec.check_positions()
+                                if positions:
+                                    logger.warning(f"Market closing soon — closing {len(positions)} open position(s)")
+                                    closed = mt5_exec.close_all_positions()
+                                    logger.info(f"Pre-close: {closed} position(s) closed before weekend")
+                        except Exception as e:
+                            logger.error(f"MT5 pre-close error: {e}")
 
                     # ── MT5: sync closed positions ──
                     if mt5_exec and mt5_exec.is_ready():

@@ -398,7 +398,7 @@ class MT5Executor:
             result = self._mt5.order_send(request)
             if result and result.retcode == self._mt5.TRADE_RETCODE_DONE:
                 self.logger.info(f"MT5 auto-close: strategy #{strategy_id} ticket #{ticket} closed @ {close_price:.5f}")
-                return True
+                return close_price
             else:
                 self.logger.error(f"MT5 auto-close failed: strategy #{strategy_id} retcode={result.retcode if result else 'None'}")
                 return False

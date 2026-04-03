@@ -52,9 +52,9 @@ DEFAULT_PARAMS = {
 
     # Session filter (hours in UTC)
     'session_london_start': 7,
-    'session_london_end': 12,
-    'session_ny_start': 12,
-    'session_ny_end': 17,
+    'session_london_end': 16,
+    'session_ny_start': 13,
+    'session_ny_end': 21,
     'block_outside_sessions': False,
 
     # Setup blocker
