@@ -38,9 +38,6 @@ else:
 sys.path.insert(0, _APP_DIR)
 
 # Configuración
-OLLAMA_URL = "https://ollama.com/download/OllamaSetup.exe"
-OLLAMA_API = "http://localhost:11434/api/tags"
-OLLAMA_MODEL = "llama3.1:8b"
 DASHBOARD_URL = "http://localhost:8000"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2086,7 +2083,7 @@ class AIdan:
 
         # ── Window (borderless but stays in taskbar) ──
         self.root = tk.Tk()
-        self.root.title("AIdan v3.0")
+        self.root.title("AIdan v3.4")
         self.root.geometry(f"{W}x{H}")
         self.root.resizable(False, False)
         self.root.configure(bg=self.BG)
@@ -2178,7 +2175,7 @@ class AIdan:
         # Version badge
         header_canvas.create_rectangle(200, 25, 262, 50, fill=self.ACCENT_DIM, outline=self.ACCENT)
         header_canvas.create_text(
-            231, 37, text="v3.0", font=("Segoe UI", 11, "bold"),
+            231, 37, text="v3.4", font=("Segoe UI", 11, "bold"),
             fill='#ffffff', anchor='center'
         )
 
@@ -2208,7 +2205,7 @@ class AIdan:
                               highlightthickness=1)
         steps_frame.pack(fill='x', pady=(14, 0), ipady=8)
 
-        step_names = ["Ollama Engine", "Modelo IA", "Modelo Vision", "Servicios", "Dashboard"]
+        step_names = ["Groq API", "Servicios", "Dashboard"]
         self._step_icons = []
         for i, name in enumerate(step_names):
             row = tk.Frame(steps_frame, bg=self.BG_CARD)
@@ -2225,7 +2222,7 @@ class AIdan:
                                          highlightthickness=0)
         self._progress_canvas.pack(fill='x', pady=(12, 0))
         self._progress_steps = 0
-        self._progress_total = 5
+        self._progress_total = 3
         self._progress_target = 0.02
         self._progress_current = 0.0
 
@@ -2280,64 +2277,27 @@ class AIdan:
 
         # ── Init thread ──
         def init_thread():
-            # 1. Ollama
+            # 1. Groq API
             self._mark_step_active(0)
-            self.log("Verificando Ollama...", "blue")
-            if not self.check_ollama_installed():
-                response = _ask_yesno_safe(
-                    "Ollama no instalado",
-                    "AIdan necesita Ollama (motor de IA local).\n\n"
-                    "Descargar e instalar Ollama ahora?\n"
-                    "(Descarga ~400MB, instalacion ~5 minutos)"
-                )
-                if response:
-                    if not self.install_ollama():
-                        self.log("Ollama: error de instalacion", "red")
-                        self._mark_step_error(0)
-                        return
+            self.log("Verificando Groq API...", "blue")
+            try:
+                from src.common.config import Config
+                if Config.GROQ_API_KEY:
+                    self.log("Groq API configurada", "green")
                 else:
-                    self.log("Ollama es necesario para AIdan", "red")
-                    self._mark_step_error(0)
-                    return
-            self.log("Ollama listo", "green")
+                    self.log("GROQ_API_KEY no configurada", "orange")
+            except Exception as e:
+                self.log(f"Config: {e}", "orange")
             self._advance_progress(step_index=0)
 
-            # 2. Modelo IA
+            # 2. Servicios
             self._mark_step_active(1)
-            self.log(f"Verificando modelo {OLLAMA_MODEL}...", "blue")
-            if not self.check_ollama_model():
-                response = _ask_yesno_safe(
-                    "Modelo no instalado",
-                    f"Se necesita descargar el modelo {OLLAMA_MODEL}\n"
-                    f"Tamano: ~4GB\n\nDescargar ahora?"
-                )
-                if response:
-                    if not self.install_ollama_model():
-                        self.log("Error instalando modelo", "red")
-                        self._mark_step_error(1)
-                        return
-                else:
-                    self.log("Sin modelo, analisis limitado", "orange")
-            self.log(f"Modelo {OLLAMA_MODEL} listo", "green")
-            self._advance_progress(step_index=1)
-
-            # 3. Vision
-            self._mark_step_active(2)
-            self.log("Verificando modelo de vision (llava)...", "blue")
-            if not self.check_vision_model():
-                self.log("Descargando llava (analisis de graficos)...", "blue")
-                self.install_vision_model()
-            self.log("Modelo de vision listo", "green")
-            self._advance_progress(step_index=2)
-
-            # 4. Servicios
-            self._mark_step_active(3)
             if self.start_services():
-                self._advance_progress(step_index=3)
-                # 5. Dashboard
-                self._mark_step_active(4)
+                self._advance_progress(step_index=1)
+                # 3. Dashboard
+                self._mark_step_active(2)
                 self.open_dashboard()
-                self._advance_progress(step_index=4)
+                self._advance_progress(step_index=2)
                 self._anim_running = False
                 self.log("AIdan activo — dashboard abierto", "green")
 
