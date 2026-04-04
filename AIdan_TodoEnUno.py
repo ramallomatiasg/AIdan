@@ -963,9 +963,24 @@ class AIdan:
                 logger.error(f"Startup eval error: {e}", exc_info=True)
 
             iteration = 0
+            _weekend_logged = False
             while True:
                 try:
                     iteration += 1
+
+                    # ── Weekend filter: forex market closed Sat & Sun ──
+                    from datetime import datetime as _wdt, timezone as _wtz
+                    _w_utc = _wdt.now(_wtz.utc)
+                    # Market closed: Friday after 21:00 UTC until Sunday 22:00 UTC
+                    _is_weekend = (_w_utc.weekday() == 5) or (_w_utc.weekday() == 6 and _w_utc.hour < 22) or (_w_utc.weekday() == 4 and _w_utc.hour >= 21)
+                    if _is_weekend:
+                        if not _weekend_logged:
+                            logger.info("Forex market closed (weekend) — pausing strategy generation")
+                            _weekend_logged = True
+                        time.sleep(300)  # check every 5 min
+                        continue
+                    _weekend_logged = False
+
                     news_items = get_unprocessed_news()
                     
                     alerts_sent = 0
