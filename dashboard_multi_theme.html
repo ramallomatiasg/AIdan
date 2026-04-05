@@ -2195,12 +2195,6 @@
                 // Vote button states
                 const btnState = (r) => s.result === r ? 'active' : (s.result ? 'disabled' : '');
 
-                // Weekend paper badge
-                const createdDay = s.created_at ? new Date(s.created_at).getDay() : -1;
-                const paperBadge = (createdDay === 0 || createdDay === 6)
-                    ? '<span style="background:rgba(168,85,247,0.15);color:#a855f7;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;" title="Generada en fin de semana — solo aprendizaje, sin ejecucion MT5">Solo aprendizaje</span>'
-                    : '';
-
                 // MT5 badge
                 let mt5Badge = '';
                 if (s.mt5_ticket && s.mt5_status === 'filled') {
@@ -2220,7 +2214,6 @@
                             ${statusBadge}
                             ${expiryTag}
                             ${mt5Badge}
-                            ${paperBadge}
                         </div>
                         <div style="text-align:right;">
                             <span style="font-size:16px;color:var(--accent-cyan);">Conf: ${s.confidence.toFixed(1)}%</span>

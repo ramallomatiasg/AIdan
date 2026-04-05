@@ -774,15 +774,10 @@ class AIdan:
 
             def _try_mt5_execute(sid, direction, entry_price, sl, tp, confidence):
                 if mt5_exec and mt5_exec.is_ready():
+                    # Block new trades 10min before market close (Friday 20:50+ UTC)
                     try:
                         from datetime import datetime, timezone
                         utc_now = datetime.now(timezone.utc)
-                        # Block during weekends (paper-only mode)
-                        _wknd = (utc_now.weekday() == 5) or (utc_now.weekday() == 6 and utc_now.hour < 22) or (utc_now.weekday() == 4 and utc_now.hour >= 21)
-                        if _wknd:
-                            logger.debug(f"Weekend mode: paper-only, skipping MT5 for #{sid}")
-                            return None
-                        # Block new trades 10min before market close (Friday 20:50+ UTC)
                         if utc_now.weekday() == 4 and utc_now.hour == 20 and utc_now.minute >= 50:
                             logger.info(f"MT5 blocked: market closing soon, skipping #{sid}")
                             return None
@@ -973,17 +968,18 @@ class AIdan:
                 try:
                     iteration += 1
 
-                    # ── Weekend detection: forex market closed Sat & Sun ──
+                    # ── Weekend filter: forex market closed Sat & Sun ──
                     from datetime import datetime as _wdt, timezone as _wtz
                     _w_utc = _wdt.now(_wtz.utc)
                     # Market closed: Friday after 21:00 UTC until Sunday 22:00 UTC
                     _is_weekend = (_w_utc.weekday() == 5) or (_w_utc.weekday() == 6 and _w_utc.hour < 22) or (_w_utc.weekday() == 4 and _w_utc.hour >= 21)
                     if _is_weekend:
                         if not _weekend_logged:
-                            logger.info("Weekend mode — paper strategies only (no MT5 execution)")
+                            logger.info("Forex market closed (weekend) — pausing until Sunday 22:00 UTC")
                             _weekend_logged = True
-                    else:
-                        _weekend_logged = False
+                        time.sleep(300)  # check every 5 min
+                        continue
+                    _weekend_logged = False
 
                     news_items = get_unprocessed_news()
                     
@@ -1939,7 +1935,7 @@ class AIdan:
                             mt5_exec = None
 
                     # ── MT5: retry execution for active strategies without tickets ──
-                    if mt5_exec and mt5_exec.is_ready() and not _is_weekend:
+                    if mt5_exec and mt5_exec.is_ready():
                         try:
                             from src.common.db import get_active_unexecuted_strategies
                             unexecuted = get_active_unexecuted_strategies()
@@ -1957,7 +1953,7 @@ class AIdan:
                             logger.error(f"MT5 retry execution error: {e}")
 
                     # ── MT5: close positions for evaluated strategies ──
-                    if mt5_exec and mt5_exec.is_ready() and not _is_weekend:
+                    if mt5_exec and mt5_exec.is_ready():
                         try:
                             from src.common.db import get_evaluated_open_mt5
                             for row in get_evaluated_open_mt5():
@@ -1985,7 +1981,7 @@ class AIdan:
                             logger.error(f"MT5 pre-close error: {e}")
 
                     # ── MT5: sync closed positions ──
-                    if mt5_exec and mt5_exec.is_ready() and not _is_weekend:
+                    if mt5_exec and mt5_exec.is_ready():
                         try:
                             mt5_exec.sync_closed_positions()
                         except Exception as e:
