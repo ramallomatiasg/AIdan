@@ -41,10 +41,11 @@ def _sb_url(table):
 def authenticate_user(username, password):
     """Authenticate user against Supabase users table.
     Returns (ok, message, user_data)."""
+    from urllib.parse import quote
     try:
         pwd_hash = hash_password(password)
         resp = requests.get(
-            _sb_url('users') + f'?username=eq.{username}&password_hash=eq.{pwd_hash}&select=id,username,created_at',
+            _sb_url('users') + f'?username=eq.{quote(username, safe="")}&password_hash=eq.{pwd_hash}&select=id,username,created_at',
             headers=_sb_headers(),
             timeout=10,
         )
@@ -64,13 +65,14 @@ def authenticate_user(username, password):
 
 def change_password(username, old_password, new_password):
     """Change user password in Supabase. Returns (ok, message)."""
-    if not new_password or len(new_password) < 4:
-        return False, "La clave debe tener al menos 4 caracteres"
+    if not new_password or len(new_password) < 8:
+        return False, "La clave debe tener al menos 8 caracteres"
     try:
         # Verify old password first
         old_hash = hash_password(old_password)
+        from urllib.parse import quote
         resp = requests.get(
-            _sb_url('users') + f'?username=eq.{username}&password_hash=eq.{old_hash}&select=id',
+            _sb_url('users') + f'?username=eq.{quote(username, safe="")}&password_hash=eq.{old_hash}&select=id',
             headers=_sb_headers(),
             timeout=10,
         )
@@ -80,7 +82,7 @@ def change_password(username, old_password, new_password):
         # Update password
         new_hash = hash_password(new_password)
         resp = requests.patch(
-            _sb_url('users') + f'?username=eq.{username}',
+            _sb_url('users') + f'?username=eq.{quote(username, safe="")}',
             headers={**_sb_headers(), 'Prefer': 'return=minimal'},
             json={'password_hash': new_hash},
             timeout=10,

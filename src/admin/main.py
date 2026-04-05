@@ -143,7 +143,7 @@ def get_smc():
 # Configurar CORS para permitir peticiones desde PyWebView y navegadores
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000", "http://localhost:5000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1731,7 +1731,7 @@ async def mt5_diagnose():
     # Try login
     try:
         from src.common.config import Config
-        acct = Config.MT5_ACCOUNT or 52823409
+        acct = Config.MT5_ACCOUNT or 0
         pwd = Config.MT5_PASSWORD or ""
         srv = Config.MT5_SERVER or "ICMarketsSC-Demo"
         login_ok = mt5mod.login(acct, pwd, srv)
@@ -1874,6 +1874,7 @@ async def auth_login(request: Request):
         from src.cloud.shared_learning import authenticate_user
         ok, msg, user_data = authenticate_user(username, password)
         if ok:
+            logger.info(f"Login OK: {username}")
             _logged_in_user = {'username': username, 'id': user_data.get('id')}
             # Auto-enable shared learning with this username
             from src.common.db import update_shared_learning_config
@@ -1887,8 +1888,10 @@ async def auth_login(request: Request):
                     shared.register_instance()
             return JSONResponse({"status": "success", "message": msg, "data": {"username": username}})
         else:
+            logger.warning(f"Login FAILED: {username} — {msg}")
             return JSONResponse({"status": "error", "message": msg})
     except Exception as e:
+        logger.error(f"Login ERROR: {username} — {e}")
         return JSONResponse({"status": "error", "message": f"Error: {str(e)}"})
 
 @app.get("/auth/status")

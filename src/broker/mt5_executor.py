@@ -89,7 +89,7 @@ class MT5Executor:
         if self._mt5:
             try:
                 self._mt5.shutdown()
-            except:
+            except Exception:
                 pass
         self.connected = False
 
@@ -356,9 +356,10 @@ class MT5Executor:
             self.logger.info(f"MT5 position closed: #{ticket} Strategy #{sid} P&L=${pnl:.2f} @ {close_price:.5f}")
 
     def close_strategy_position(self, strategy_id):
-        """Close the MT5 position associated with a strategy after auto-evaluation."""
+        """Close the MT5 position associated with a strategy after auto-evaluation.
+        Returns close_price (float) on success, None on failure."""
         if not self.connected or not self._mt5:
-            return False
+            return None
 
         from src.common.db import get_strategies_with_open_mt5
         open_strats = get_strategies_with_open_mt5()
@@ -372,13 +373,13 @@ class MT5Executor:
             # Check if position still exists
             position = self._mt5.positions_get(ticket=ticket)
             if not position or len(position) == 0:
-                return False  # Already closed by SL/TP
+                return None  # Already closed by SL/TP
 
             p = position[0]
             close_type = self._mt5.ORDER_TYPE_SELL if p.type == 0 else self._mt5.ORDER_TYPE_BUY
             tick = self._mt5.symbol_info_tick(p.symbol)
             if not tick:
-                return False
+                return None
             close_price = tick.bid if p.type == 0 else tick.ask
 
             request = {
@@ -401,8 +402,8 @@ class MT5Executor:
                 return close_price
             else:
                 self.logger.error(f"MT5 auto-close failed: strategy #{strategy_id} retcode={result.retcode if result else 'None'}")
-                return False
-        return False
+                return None
+        return None
 
     def close_all_positions(self):
         if not self.connected or not self._mt5:

@@ -1054,7 +1054,7 @@ class AIdan:
                                                 if _news_tp.get('block_outside_sessions', False):
                                                     from datetime import datetime as _ndt, timezone as _ntz
                                                     _n_utc_h = _ndt.now(_ntz.utc).hour
-                                                    _n_london = _news_tp.get('session_london_start', 8) <= _n_utc_h < _news_tp.get('session_london_end', 16)
+                                                    _n_london = _news_tp.get('session_london_start', 7) <= _n_utc_h < _news_tp.get('session_london_end', 16)
                                                     _n_ny = _news_tp.get('session_ny_start', 13) <= _n_utc_h < _news_tp.get('session_ny_end', 21)
                                                     if not _n_london and not _n_ny:
                                                         logger.info(f"Session filter: skipping news {direction}, outside active sessions (UTC {_n_utc_h}h)")
@@ -1249,7 +1249,7 @@ class AIdan:
                                     _cal_session_penalty = 0
                                     if _cal_tp.get('block_outside_sessions', False):
                                         _cal_utc_h = utc_now.hour
-                                        _cal_in_london = _cal_tp.get('session_london_start', 8) <= _cal_utc_h < _cal_tp.get('session_london_end', 16)
+                                        _cal_in_london = _cal_tp.get('session_london_start', 7) <= _cal_utc_h < _cal_tp.get('session_london_end', 16)
                                         _cal_in_ny = _cal_tp.get('session_ny_start', 13) <= _cal_utc_h < _cal_tp.get('session_ny_end', 21)
                                         if not _cal_in_london and not _cal_in_ny:
                                             _cal_session_penalty = 10
@@ -1561,7 +1561,7 @@ class AIdan:
                         if _smc_tp.get('block_outside_sessions', False):
                             from datetime import datetime as _sdt, timezone as _stz
                             _s_utc_h = _sdt.now(_stz.utc).hour
-                            _s_london = _smc_tp.get('session_london_start', 8) <= _s_utc_h < _smc_tp.get('session_london_end', 16)
+                            _s_london = _smc_tp.get('session_london_start', 7) <= _s_utc_h < _smc_tp.get('session_london_end', 16)
                             _s_ny = _smc_tp.get('session_ny_start', 13) <= _s_utc_h < _smc_tp.get('session_ny_end', 21)
                             if not _s_london and not _s_ny:
                                 _smc_skip_session = True
