@@ -786,10 +786,14 @@ def record_strategy_result(strategy_id, result, market_context=None):
         conn.close()
 
 def get_strategy_performance():
-    """Get win/loss/skip stats for auto-strategies"""
+    """Get win/loss/skip stats for auto-strategies (excludes weekend paper trades)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT result, COUNT(*) FROM strategy_results GROUP BY result")
+    cursor.execute("""
+        SELECT result, COUNT(*) FROM strategy_results
+        WHERE strftime('%w', recorded_at) NOT IN ('0', '6')
+        GROUP BY result
+    """)
     rows = cursor.fetchall()
     conn.close()
     stats = {'wins': 0, 'losses': 0, 'skips': 0, 'break_evens': 0}
@@ -888,6 +892,7 @@ def get_detailed_trade_history(limit=30):
             LEFT JOIN alerts a ON sr.alert_id = a.id
             LEFT JOIN news n ON a.news_id = n.id
             WHERE sr.result IN ('win', 'loss')
+              AND strftime('%w', sr.recorded_at) NOT IN ('0', '6')
             ORDER BY sr.recorded_at DESC
             LIMIT ?
         """, (limit,))
@@ -914,6 +919,7 @@ def get_detailed_trade_history(limit=30):
             FROM strategy_results sr
             LEFT JOIN auto_strategies s ON sr.strategy_id = s.id
             WHERE sr.result IN ('win', 'loss')
+              AND strftime('%w', sr.recorded_at) NOT IN ('0', '6')
             ORDER BY sr.recorded_at DESC
             LIMIT ?
         """, (limit,))
@@ -1036,6 +1042,7 @@ def get_setup_win_rates():
         cursor.execute("""
             SELECT setup_type, result, COUNT(*) FROM strategy_results
             WHERE result IN ('win', 'loss') AND setup_type != ''
+              AND strftime('%w', recorded_at) NOT IN ('0', '6')
             GROUP BY setup_type, result
         """)
         for setup_type, result, count in cursor.fetchall():
@@ -1053,6 +1060,7 @@ def get_setup_win_rates():
         cursor.execute("""
             SELECT setup_type, result, COUNT(*) FROM signal_results
             WHERE result IN ('win', 'loss') AND setup_type != ''
+              AND strftime('%w', recorded_at) NOT IN ('0', '6')
             GROUP BY setup_type, result
         """)
         for setup_type, result, count in cursor.fetchall():
@@ -1344,12 +1352,13 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
 
 
 def get_trade_archive(limit=500):
-    """Get trades from archive for learning analysis."""
+    """Get trades from archive for learning analysis (excludes weekend paper trades)."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
         SELECT * FROM trade_archive
+        WHERE day_of_week NOT IN (5, 6)
         ORDER BY created_at DESC LIMIT ?
     """, (limit,))
     rows = [dict(r) for r in cursor.fetchall()]
@@ -1371,6 +1380,7 @@ def get_archive_stats():
             MIN(created_at) as first_trade,
             MAX(created_at) as last_trade
         FROM trade_archive WHERE result IN ('win', 'loss')
+          AND day_of_week NOT IN (5, 6)
     """)
     row = cursor.fetchone()
     conn.close()

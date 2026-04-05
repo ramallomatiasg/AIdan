@@ -291,6 +291,10 @@ class SharedLearning:
         synced_ids = []
 
         for t in trades:
+            # Skip weekend paper trades (unreliable with market closed)
+            if t.get('day_of_week', -1) in (5, 6):
+                synced_ids.append(t['id'])  # mark as synced to avoid retrying
+                continue
             # Anonymize: strip prices, titles, personal data
             payload.append({
                 'instance_id': instance_id,
