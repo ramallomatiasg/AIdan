@@ -67,6 +67,9 @@ AIdan_Portable.zip
 
 # Temporal
 check_db.py
+tmp_alerts.json
+.coverage
+.pytest_cache/
 
 # Archivos obsoletos
 about.html

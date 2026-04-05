@@ -1068,9 +1068,8 @@
                     <div class="strat-row"><label>Confianza minima %</label><input type="number" id="stratMinConf" min="0" max="100" value="65"></div>
                     <div class="strat-row"><label>Direccion permitida</label><select id="stratDirection"><option value="any">CALL y PUT</option><option value="CALL">Solo CALL</option><option value="PUT">Solo PUT</option></select></div>
                     <h4 class="strat-section-title">Gestion de riesgo</h4>
-                    <div class="strat-row"><label>Stop loss (pips)</label><input type="number" id="stratSL" min="1" max="50" value="5" step="0.5"></div>
-                    <div class="strat-row"><label>Take profit (pips)</label><input type="number" id="stratTP" min="1" max="50" value="10" step="0.5"></div>
-                    <div class="strat-row"><label>Expiracion (min)</label><input type="number" id="stratExpiry" min="1" max="30" value="5"></div>
+                    <div class="strat-row"><label>SL minimo (pips)</label><input type="number" id="stratSL" min="1" max="50" value="5" step="0.5"></div>
+                    <div class="strat-row"><label>TP minimo (pips)</label><input type="number" id="stratTP" min="1" max="50" value="10" step="0.5"></div>
                     <div class="strat-row"><label>Cooldown entre estrategias (min)</label><input type="number" id="stratCooldown" min="0" max="30" value="2" step="1"></div>
                     <div class="strat-actions"><button onclick="saveStrategy()">&#x1F4BE; Guardar perfil</button></div>
                 </div>
@@ -2378,7 +2377,6 @@
             max_trades_per_hour: 3,
             stop_loss_pips: parseFloat(document.getElementById('stratSL')?.value) || 5,
             take_profit_pips: parseFloat(document.getElementById('stratTP')?.value) || 10,
-            expiry_minutes: parseInt(document.getElementById('stratExpiry')?.value) || 5,
             cooldown_minutes: parseInt(document.getElementById('stratCooldown')?.value) || 2
         };
     }
@@ -2424,7 +2422,7 @@
                             </div>
                         </div>
                         <div class="strat-saved-meta">
-                            Score &ge;${c.min_impact} | Conf &ge;${c.min_confidence}% | ${dirLabel} | SL:${c.stop_loss_pips} TP:${c.take_profit_pips} | Exp:${c.expiry_minutes || 5}min | CD:${c.cooldown_minutes || 2}min
+                            Score &ge;${c.min_impact} | Conf &ge;${c.min_confidence}% | ${dirLabel} | SL:${c.stop_loss_pips} TP:${c.take_profit_pips} | CD:${c.cooldown_minutes || 2}min
                         </div>
                     </div>`;
                 }).join('');
@@ -2448,7 +2446,6 @@
             document.getElementById('stratDirection').value = c.direction || 'any';
             document.getElementById('stratSL').value = c.stop_loss_pips || 5;
             document.getElementById('stratTP').value = c.take_profit_pips || 10;
-            if (document.getElementById('stratExpiry')) document.getElementById('stratExpiry').value = c.expiry_minutes || 5;
             if (document.getElementById('stratCooldown')) document.getElementById('stratCooldown').value = c.cooldown_minutes || 2;
         } catch(e) {}
     }
