@@ -494,47 +494,58 @@ REGLAS OBLIGATORIAS:
         }
 
     def _analyze_with_groq(self, news_id, title, summary, entities, tags):
-        """Analiza con Groq API (Llama 70B en la nube - gratis y rápido)"""
-        try:
-            import requests
-            from src.common.config import Config
+        """Analiza con Groq API (Llama 70B) con rotación automática de keys."""
+        import requests
+        from src.common.config import Config
 
-            api_key = Config.GROQ_API_KEY
-            if not api_key:
-                return None
-
-            prompt = self._build_analysis_prompt(title, summary)
-
-            self.logger.info(f"Analizando noticia #{news_id} con Groq/Llama-70B...")
-
-            resp = requests.post(
-                'https://api.groq.com/openai/v1/chat/completions',
-                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-                json={
-                    'model': Config.GROQ_MODEL,
-                    'messages': [
-                        {'role': 'system', 'content': 'Sos un analista experto de forex EUR/USD. Respondé SOLO con JSON válido.'},
-                        {'role': 'user', 'content': prompt}
-                    ],
-                    'temperature': 0.3,
-                    'max_tokens': 500,
-                    'stream': False
-                },
-                timeout=30
-            )
-
-            if resp.status_code != 200:
-                self.logger.error(f"Groq HTTP error: {resp.status_code} - {resp.text[:200]}")
-                return None
-
-            result_text = resp.json()['choices'][0]['message']['content']
-            self.logger.debug(f"Groq response: {result_text[:200]}")
-
-            return self._parse_ai_result(news_id, result_text, 'groq')
-
-        except Exception as e:
-            self.logger.error(f"Groq analysis error: {str(e)}")
+        keys = Config.GROQ_API_KEYS if hasattr(Config, 'GROQ_API_KEYS') else [Config.GROQ_API_KEY]
+        keys = [k for k in keys if k]
+        if not keys:
             return None
+
+        prompt = self._build_analysis_prompt(title, summary)
+
+        for i, api_key in enumerate(keys):
+            try:
+                self.logger.info(f"Analizando noticia #{news_id} con Groq/Llama-70B (key {i+1}/{len(keys)})...")
+
+                resp = requests.post(
+                    'https://api.groq.com/openai/v1/chat/completions',
+                    headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                    json={
+                        'model': Config.GROQ_MODEL,
+                        'messages': [
+                            {'role': 'system', 'content': 'Sos un analista experto de forex EUR/USD. Respondé SOLO con JSON válido.'},
+                            {'role': 'user', 'content': prompt}
+                        ],
+                        'temperature': 0.3,
+                        'max_tokens': 500,
+                        'stream': False
+                    },
+                    timeout=30
+                )
+
+                if resp.status_code == 200:
+                    result_text = resp.json()['choices'][0]['message']['content']
+                    self.logger.debug(f"Groq response: {result_text[:200]}")
+                    return self._parse_ai_result(news_id, result_text, 'groq')
+                elif resp.status_code == 429 and i < len(keys) - 1:
+                    self.logger.warning(f"Groq key {i+1} rate limited, trying key {i+2}...")
+                    continue
+                elif resp.status_code == 401 and i < len(keys) - 1:
+                    self.logger.warning(f"Groq key {i+1} invalid, trying key {i+2}...")
+                    continue
+                else:
+                    self.logger.error(f"Groq HTTP error: {resp.status_code} - {resp.text[:200]}")
+                    return None
+
+            except Exception as e:
+                if i < len(keys) - 1:
+                    self.logger.warning(f"Groq key {i+1} failed ({e}), trying next...")
+                    continue
+                self.logger.error(f"Groq analysis error: {str(e)}")
+                return None
+        return None
 
     def _analyze_with_ollama(self, news_id, title, summary, entities, tags):
         """Analiza con Llama local via Ollama (fallback)"""

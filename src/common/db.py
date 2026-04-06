@@ -332,9 +332,39 @@ def init_db():
         import uuid
         cursor.execute("UPDATE shared_learning_config SET instance_id = ? WHERE id = 1", (str(uuid.uuid4()),))
 
+    # Shared trade cache (trades from other instances, for cross-instance learning)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shared_trade_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            remote_id INTEGER UNIQUE,
+            instance_id TEXT,
+            direction TEXT, result TEXT, pips REAL,
+            sl_pips REAL, tp_pips REAL,
+            sl_hit INTEGER DEFAULT 0, tp_hit INTEGER DEFAULT 0,
+            confidence REAL, trigger_type TEXT, setup_type TEXT,
+            session TEXT, hour_utc INTEGER, day_of_week INTEGER,
+            htf_bias TEXT, market_trend TEXT, rsi_at_entry REAL,
+            volatility TEXT, news_category TEXT,
+            created_at TIMESTAMP,
+            imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Migration: add synced_to_cloud column to trade_archive
     try:
         cursor.execute("ALTER TABLE trade_archive ADD COLUMN synced_to_cloud INTEGER DEFAULT 0")
+    except:
+        pass
+
+    # Migration: add last_fetched_remote_id to shared_learning_config
+    try:
+        cursor.execute("ALTER TABLE shared_learning_config ADD COLUMN last_fetched_remote_id INTEGER DEFAULT 0")
+    except:
+        pass
+
+    # Migration: add trailing step tracking to auto_strategies
+    try:
+        cursor.execute("ALTER TABLE auto_strategies ADD COLUMN mt5_trailing_step INTEGER DEFAULT 0")
     except:
         pass
 
@@ -1226,13 +1256,21 @@ def get_strategies_with_open_mt5():
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, mt5_ticket, direction, entry_price, stop_loss, take_profit,
-               mt5_lot, created_at, news_title
+               mt5_lot, created_at, news_title, mt5_trailing_step
         FROM auto_strategies
         WHERE mt5_status = 'filled' AND mt5_ticket IS NOT NULL
     """)
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+def update_mt5_trailing_step(strategy_id, step):
+    """Update the trailing SL step for a strategy."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE auto_strategies SET mt5_trailing_step = ? WHERE id = ?", (step, strategy_id))
+    conn.commit()
+    conn.close()
 
 def get_evaluated_open_mt5():
     """Get strategies that were evaluated (auto_win/auto_loss) but MT5 position still marked as filled."""
@@ -1247,6 +1285,21 @@ def get_evaluated_open_mt5():
     rows = cursor.fetchall()
     conn.close()
     return [{'id': r[0], 'result': r[1], 'mt5_ticket': r[2]} for r in rows]
+
+def get_mt5_pnl_for_strategy(strategy_id):
+    """Get MT5 P&L and lot for a strategy (if position was closed by MT5 TP/SL or sync)."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT mt5_pnl, mt5_lot, mt5_close_price
+        FROM auto_strategies
+        WHERE id = ? AND mt5_pnl IS NOT NULL AND mt5_status = 'closed'
+    """, (strategy_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {'pnl': row[0], 'lot': row[1] or 0.1, 'close_price': row[2]}
+    return None
 
 def get_mt5_config():
     conn = sqlite3.connect(DB_PATH)
@@ -1626,3 +1679,77 @@ def get_synced_trade_count():
     count = cursor.fetchone()[0]
     conn.close()
     return count
+
+
+# ── Shared Trade Cache (cross-instance learning) ──
+
+def save_shared_trades(trades):
+    """Bulk insert remote trades into shared_trade_cache. Skips duplicates by remote_id."""
+    if not trades:
+        return 0
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    inserted = 0
+    for t in trades:
+        try:
+            cursor.execute("""
+                INSERT OR IGNORE INTO shared_trade_cache
+                    (remote_id, instance_id, direction, result, pips,
+                     sl_pips, tp_pips, sl_hit, tp_hit,
+                     confidence, trigger_type, setup_type,
+                     session, hour_utc, day_of_week,
+                     htf_bias, market_trend, rsi_at_entry,
+                     volatility, news_category, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                t.get('id'), t.get('instance_id'),
+                t.get('direction'), t.get('result'), t.get('pips'),
+                t.get('sl_pips'), t.get('tp_pips'),
+                1 if t.get('sl_hit') else 0, 1 if t.get('tp_hit') else 0,
+                t.get('confidence'), t.get('trigger_type'), t.get('setup_type'),
+                t.get('session'), t.get('hour_utc'), t.get('day_of_week'),
+                t.get('htf_bias'), t.get('market_trend'), t.get('rsi_at_entry'),
+                t.get('volatility'), t.get('news_category'), t.get('created_at'),
+            ))
+            if cursor.rowcount > 0:
+                inserted += 1
+        except Exception:
+            continue
+    conn.commit()
+    conn.close()
+    return inserted
+
+
+def get_shared_trade_cache(limit=500):
+    """Get cached shared trades from other instances, excluding weekends."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM shared_trade_cache
+        WHERE result IN ('win', 'loss')
+          AND day_of_week NOT IN (5, 6)
+        ORDER BY created_at DESC LIMIT ?
+    """, (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_last_fetched_remote_id():
+    """Get the last Supabase shared_trades ID we fetched."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT last_fetched_remote_id FROM shared_learning_config WHERE id = 1")
+    row = cursor.fetchone()
+    conn.close()
+    return (row[0] or 0) if row else 0
+
+
+def update_last_fetched_remote_id(remote_id):
+    """Update the last fetched Supabase ID cursor."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE shared_learning_config SET last_fetched_remote_id = ? WHERE id = 1", (remote_id,))
+    conn.commit()
+    conn.close()

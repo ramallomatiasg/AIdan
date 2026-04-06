@@ -274,6 +274,47 @@ class MT5Executor:
                 })
         return result
 
+    def get_tick(self, symbol=None):
+        """Get current bid/ask for a symbol."""
+        if not self.connected or not self._mt5:
+            return None
+        if not symbol:
+            from src.common.config import Config
+            symbol = Config.MT5_SYMBOL
+        tick = self._mt5.symbol_info_tick(symbol)
+        if tick:
+            return {'bid': tick.bid, 'ask': tick.ask}
+        return None
+
+    def modify_position_sl(self, ticket, new_sl):
+        """Modify the SL of an open position using TRADE_ACTION_SLTP.
+        Returns True on success, False on failure."""
+        if not self.connected or not self._mt5:
+            return False
+
+        position = self._mt5.positions_get(ticket=ticket)
+        if not position or len(position) == 0:
+            return False
+
+        p = position[0]
+        request = {
+            "action": self._mt5.TRADE_ACTION_SLTP,
+            "position": p.ticket,
+            "symbol": p.symbol,
+            "sl": round(new_sl, 5),
+            "tp": p.tp,  # Keep existing TP
+        }
+
+        result = self._mt5.order_send(request)
+        if result and result.retcode == self._mt5.TRADE_RETCODE_DONE:
+            self.logger.info(f"MT5 trailing SL: #{ticket} SL {p.sl:.5f} -> {new_sl:.5f}")
+            return True
+        else:
+            retcode = result.retcode if result else 'None'
+            comment = result.comment if result else 'None'
+            self.logger.warning(f"MT5 modify SL failed: #{ticket} retcode={retcode} {comment}")
+            return False
+
     def sync_closed_positions(self):
         if not self.connected or not self._mt5:
             return
@@ -373,7 +414,14 @@ class MT5Executor:
             # Check if position still exists
             position = self._mt5.positions_get(ticket=ticket)
             if not position or len(position) == 0:
-                return None  # Already closed by SL/TP
+                # Position already closed by MT5 TP/SL — get actual close price from deal history
+                deals = self._mt5.history_deals_get(position=ticket)
+                if deals:
+                    for deal in deals:
+                        if deal.entry == 1:  # entry=1 means close deal
+                            self.logger.info(f"MT5 position #{ticket} already closed by TP/SL @ {deal.price:.5f}")
+                            return deal.price
+                return None
 
             p = position[0]
             close_type = self._mt5.ORDER_TYPE_SELL if p.type == 0 else self._mt5.ORDER_TYPE_BUY

@@ -864,11 +864,12 @@ class AIdan:
                         if not current_price or not entry_price:
                             continue
                         hit_tp, hit_sl, hit_be = False, False, False
-                        # Break Even: 1:1 R:R distance from entry
-                        sl_distance = abs(entry_price - sl)
-                        be_target = (entry_price + sl_distance) if direction == 'CALL' else (entry_price - sl_distance)
-                        be_triggered = False
-                        if candles:
+                        # 3-step trailing: divide TP distance into 3 equal steps
+                        tp_distance = abs(tp - entry_price)
+                        step_size = tp_distance / 3.0 if tp_distance > 0 else 0
+                        trailing_step = 0
+                        effective_sl = sl
+                        if candles and step_size > 0:
                             from datetime import datetime as dt
                             try:
                                 entry_ts = dt.strptime(str(created_at_str).split('.')[0], '%Y-%m-%d %H:%M:%S')
@@ -887,28 +888,34 @@ class AIdan:
                                         continue
                                     if c_time < entry_ts:
                                         continue
-                                    # Check if 1:1 R:R was reached (BE trigger)
-                                    if not be_triggered:
-                                        if direction == 'CALL' and c['high'] >= be_target:
-                                            be_triggered = True
-                                        elif direction == 'PUT' and c['low'] <= be_target:
-                                            be_triggered = True
+                                    # Update trailing step based on favorable price movement
+                                    if direction == 'CALL':
+                                        progress = c['high'] - entry_price
+                                    else:
+                                        progress = entry_price - c['low']
+                                    if progress >= step_size * 2 and trailing_step < 2:
+                                        trailing_step = 2
+                                        effective_sl = (entry_price + step_size) if direction == 'CALL' else (entry_price - step_size)
+                                    elif progress >= step_size and trailing_step < 1:
+                                        trailing_step = 1
+                                        effective_sl = entry_price  # BE
+                                    # Check TP/SL hits
                                     if direction == 'CALL':
                                         if c['high'] >= tp:
-                                            hit_tp = True; break
-                                        effective_sl = entry_price if be_triggered else sl
+                                            hit_tp = True
+                                            break
                                         if c['low'] <= effective_sl:
-                                            if be_triggered:
+                                            if trailing_step > 0:
                                                 hit_be = True
                                             else:
                                                 hit_sl = True
                                             break
-                                    else:
+                                    else:  # PUT
                                         if c['low'] <= tp:
-                                            hit_tp = True; break
-                                        effective_sl = entry_price if be_triggered else sl
+                                            hit_tp = True
+                                            break
                                         if c['high'] >= effective_sl:
-                                            if be_triggered:
+                                            if trailing_step > 0:
                                                 hit_be = True
                                             else:
                                                 hit_sl = True
@@ -1698,16 +1705,17 @@ class AIdan:
                                 if not current_price or not entry_price:
                                     continue
 
-                                # Check if TP or SL was hit using candle history (with Break Even logic)
+                                # Check if TP or SL was hit using candle history (3-step trailing SL)
                                 hit_tp = False
                                 hit_sl = False
                                 hit_be = False
-                                # Break Even: 1:1 R:R distance from entry
-                                sl_distance = abs(entry_price - sl)
-                                be_target = (entry_price + sl_distance) if direction == 'CALL' else (entry_price - sl_distance)
-                                be_triggered = False
+                                # 3-step trailing: divide TP distance into 3 equal steps
+                                tp_distance = abs(tp - entry_price)
+                                step_size = tp_distance / 3.0 if tp_distance > 0 else 0
+                                trailing_step = 0
+                                effective_sl = sl
 
-                                if candles:
+                                if candles and step_size > 0:
                                     from datetime import datetime as dt
                                     try:
                                         entry_ts = dt.strptime(str(created_at_str).split('.')[0], '%Y-%m-%d %H:%M:%S')
@@ -1729,21 +1737,26 @@ class AIdan:
                                             if c_time < entry_ts:
                                                 continue
 
-                                            # Check if 1:1 R:R was reached (BE trigger)
-                                            if not be_triggered:
-                                                if direction == 'CALL' and c['high'] >= be_target:
-                                                    be_triggered = True
-                                                elif direction == 'PUT' and c['low'] <= be_target:
-                                                    be_triggered = True
+                                            # Update trailing step based on favorable price movement
+                                            if direction == 'CALL':
+                                                progress = c['high'] - entry_price
+                                            else:
+                                                progress = entry_price - c['low']
 
-                                            # Check highs/lows against TP/SL (with BE-adjusted SL)
+                                            if progress >= step_size * 2 and trailing_step < 2:
+                                                trailing_step = 2
+                                                effective_sl = (entry_price + step_size) if direction == 'CALL' else (entry_price - step_size)
+                                            elif progress >= step_size and trailing_step < 1:
+                                                trailing_step = 1
+                                                effective_sl = entry_price  # BE
+
+                                            # Check TP/SL hits
                                             if direction == 'CALL':
                                                 if c['high'] >= tp:
                                                     hit_tp = True
                                                     break
-                                                effective_sl = entry_price if be_triggered else sl
                                                 if c['low'] <= effective_sl:
-                                                    if be_triggered:
+                                                    if trailing_step > 0:
                                                         hit_be = True
                                                     else:
                                                         hit_sl = True
@@ -1752,9 +1765,8 @@ class AIdan:
                                                 if c['low'] <= tp:
                                                     hit_tp = True
                                                     break
-                                                effective_sl = entry_price if be_triggered else sl
                                                 if c['high'] >= effective_sl:
-                                                    if be_triggered:
+                                                    if trailing_step > 0:
                                                         hit_be = True
                                                     else:
                                                         hit_sl = True
@@ -1817,15 +1829,29 @@ class AIdan:
                                     except Exception as e:
                                         logger.error(f"MT5 close on eval error: {e}")
 
-                                # If MT5 closed, use the actual close price for evaluation
+                                # Check if MT5 already has real P&L (closed by TP/SL via sync)
+                                try:
+                                    from src.common.db import get_mt5_pnl_for_strategy
+                                    mt5_data = get_mt5_pnl_for_strategy(sid)
+                                    if mt5_data and mt5_data['pnl'] is not None:
+                                        # Use MT5 ground truth: real P&L -> pips
+                                        lot = mt5_data['lot'] or 0.1
+                                        pips_result = round(mt5_data['pnl'] / (lot * 10), 1)
+                                        result = 'win' if mt5_data['pnl'] > 0 else 'loss'
+                                        exit_px = mt5_data['close_price'] or exit_px
+                                        logger.info(f"Strategy #{sid} using MT5 P&L: ${mt5_data['pnl']:.2f} = {pips_result:+.1f}p -> {result}")
+                                        mt5_closed_price = None  # skip next block
+                                except Exception:
+                                    pass
+
+                                # Fallback: if MT5 just closed, use close price (no spread deduction)
                                 if mt5_closed_price and isinstance(mt5_closed_price, (int, float)) and mt5_closed_price > 0:
                                     exit_px = mt5_closed_price
                                     if direction == 'CALL':
-                                        pips_result = (exit_px - entry_price) / pip - est_spread
+                                        pips_result = (exit_px - entry_price) / pip
                                     else:
-                                        pips_result = (entry_price - exit_px) / pip - est_spread
-                                    min_pips = tuner.get_params().get('min_pips_for_win', 1.5)
-                                    result = 'win' if pips_result >= min_pips else 'loss'
+                                        pips_result = (entry_price - exit_px) / pip
+                                    result = 'win' if pips_result > 0 else 'loss'
 
                                 auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
                                 try:
@@ -1951,6 +1977,50 @@ class AIdan:
                                     logger.debug(f"MT5 retry: no fill for strategy #{sid}")
                         except Exception as e:
                             logger.error(f"MT5 retry execution error: {e}")
+
+                    # ── MT5: stepped trailing stop-loss ──
+                    if mt5_exec and mt5_exec.is_ready():
+                        try:
+                            from src.common.db import get_strategies_with_open_mt5, update_mt5_trailing_step
+                            open_mt5 = get_strategies_with_open_mt5()
+                            for row in open_mt5:
+                                sid, ticket, direction = row[0], row[1], row[2]
+                                entry_price, sl, tp = row[3], row[4], row[5]
+                                current_step = row[9] if len(row) > 9 else 0
+
+                                tp_distance = abs(tp - entry_price)
+                                if tp_distance < 0.00005:  # skip if TP too close
+                                    continue
+                                step_size = tp_distance / 3.0
+
+                                tick = mt5_exec.get_tick()
+                                if not tick:
+                                    continue
+                                current_price = tick['bid'] if direction == 'CALL' else tick['ask']
+
+                                if direction == 'CALL':
+                                    progress = current_price - entry_price
+                                else:
+                                    progress = entry_price - current_price
+
+                                reached_step = 0
+                                if progress >= step_size * 2:
+                                    reached_step = 2
+                                elif progress >= step_size:
+                                    reached_step = 1
+
+                                if reached_step > (current_step or 0):
+                                    if direction == 'CALL':
+                                        new_sl = entry_price if reached_step == 1 else entry_price + step_size
+                                    else:
+                                        new_sl = entry_price if reached_step == 1 else entry_price - step_size
+
+                                    success = mt5_exec.modify_position_sl(ticket, new_sl)
+                                    if success:
+                                        update_mt5_trailing_step(sid, reached_step)
+                                        logger.info(f"Trailing SL: #{ticket} strategy #{sid} step {current_step}->{reached_step} SL->{new_sl:.5f} (progress {progress/0.0001:+.1f}p)")
+                        except Exception as e:
+                            logger.error(f"MT5 trailing SL error: {e}")
 
                     # ── MT5: close positions for evaluated strategies ──
                     if mt5_exec and mt5_exec.is_ready():

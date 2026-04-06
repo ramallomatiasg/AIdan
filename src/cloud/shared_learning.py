@@ -368,14 +368,14 @@ class SharedLearning:
 
     # ── Fetch Shared Data ──
 
-    def fetch_shared_trades(self, limit=500):
-        """Download trades from OTHER instances for local learning."""
+    def fetch_shared_trades(self, last_id=0, limit=500):
+        """Download trades from OTHER instances newer than last_id."""
         if not self.enabled:
             return []
         instance_id = self._config['instance_id']
         try:
             resp = requests.get(
-                self._url('shared_trades') + f'?instance_id=neq.{instance_id}&order=created_at.desc&limit={limit}',
+                self._url('shared_trades') + f'?instance_id=neq.{instance_id}&id=gt.{last_id}&order=id.asc&limit={limit}',
                 headers=self._headers(),
                 timeout=15,
             )
@@ -385,6 +385,27 @@ class SharedLearning:
         except Exception as e:
             self.logger.warning(f"Shared Learning: fetch trades error: {e}")
             return []
+
+    def import_shared_trades(self):
+        """Fetch new trades from other instances and cache locally for learning."""
+        if not self.enabled:
+            return 0
+        try:
+            from src.common.db import get_last_fetched_remote_id, save_shared_trades, update_last_fetched_remote_id
+            last_id = get_last_fetched_remote_id()
+            trades = self.fetch_shared_trades(last_id=last_id, limit=500)
+            if not trades:
+                return 0
+            inserted = save_shared_trades(trades)
+            # Update cursor to max ID fetched
+            max_id = max(t.get('id', 0) for t in trades)
+            if max_id > last_id:
+                update_last_fetched_remote_id(max_id)
+            self.logger.info(f"Shared Learning: fetched {len(trades)} remote trades, {inserted} new cached")
+            return inserted
+        except Exception as e:
+            self.logger.warning(f"Shared Learning: trade import error: {e}")
+            return 0
 
     def fetch_shared_insights(self):
         """Download aggregated insights from the cloud."""
@@ -486,6 +507,12 @@ class SharedLearning:
 
         # Sync trades up
         synced = self.sync_trades()
+
+        # Import remote trades for cross-instance learning
+        try:
+            imported = self.import_shared_trades()
+        except Exception as e:
+            self.logger.warning(f"Shared Learning: trade import error: {e}")
 
         # Fetch remote insights and save locally
         try:

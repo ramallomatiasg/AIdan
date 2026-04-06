@@ -256,6 +256,24 @@ class AutoTuner:
             self.logger.warning(f"AutoTuner: trade history query failed: {e}")
         finally:
             conn.close()
+
+        # Include shared trades from other instances (weight=0.5)
+        try:
+            from src.common.db import get_shared_trade_cache
+            shared = get_shared_trade_cache(200)
+            for t in shared:
+                trades.append({
+                    'result': t.get('result', ''), 'direction': t.get('direction', ''),
+                    'confidence': t.get('confidence', 0), 'setup_type': t.get('setup_type', ''),
+                    'trigger_type': t.get('trigger_type', ''), 'market_trend': t.get('market_trend', ''),
+                    'rsi': t.get('rsi_at_entry', 50), 'htf_bias': t.get('htf_bias', ''),
+                    'entry_price': 0, 'exit_price': 0, 'pips': t.get('pips', 0),
+                    'recorded_at': t.get('created_at', ''), 'created_at': t.get('created_at', ''),
+                    '_weight': 0.5,
+                })
+        except Exception as e:
+            self.logger.warning(f"AutoTuner: shared trade query failed: {e}")
+
         return trades
 
     def _evaluate_params(self, params, trades):
@@ -274,6 +292,7 @@ class AutoTuner:
         min_pips = params.get('min_pips_for_win', 1.5)
 
         for t in trades:
+            w = t.get('_weight', 1.0)
             setup = t['setup_type']
             pips = t['pips']
 
@@ -285,16 +304,16 @@ class AutoTuner:
             # Apply minimum pips filter
             if t['result'] == 'win' and abs(pips) < min_pips:
                 # Reclassify as loss (too small to count)
-                losses += 1
-                total_loss += abs(pips) if pips != 0 else 1
+                losses += w
+                total_loss += (abs(pips) if pips != 0 else 1) * w
                 continue
 
             if t['result'] == 'win':
-                wins += 1
-                total_profit += abs(pips) if pips != 0 else 1
+                wins += w
+                total_profit += (abs(pips) if pips != 0 else 1) * w
             else:
-                losses += 1
-                total_loss += abs(pips) if pips != 0 else 1
+                losses += w
+                total_loss += (abs(pips) if pips != 0 else 1) * w
 
         total = wins + losses
         if total == 0:

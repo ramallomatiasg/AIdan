@@ -1,4 +1,4 @@
-# AIdan v3.4 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.5 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
@@ -6,14 +6,14 @@ Sistema de trading asistido que monitorea noticias financieras en tiempo real, a
 
 ---
 
-## Que hay de nuevo en v3.4
+## Que hay de nuevo en v3.5
 
-- **Login de usuarios**: pantalla de ingreso con usuario y clave al abrir AIdan. Solo usuarios autorizados pueden acceder
-- **Cambio de clave**: cada usuario puede cambiar su clave desde el dashboard (clic en su nombre)
-- **Aprendizaje Compartido**: multiples instancias de AIdan sincronizan trades anonimizados a la nube (Supabase) para aprender entre todos
-- **Conexion automatica**: al loguearse, el shared learning se activa automaticamente sin configuracion extra
-- **Datos anonimizados**: no se comparten precios exactos, titulos de noticias ni datos de cuenta MT5
-- **Ejecucion MT5 mejorada**: sync de posiciones, cierre automatico, deteccion de huerfanas, reconexion automatica
+- **Trailing Stop-Loss escalonado**: el SL se mueve automaticamente en 3 pasos proporcionales al TP. A 1/3 del TP se mueve a Break Even, a 2/3 asegura 1/3 de ganancia, y el 3er paso es el TP completo. Se ejecuta en MT5 real via TRADE_ACTION_SLTP
+- **Rotacion de API keys Groq**: 3 keys con fallback automatico cuando una alcanza el limite diario (429/401)
+- **Aprendizaje cross-instancia desde Supabase**: trades de otras instancias se importan con peso 0.5x y alimentan learning engine + auto tuner
+- **Evaluacion con P&L real de MT5**: usa el beneficio real de MT5 como ground truth en vez de calcular pips teoricos
+- **Fix timezone en graficos**: las velas del dashboard ahora muestran hora Argentina (UTC-3) correctamente
+- **Fix evaluaciones incorrectas**: estrategias ganadoras en MT5 ya no se marcan como LOSS
 
 ---
 
@@ -136,7 +136,7 @@ Cada minuto escanea el grafico buscando patrones. Si encuentra uno, calcula una 
 Si la confianza supera el umbral y pasa todos los filtros, crea la estrategia con entry, SL, TP adaptativos. Queda activa por 15-60 minutos.
 
 ### Paso 3: Espera que expire
-Durante ese tiempo, revisa las velas cada minuto para ver si toco el TP (gano), el SL (perdio), o el Break Even (se movio a entry despues de alcanzar 1:1 R:R).
+Durante ese tiempo, revisa las velas cada minuto para ver si toco el TP (gano), el SL (perdio), o el Break Even. El trailing SL escalonado divide la distancia al TP en 3 pasos iguales: al alcanzar 1/3 mueve SL a entry (BE), al alcanzar 2/3 asegura 1/3 de ganancia.
 
 ### Paso 4: Evalua el resultado
 Cuando expira, guarda el resultado con **todo el contexto**: direccion, setup_type, tendencia, RSI, sesion, pips, alineacion con HTF.
@@ -278,6 +278,14 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.5.0 (06 Abr 2026)
+- **Trailing SL escalonado**: 3 pasos proporcionales al TP. Mueve SL en MT5 real via TRADE_ACTION_SLTP
+- **Groq API key rotation**: 3 keys con fallback automatico en 429/401
+- **Cross-instance learning**: importa trades de Supabase con peso 0.5x para learning engine y auto tuner
+- **MT5 P&L ground truth**: evalua con beneficio real de MT5, no pips teoricos
+- **Fix timezone graficos**: velas en hora Argentina (UTC-3)
+- **Fix evaluaciones**: corregido bug que marcaba trades ganadores como LOSS
 
 ### v3.4.0 (03 Abr 2026)
 - **Login de usuarios**: pantalla de ingreso con autenticacion contra Supabase. Solo usuarios autorizados

@@ -29,46 +29,58 @@ logger = setup_logging(__name__, Config.LOG_LEVEL)
 _groq_status = {"ok": True, "last_error": "", "last_error_time": None}
 
 def _call_groq(messages, temperature=0.75, max_tokens=600):
-    """Call Groq API (OpenAI-compatible). Returns response text or None."""
-    api_key = Config.GROQ_API_KEY
-    if not api_key:
+    """Call Groq API with automatic key rotation on rate limit."""
+    keys = Config.GROQ_API_KEYS if hasattr(Config, 'GROQ_API_KEYS') else [Config.GROQ_API_KEY]
+    keys = [k for k in keys if k]
+    if not keys:
         return None
-    try:
-        resp = requests.post(
-            'https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-            json={
-                'model': Config.GROQ_MODEL,
-                'messages': messages,
-                'temperature': temperature,
-                'max_tokens': max_tokens,
-                'stream': False
-            },
-            timeout=30
-        )
-        if resp.status_code == 200:
-            content = resp.json()['choices'][0]['message']['content']
-            logger.info(f"Groq response OK ({len(content)} chars)")
-            _groq_status["ok"] = True
-            _groq_status["last_error"] = ""
-            return content
-        else:
-            error_msg = resp.text[:300]
-            _groq_status["last_error"] = f"HTTP {resp.status_code}: {error_msg}"
-            _groq_status["last_error_time"] = __import__('datetime').datetime.now().isoformat()
-            if resp.status_code == 401:
-                _groq_status["ok"] = False
-                logger.error(f"⚠️ GROQ API KEY EXPIRADA O INVÁLIDA. Renovar en console.groq.com")
-            elif resp.status_code == 429:
-                logger.warning(f"Groq rate limit alcanzado. Usando Ollama como fallback.")
+
+    for i, api_key in enumerate(keys):
+        try:
+            resp = requests.post(
+                'https://api.groq.com/openai/v1/chat/completions',
+                headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+                json={
+                    'model': Config.GROQ_MODEL,
+                    'messages': messages,
+                    'temperature': temperature,
+                    'max_tokens': max_tokens,
+                    'stream': False
+                },
+                timeout=30
+            )
+            if resp.status_code == 200:
+                content = resp.json()['choices'][0]['message']['content']
+                logger.info(f"Groq response OK (key {i+1}/{len(keys)}, {len(content)} chars)")
+                _groq_status["ok"] = True
+                _groq_status["last_error"] = ""
+                return content
+            elif resp.status_code == 429 and i < len(keys) - 1:
+                logger.warning(f"Groq key {i+1} rate limited, trying key {i+2}...")
+                continue
             else:
-                logger.warning(f"Groq error {resp.status_code}: {error_msg}")
+                error_msg = resp.text[:300]
+                _groq_status["last_error"] = f"HTTP {resp.status_code}: {error_msg}"
+                _groq_status["last_error_time"] = __import__('datetime').datetime.now().isoformat()
+                if resp.status_code == 401:
+                    logger.warning(f"Groq key {i+1} invalid, trying next..." if i < len(keys) - 1 else f"All Groq keys failed")
+                    if i < len(keys) - 1:
+                        continue
+                    _groq_status["ok"] = False
+                elif resp.status_code == 429:
+                    logger.warning(f"Groq rate limit on all keys. Usando Ollama como fallback.")
+                else:
+                    logger.warning(f"Groq error {resp.status_code}: {error_msg}")
+                return None
+        except Exception as e:
+            _groq_status["last_error"] = str(e)
+            _groq_status["last_error_time"] = __import__('datetime').datetime.now().isoformat()
+            if i < len(keys) - 1:
+                logger.warning(f"Groq key {i+1} failed ({e}), trying next...")
+                continue
+            logger.warning(f"Groq unavailable: {e}")
             return None
-    except Exception as e:
-        _groq_status["last_error"] = str(e)
-        _groq_status["last_error_time"] = __import__('datetime').datetime.now().isoformat()
-        logger.warning(f"Groq unavailable: {e}")
-        return None
+    return None
 
 app = FastAPI(title="Financial News Monitor API", version=Config.VERSION)
 
@@ -765,6 +777,7 @@ async def list_auto_strategies():
                 try:
                     import json as _json
                     from datetime import datetime as _dt, timezone as _tz
+                    AR_OFFSET = -3 * 3600  # UTC-3 Argentina — match dashboard /candles
                     raw = _json.loads(r[15])
                     snapshot = []
                     for c in raw:
@@ -780,6 +793,7 @@ async def list_auto_strategies():
                                 ts = int(float(ts))
                             except (ValueError, TypeError):
                                 ts = 0
+                        ts = (ts // 300) * 300 + AR_OFFSET  # Align to 5min + AR timezone
                         snapshot.append({
                             "time": ts,
                             "open": c.get('open') or c.get('o', 0),

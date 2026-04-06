@@ -28,6 +28,16 @@ FOREX_HOLIDAYS = [
 ]
 
 MIN_TRADES_FOR_ANALYSIS = 3
+
+
+def _wcount(trades):
+    """Weighted trade count (shared trades count as 0.5)."""
+    return sum(t.get('_weight', 1.0) for t in trades)
+
+
+def _wwins(trades):
+    """Weighted win count."""
+    return sum(t.get('_weight', 1.0) for t in trades if t.get('result') == 'win')
 MIN_IMPROVEMENT_PCT = 2.0
 
 
@@ -156,13 +166,23 @@ class LearningEngine:
 
     def _run_deep_analysis(self):
         """Run comprehensive analysis when market is closed."""
-        from src.common.db import get_trade_archive
-        trades = get_trade_archive(500)
-        if len(trades) < MIN_TRADES_FOR_ANALYSIS:
-            self.logger.info(f"Learning: not enough trades for deep analysis ({len(trades)}/{MIN_TRADES_FOR_ANALYSIS})")
+        from src.common.db import get_trade_archive, get_shared_trade_cache
+        local_trades = get_trade_archive(500)
+        shared_trades = get_shared_trade_cache(500)
+
+        # Tag with weight: local=1.0, shared=0.5
+        for t in local_trades:
+            t['_weight'] = 1.0
+        for t in shared_trades:
+            t['_weight'] = 0.5
+
+        trades = local_trades + shared_trades
+        effective_count = _wcount(trades)
+        if effective_count < MIN_TRADES_FOR_ANALYSIS:
+            self.logger.info(f"Learning: not enough trades for deep analysis ({effective_count:.0f}/{MIN_TRADES_FOR_ANALYSIS})")
             return
 
-        self.logger.info(f"Learning Engine: starting deep analysis ({len(trades)} trades)")
+        self.logger.info(f"Learning Engine: starting deep analysis ({len(local_trades)} local + {len(shared_trades)} shared = {effective_count:.0f} effective trades)")
 
         analysis_steps = [
             ('sl_tp', self._analyze_sl_tp),
@@ -196,13 +216,14 @@ class LearningEngine:
 
         insights = []
         for key, group in groups.items():
-            if len(group) < MIN_TRADES_FOR_ANALYSIS:
+            wc = _wcount(group)
+            if wc < MIN_TRADES_FOR_ANALYSIS:
                 continue
 
             trigger, vol = key.split('|')
             sl_hits = [t for t in group if t.get('sl_hit')]
             tp_hits = [t for t in group if t.get('tp_hit')]
-            sl_hit_rate = len(sl_hits) / len(group) * 100
+            sl_hit_rate = _wcount(sl_hits) / wc * 100
 
             # Average SL/TP distances
             sl_dists = [t['sl_pips'] for t in group if t.get('sl_pips') and t['sl_pips'] > 0]
@@ -222,20 +243,20 @@ class LearningEngine:
                     'sl_hit_rate': round(sl_hit_rate, 1),
                     'avg_sl_pips': round(avg_sl, 1),
                     'avg_tp_pips': round(avg_tp, 1),
-                    'sample_size': len(group),
+                    'sample_size': round(wc),
                     'recommendation': 'increase_sl',
                 }, f"SL hit rate {sl_hit_rate:.0f}% para {trigger}/{vol}")
                 insights.append(insight)
 
             # TP too ambitious? If TP hit rate < 30% and avg TP > 15 pips
-            tp_hit_rate = len(tp_hits) / len(group) * 100
+            tp_hit_rate = _wcount(tp_hits) / wc * 100
             if tp_hit_rate < 30 and avg_tp > 15:
                 insight = f"TP en {trigger} ({vol} vol): TP promedio {avg_tp:.1f}p se alcanza solo {tp_hit_rate:.0f}%. Recomendacion: reducir TP."
                 save_learning_insight('sl_tp', insight, {
                     'trigger_type': trigger, 'volatility': vol,
                     'tp_hit_rate': round(tp_hit_rate, 1),
                     'avg_tp_pips': round(avg_tp, 1),
-                    'sample_size': len(group),
+                    'sample_size': round(wc),
                     'recommendation': 'decrease_tp',
                 }, f"TP hit rate {tp_hit_rate:.0f}% para {trigger}/{vol}")
                 insights.append(insight)
@@ -252,30 +273,31 @@ class LearningEngine:
         for t in trades:
             if t['result'] not in ('win', 'loss'):
                 continue
+            w = t.get('_weight', 1.0)
             s = t.get('session', 'unknown')
             sessions.setdefault(s, {'wins': 0, 'losses': 0, 'total': 0})
-            sessions[s]['total'] += 1
+            sessions[s]['total'] += w
             if t['result'] == 'win':
-                sessions[s]['wins'] += 1
+                sessions[s]['wins'] += w
             else:
-                sessions[s]['losses'] += 1
+                sessions[s]['losses'] += w
 
         for session, data in sessions.items():
             if data['total'] < MIN_TRADES_FOR_ANALYSIS:
                 continue
             wr = data['wins'] / data['total'] * 100
             if wr < 35:
-                insight = f"Sesion {session}: WR {wr:.0f}% ({data['wins']}W/{data['losses']}L, {data['total']} trades). Rendimiento pobre."
+                insight = f"Sesion {session}: WR {wr:.0f}% ({data['wins']:.0f}W/{data['losses']:.0f}L, {data['total']:.0f} trades). Rendimiento pobre."
                 save_learning_insight('session', insight, {
                     'session': session, 'win_rate': round(wr, 1),
-                    'wins': data['wins'], 'losses': data['losses'],
+                    'total': round(data['total']),
                     'recommendation': 'avoid_session',
                 }, f"WR bajo en sesion {session}")
             elif wr > 65:
-                insight = f"Sesion {session}: WR {wr:.0f}% ({data['wins']}W/{data['losses']}L). Mejor horario para operar."
+                insight = f"Sesion {session}: WR {wr:.0f}% ({data['wins']:.0f}W/{data['losses']:.0f}L). Mejor horario para operar."
                 save_learning_insight('session', insight, {
                     'session': session, 'win_rate': round(wr, 1),
-                    'wins': data['wins'], 'losses': data['losses'],
+                    'total': round(data['total']),
                     'recommendation': 'prefer_session',
                 }, f"WR alto en sesion {session}")
 
@@ -284,13 +306,14 @@ class LearningEngine:
         for t in trades:
             if t['result'] not in ('win', 'loss'):
                 continue
+            w = t.get('_weight', 1.0)
             h = t.get('hour_utc', 0)
-            hours.setdefault(h, {'wins': 0, 'losses': 0})
-            hours[h]['total'] = hours[h].get('total', 0) + 1
+            hours.setdefault(h, {'wins': 0, 'losses': 0, 'total': 0})
+            hours[h]['total'] += w
             if t['result'] == 'win':
-                hours[h]['wins'] += 1
+                hours[h]['wins'] += w
             else:
-                hours[h]['losses'] += 1
+                hours[h]['losses'] += w
 
         self.logger.info(f"Learning sessions: analyzed {len(sessions)} sessions, {len(hours)} hours")
 
@@ -316,22 +339,23 @@ class LearningEngine:
 
         calibration = {}
         for bracket, group in brackets.items():
-            if len(group) < MIN_TRADES_FOR_ANALYSIS:
+            wc = _wcount(group)
+            if wc < MIN_TRADES_FOR_ANALYSIS:
                 continue
-            wins = sum(1 for t in group if t['result'] == 'win')
-            actual_wr = wins / len(group) * 100
+            wins = _wwins(group)
+            actual_wr = wins / wc * 100
             # Expected WR is roughly the confidence bracket midpoint
             expected_wr = {'50-60': 55, '60-70': 65, '70-80': 75, '80+': 85}[bracket]
             calibration[bracket] = {
                 'expected_wr': expected_wr,
                 'actual_wr': round(actual_wr, 1),
-                'trades': len(group),
+                'trades': round(wc),
                 'deviation': round(actual_wr - expected_wr, 1),
             }
 
             if abs(actual_wr - expected_wr) > 15:
                 direction = "sobreestima" if actual_wr < expected_wr else "subestima"
-                insight = f"Confidence {bracket}%: WR real {actual_wr:.0f}% vs esperado ~{expected_wr}% ({len(group)} trades). El modelo {direction} la confianza."
+                insight = f"Confidence {bracket}%: WR real {actual_wr:.0f}% vs esperado ~{expected_wr}% ({round(wc)} trades). El modelo {direction} la confianza."
                 save_learning_insight('confidence', insight, calibration[bracket],
                     f"Calibracion: {bracket}% → WR real {actual_wr:.0f}%")
 
@@ -356,17 +380,30 @@ class LearningEngine:
 
         cat_results = {}
         for t in trades:
-            if t['result'] not in ('win', 'loss') or not t.get('news_title'):
+            if t['result'] not in ('win', 'loss'):
                 continue
-            title_lower = (t.get('news_title') or '').lower()
-            for cat, keywords in categories.items():
-                if any(kw in title_lower for kw in keywords):
-                    cat_results.setdefault(cat, {'wins': 0, 'losses': 0, 'total': 0})
-                    cat_results[cat]['total'] += 1
-                    if t['result'] == 'win':
-                        cat_results[cat]['wins'] += 1
-                    else:
-                        cat_results[cat]['losses'] += 1
+            w = t.get('_weight', 1.0)
+            matched_cats = []
+
+            # Shared trades have pre-categorized news_category
+            if t.get('news_category') and t['news_category'] in categories:
+                matched_cats.append(t['news_category'])
+            # Local trades: match by news_title keywords
+            elif t.get('news_title'):
+                title_lower = t['news_title'].lower()
+                for cat, keywords in categories.items():
+                    if any(kw in title_lower for kw in keywords):
+                        matched_cats.append(cat)
+            else:
+                continue
+
+            for cat in matched_cats:
+                cat_results.setdefault(cat, {'wins': 0, 'losses': 0, 'total': 0})
+                cat_results[cat]['total'] += w
+                if t['result'] == 'win':
+                    cat_results[cat]['wins'] += w
+                else:
+                    cat_results[cat]['losses'] += w
 
         for cat, data in cat_results.items():
             if data['total'] < 3:
@@ -374,10 +411,10 @@ class LearningEngine:
             wr = data['wins'] / data['total'] * 100
             if wr > 65 or wr < 35:
                 quality = "excelente" if wr > 65 else "pobre"
-                insight = f"Noticias '{cat}': WR {wr:.0f}% ({data['wins']}W/{data['losses']}L, {data['total']} trades). Rendimiento {quality}."
+                insight = f"Noticias '{cat}': WR {wr:.0f}% ({data['wins']:.0f}W/{data['losses']:.0f}L, {data['total']:.0f} trades). Rendimiento {quality}."
                 save_learning_insight('news_category', insight, {
                     'category': cat, 'win_rate': round(wr, 1),
-                    'wins': data['wins'], 'losses': data['losses'],
+                    'total': round(data['total']),
                 }, f"News cat '{cat}' WR={wr:.0f}%")
 
         if cat_results:
@@ -392,6 +429,7 @@ class LearningEngine:
         for t in trades:
             if t['result'] not in ('win', 'loss'):
                 continue
+            w = t.get('_weight', 1.0)
             direction = t.get('direction', '?')
             htf = t.get('htf_bias', 'unknown') or 'unknown'
             session = t.get('session', 'unknown') or 'unknown'
@@ -399,12 +437,12 @@ class LearningEngine:
 
             key = f"{direction}|{htf}|{session}|{trigger}"
             patterns.setdefault(key, {'wins': 0, 'losses': 0, 'total': 0, 'pips': []})
-            patterns[key]['total'] += 1
+            patterns[key]['total'] += w
             patterns[key]['pips'].append(t.get('pips', 0))
             if t['result'] == 'win':
-                patterns[key]['wins'] += 1
+                patterns[key]['wins'] += w
             else:
-                patterns[key]['losses'] += 1
+                patterns[key]['losses'] += w
 
         best_patterns = []
         worst_patterns = []
@@ -418,7 +456,7 @@ class LearningEngine:
                 'direction': parts[0], 'htf_bias': parts[1],
                 'session': parts[2], 'trigger': parts[3],
                 'win_rate': round(wr, 1), 'avg_pips': round(avg_pips, 2),
-                'trades': data['total'],
+                'trades': round(data['total']),
             }
 
             if wr >= 70:
@@ -445,29 +483,31 @@ class LearningEngine:
         if stats['total'] == 0:
             return
 
-        # WR by direction
+        # WR by direction (local stats for report display)
         dir_stats = {}
         for t in trades:
             if t['result'] not in ('win', 'loss'):
                 continue
+            w = t.get('_weight', 1.0)
             d = t.get('direction', '?')
             dir_stats.setdefault(d, {'wins': 0, 'losses': 0})
             if t['result'] == 'win':
-                dir_stats[d]['wins'] += 1
+                dir_stats[d]['wins'] += w
             else:
-                dir_stats[d]['losses'] += 1
+                dir_stats[d]['losses'] += w
 
-        # WR by trigger
+        # WR by trigger (combined local + shared for insights)
         trigger_stats = {}
         for t in trades:
             if t['result'] not in ('win', 'loss'):
                 continue
+            w = t.get('_weight', 1.0)
             tr = t.get('trigger_type', 'unknown') or 'unknown'
             trigger_stats.setdefault(tr, {'wins': 0, 'losses': 0})
             if t['result'] == 'win':
-                trigger_stats[tr]['wins'] += 1
+                trigger_stats[tr]['wins'] += w
             else:
-                trigger_stats[tr]['losses'] += 1
+                trigger_stats[tr]['losses'] += w
 
         # Save trigger_type insights for confidence adjustments
         for tr, s in trigger_stats.items():
@@ -476,9 +516,8 @@ class LearningEngine:
                 continue
             wr = s['wins'] / total * 100
             save_learning_insight('trigger_type',
-                f"Trigger {tr}: WR {wr:.0f}% ({s['wins']}W/{s['losses']}L, {total} trades)",
-                {'trigger_type': tr, 'win_rate': round(wr, 1), 'total': total,
-                 'wins': s['wins'], 'losses': s['losses']},
+                f"Trigger {tr}: WR {wr:.0f}% ({s['wins']:.0f}W/{s['losses']:.0f}L, {total:.0f} trades)",
+                {'trigger_type': tr, 'win_rate': round(wr, 1), 'total': round(total)},
                 f"Trigger WR: {tr}={wr:.0f}%")
 
         # Build report
@@ -495,7 +534,7 @@ class LearningEngine:
         for d, s in dir_stats.items():
             total = s['wins'] + s['losses']
             wr = s['wins'] / total * 100 if total else 0
-            lines.append(f"  {d}: {wr:.0f}% ({s['wins']}W/{s['losses']}L)")
+            lines.append(f"  {d}: {wr:.0f}% ({s['wins']:.0f}W/{s['losses']:.0f}L)")
 
         lines.append("")
         lines.append("Por tipo de señal:")
@@ -503,16 +542,17 @@ class LearningEngine:
             total = s['wins'] + s['losses']
             wr = s['wins'] / total * 100 if total else 0
             emoji = "✅" if wr >= 60 else ("⚠️" if wr >= 40 else "❌")
-            lines.append(f"  {emoji} {tr}: {wr:.0f}% ({s['wins']}W/{s['losses']}L, {total} trades)")
+            lines.append(f"  {emoji} {tr}: {wr:.0f}% ({s['wins']:.0f}W/{s['losses']:.0f}L, {total:.0f} trades)")
 
-        # Top pips contributors
+        # Top pips contributors (weighted)
         pips_by_trigger = {}
         for t in trades:
             if t['result'] not in ('win', 'loss'):
                 continue
+            w = t.get('_weight', 1.0)
             tr = t.get('trigger_type', 'unknown') or 'unknown'
             pips_by_trigger.setdefault(tr, 0)
-            pips_by_trigger[tr] += t.get('pips', 0)
+            pips_by_trigger[tr] += t.get('pips', 0) * w
 
         lines.append("")
         lines.append("Pips netos por tipo:")

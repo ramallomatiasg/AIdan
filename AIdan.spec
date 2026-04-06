@@ -1,21 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
-
-datas = [('dashboard_multi_theme.html', '.'), ('config', 'config')]
-binaries = []
-hiddenimports = ['MetaTrader5', 'numpy']
-tmp_ret = collect_all('MetaTrader5')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('numpy')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['AIdan_TodoEnUno.py'],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=[],
+    datas=[('dashboard_multi_theme.html', '.')],
+    hiddenimports=['numpy', 'numpy._core.multiarray', 'numpy._core._multiarray_umath'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -38,7 +29,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
