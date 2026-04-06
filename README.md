@@ -1,4 +1,4 @@
-# AIdan v3.5 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.5.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
@@ -6,9 +6,17 @@ Sistema de trading asistido que monitorea noticias financieras en tiempo real, a
 
 ---
 
-## Que hay de nuevo en v3.5
+## Que hay de nuevo en v3.5.1
 
-- **Trailing Stop-Loss escalonado**: el SL se mueve automaticamente en 3 pasos proporcionales al TP. A 1/3 del TP se mueve a Break Even, a 2/3 asegura 1/3 de ganancia, y el 3er paso es el TP completo. Se ejecuta en MT5 real via TRADE_ACTION_SLTP
+- **Min confidence gate**: las estrategias de Estructura y Calendario ahora respetan el umbral minimo de confianza del perfil. Antes, penalizaciones podian bajar la confianza por debajo del minimo sin bloquearse
+- **Auto-login y auto-connect MT5**: al iniciar, restaura la ultima sesion guardada localmente y reconecta MT5 sin pedir credenciales
+- **Filtro de noticias basura**: descarta titulos clickbait/quiz/podcast antes de enviar a Groq, evitando analisis falsos
+- **Sync de insights a Supabase**: sube aprendizajes locales a la nube y descarga los de otras instancias
+- **Boton Salir en dashboard**: desconecta sesion + MT5 y limpia credenciales guardadas
+- **Tarea programada 4am**: script para arranque automatico Lun-Vie con wake del PC
+
+### v3.5.0 (06 Abr 2026)
+- **Trailing Stop-Loss escalonado**: 3 pasos proporcionales al TP. Mueve SL en MT5 real via TRADE_ACTION_SLTP
 - **Rotacion de API keys Groq**: 3 keys con fallback automatico cuando una alcanza el limite diario (429/401)
 - **Aprendizaje cross-instancia desde Supabase**: trades de otras instancias se importan con peso 0.5x y alimentan learning engine + auto tuner
 - **Evaluacion con P&L real de MT5**: usa el beneficio real de MT5 como ground truth en vez de calcular pips teoricos
@@ -278,6 +286,14 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.5.1 (06 Abr 2026)
+- **Min confidence gate**: Estructura y Calendario respetan umbral minimo del perfil
+- **Auto-login + auto-connect MT5**: restaura sesion local al iniciar
+- **Filtro noticias basura**: descarta clickbait/quiz antes de Groq
+- **Sync insights a Supabase**: bidireccional con otras instancias
+- **Boton Salir**: desconecta sesion + MT5 desde dashboard
+- **Startup programado 4am Lun-Vie**: con wake del PC
 
 ### v3.5.0 (06 Abr 2026)
 - **Trailing SL escalonado**: 3 pasos proporcionales al TP. Mueve SL en MT5 real via TRADE_ACTION_SLTP

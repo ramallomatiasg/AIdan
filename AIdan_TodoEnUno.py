@@ -1339,6 +1339,12 @@ class AIdan:
 
                                         _cal_session = tech.get_session_info().get('session', '')
                                         conf = _apply_learning_adjustments(conf, 'calendar', _cal_session, direction=direction, htf_bias=_cal_htf)
+
+                                        # Min confidence gate: skip if below profile threshold after all adjustments
+                                        if conf < base_conf:
+                                            logger.info(f"Min confidence gate: skipping calendar {direction}, conf {conf} < profile min {base_conf}")
+                                            continue
+
                                         sid = add_auto_strategy(
                                             alert_id=None,
                                             news_title=news_title_cal,
@@ -1531,6 +1537,12 @@ class AIdan:
 
                                 _struct_session = tech.get_session_info().get('session', '')
                                 conf = _apply_learning_adjustments(conf, 'structure', _struct_session, direction=direction, htf_bias=htf_bias)
+
+                                # Min confidence gate: skip if below profile threshold after all adjustments
+                                if conf < min_conf:
+                                    logger.info(f"Min confidence gate: skipping structure {direction}, conf {conf} < profile min {min_conf}")
+                                    continue
+
                                 sid = add_auto_strategy(
                                     alert_id=None,
                                     news_title=f"[ESTRUCTURA] {sig['reason'][:80]}",
