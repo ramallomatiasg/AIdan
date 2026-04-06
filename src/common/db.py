@@ -236,6 +236,20 @@ def init_db():
     """)
     cursor.execute("INSERT OR IGNORE INTO mt5_config (id) VALUES (1)")
 
+    # App state persistence (last session, MT5 credentials)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            last_username TEXT,
+            last_password_hash TEXT,
+            mt5_account INTEGER,
+            mt5_password TEXT,
+            mt5_server TEXT DEFAULT 'ICMarketsSC-Demo',
+            updated_at TIMESTAMP
+        )
+    """)
+    cursor.execute("INSERT OR IGNORE INTO app_state (id) VALUES (1)")
+
     # SMC state persistence table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS smc_state (
@@ -365,6 +379,12 @@ def init_db():
     # Migration: add trailing step tracking to auto_strategies
     try:
         cursor.execute("ALTER TABLE auto_strategies ADD COLUMN mt5_trailing_step INTEGER DEFAULT 0")
+    except:
+        pass
+
+    # Migration: add synced_to_cloud column to learning_insights
+    try:
+        cursor.execute("ALTER TABLE learning_insights ADD COLUMN synced_to_cloud INTEGER DEFAULT 0")
     except:
         pass
 
@@ -1472,6 +1492,33 @@ def get_learning_insights(limit=20):
     return rows
 
 
+def get_unsynced_insights(limit=50):
+    """Get learning insights not yet synced to cloud."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM learning_insights
+        WHERE (synced_to_cloud IS NULL OR synced_to_cloud = 0)
+          AND category NOT LIKE 'shared_%'
+        ORDER BY id ASC LIMIT ?
+    """, (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def mark_insights_synced(ids):
+    """Mark insights as synced to cloud."""
+    if not ids:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    placeholders = ','.join('?' * len(ids))
+    conn.execute(f"UPDATE learning_insights SET synced_to_cloud = 1 WHERE id IN ({placeholders})", ids)
+    conn.commit()
+    conn.close()
+
+
 def get_learning_adjustments():
     """Get actionable learning adjustments for strategy generation.
     Returns dict with confidence penalties/bonuses by trigger, session, and blocked patterns."""
@@ -1751,5 +1798,53 @@ def update_last_fetched_remote_id(remote_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("UPDATE shared_learning_config SET last_fetched_remote_id = ? WHERE id = 1", (remote_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── App State Persistence ──
+
+def save_last_session(username=None, password_hash=None, mt5_account=None, mt5_password=None, mt5_server=None):
+    """Save last login session and/or MT5 credentials for auto-reconnect."""
+    conn = sqlite3.connect(DB_PATH)
+    fields = []
+    values = []
+    if username is not None:
+        fields.append("last_username = ?")
+        values.append(username)
+    if password_hash is not None:
+        fields.append("last_password_hash = ?")
+        values.append(password_hash)
+    if mt5_account is not None:
+        fields.append("mt5_account = ?")
+        values.append(int(mt5_account))
+    if mt5_password is not None:
+        fields.append("mt5_password = ?")
+        values.append(mt5_password)
+    if mt5_server is not None:
+        fields.append("mt5_server = ?")
+        values.append(mt5_server)
+    if fields:
+        fields.append("updated_at = datetime('now')")
+        conn.execute(f"UPDATE app_state SET {', '.join(fields)} WHERE id = 1", values)
+        conn.commit()
+    conn.close()
+
+
+def get_last_session():
+    """Get saved session data for auto-login and MT5 auto-connect."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM app_state WHERE id = 1").fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return None
+
+
+def clear_last_session():
+    """Clear saved session (on disconnect/logout)."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE app_state SET last_username = NULL, last_password_hash = NULL, updated_at = datetime('now') WHERE id = 1")
     conn.commit()
     conn.close()

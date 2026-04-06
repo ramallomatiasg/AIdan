@@ -231,6 +231,10 @@ async def startup():
     """Initialize on startup"""
     logger.info("API starting up...")
     init_db()
+    # Restore last session (auto-login + auto-connect MT5)
+    if _try_auto_login():
+        logger.info("Session restored from last login")
+    _try_auto_mt5()
 
 @app.get("/health")
 async def health():
@@ -1696,6 +1700,9 @@ async def mt5_connect(request: Request):
     try:
         success = mt5.reconnect(account, password, server)
         if success:
+            # Save MT5 credentials for auto-reconnect on restart
+            from src.common.db import save_last_session
+            save_last_session(mt5_account=account, mt5_password=password, mt5_server=server)
             info = mt5.get_account_info()
             return JSONResponse({"status": "success", "data": info})
         else:
@@ -1876,6 +1883,61 @@ def get_logged_in_user():
     global _logged_in_user
     return _logged_in_user
 
+# ── Auto-login from saved session on startup ──
+def _try_auto_login():
+    """Attempt to restore last login session from DB."""
+    global _logged_in_user
+    try:
+        from src.common.db import get_last_session
+        session = get_last_session()
+        if session and session.get('last_username') and session.get('last_password_hash'):
+            username = session['last_username']
+            pwd_hash = session['last_password_hash']
+            # Verify against Supabase using stored hash
+            from src.cloud.shared_learning import authenticate_user_by_hash
+            ok, msg, user_data = authenticate_user_by_hash(username, pwd_hash)
+            if ok:
+                _logged_in_user = {'username': username, 'id': user_data.get('id')}
+                logger.info(f"Auto-login restored: {username}")
+                # Re-enable shared learning
+                from src.common.db import update_shared_learning_config
+                update_shared_learning_config(instance_name=f"AIdan-{username}", enabled=True)
+                learner = _get_learner()
+                if learner:
+                    shared = learner.get_shared_learning()
+                    if shared:
+                        shared.reload_config()
+                        shared.register_instance()
+                return True
+            else:
+                logger.info(f"Auto-login failed for {username}: {msg}")
+    except Exception as e:
+        logger.debug(f"Auto-login skipped: {e}")
+    return False
+
+# ── Auto-connect MT5 from saved credentials ──
+def _try_auto_mt5():
+    """Attempt to reconnect MT5 from saved credentials."""
+    try:
+        from src.common.db import get_last_session
+        session = get_last_session()
+        if session and session.get('mt5_account') and session.get('mt5_password'):
+            mt5 = _get_mt5()
+            if not mt5:
+                from src.broker.mt5_executor import MT5Executor
+                mt5 = MT5Executor(logger)
+                set_mt5_executor(mt5)
+            if not mt5.connected:
+                success = mt5.reconnect(session['mt5_account'], session['mt5_password'], session.get('mt5_server', 'ICMarketsSC-Demo'))
+                if success:
+                    logger.info(f"Auto-connect MT5: account {session['mt5_account']}")
+                    return True
+                else:
+                    logger.info(f"Auto-connect MT5 failed for account {session['mt5_account']}")
+    except Exception as e:
+        logger.debug(f"Auto-connect MT5 skipped: {e}")
+    return False
+
 @app.post("/auth/login")
 async def auth_login(request: Request):
     global _logged_in_user
@@ -1890,6 +1952,9 @@ async def auth_login(request: Request):
         if ok:
             logger.info(f"Login OK: {username}")
             _logged_in_user = {'username': username, 'id': user_data.get('id')}
+            # Save session for auto-login on restart
+            from src.common.db import save_last_session
+            save_last_session(username=username, password_hash=user_data.get('password_hash', ''))
             # Auto-enable shared learning with this username
             from src.common.db import update_shared_learning_config
             update_shared_learning_config(instance_name=f"AIdan-{username}", enabled=True)
@@ -1912,8 +1977,10 @@ async def auth_login(request: Request):
 async def auth_status():
     global _logged_in_user
     if _logged_in_user:
-        return JSONResponse({"status": "success", "data": {"logged_in": True, "username": _logged_in_user['username']}})
-    return JSONResponse({"status": "success", "data": {"logged_in": False}})
+        mt5 = _get_mt5()
+        mt5_connected = mt5.connected if mt5 else False
+        return JSONResponse({"status": "success", "data": {"logged_in": True, "username": _logged_in_user['username'], "mt5_connected": mt5_connected}})
+    return JSONResponse({"status": "success", "data": {"logged_in": False, "mt5_connected": False}})
 
 @app.post("/auth/change-password")
 async def auth_change_password(request: Request):
@@ -1932,9 +1999,28 @@ async def auth_change_password(request: Request):
 
 @app.post("/auth/logout")
 async def auth_logout():
+    """Logout: clear session but keep MT5 credentials saved."""
     global _logged_in_user
     _logged_in_user = None
+    from src.common.db import clear_last_session
+    clear_last_session()
     return JSONResponse({"status": "success", "message": "Sesion cerrada"})
+
+@app.post("/auth/disconnect")
+async def auth_disconnect():
+    """Full disconnect: logout + disconnect MT5 + clear all saved state."""
+    global _logged_in_user
+    _logged_in_user = None
+    # Disconnect MT5
+    mt5 = _get_mt5()
+    if mt5 and mt5.connected:
+        mt5.disconnect()
+        logger.info("MT5 disconnected by user")
+    # Clear all saved session data
+    from src.common.db import save_last_session, clear_last_session
+    clear_last_session()
+    save_last_session(mt5_account=0, mt5_password='', mt5_server='')
+    return JSONResponse({"status": "success", "message": "Desconectado completamente"})
 
 # ===== SHARED LEARNING ENDPOINTS =====
 

@@ -736,6 +736,7 @@
     </div>
     <div class="header-right">
         <span id="userBadge" style="font-size:13px;color:var(--accent-cyan,#00d4ff);font-weight:600;padding:2px 10px;border:1px solid var(--accent-cyan,#00d4ff);border-radius:12px;cursor:pointer;" onclick="togglePwdModal()" title="Cambiar clave"></span>
+        <button id="disconnectBtn" onclick="doDisconnect()" style="font-size:11px;color:#ff6b6b;background:transparent;border:1px solid #ff6b6b;border-radius:10px;padding:2px 8px;cursor:pointer;margin-left:4px;display:none;" title="Cerrar sesion y desconectar MT5">Salir</button>
         <span class="clock" id="clock">--:--:--</span>
         <div class="status-indicator" id="statusIndicator">
             <div class="status-dot" id="statusDot"></div>
@@ -2608,13 +2609,16 @@
             const data = (await r.json()).data || {};
             if (data.logged_in) {
                 document.getElementById('loginOverlay').style.display = 'none';
-                // Show username in header
                 const badge = document.getElementById('userBadge');
                 if (badge) badge.textContent = data.username;
+                const dcBtn = document.getElementById('disconnectBtn');
+                if (dcBtn) dcBtn.style.display = 'inline-block';
                 return true;
             }
         } catch(e) {}
         document.getElementById('loginOverlay').style.display = 'flex';
+        const dcBtn = document.getElementById('disconnectBtn');
+        if (dcBtn) dcBtn.style.display = 'none';
         return false;
     }
 
@@ -2637,6 +2641,8 @@
                 document.getElementById('loginOverlay').style.display = 'none';
                 const badge = document.getElementById('userBadge');
                 if (badge) badge.textContent = user;
+                const dcBtn = document.getElementById('disconnectBtn');
+                if (dcBtn) dcBtn.style.display = 'inline-block';
                 loadSharedLearningStatus();
             } else {
                 msg.textContent = result.message || 'Error de login';
@@ -2645,6 +2651,18 @@
             msg.textContent = 'Sin conexion al servidor';
         }
         btn.disabled = false; btn.textContent = 'Ingresar';
+    }
+
+    async function doDisconnect() {
+        if (!confirm('Cerrar sesion y desconectar MT5?')) return;
+        try {
+            await fetch(`${API_BASE}/auth/disconnect`, {method: 'POST'});
+        } catch(e) {}
+        document.getElementById('loginOverlay').style.display = 'flex';
+        document.getElementById('disconnectBtn').style.display = 'none';
+        document.getElementById('userBadge').textContent = '';
+        document.getElementById('loginUser').value = '';
+        document.getElementById('loginPass').value = '';
     }
 
     function togglePwdModal() {

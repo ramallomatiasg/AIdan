@@ -95,14 +95,41 @@ class NewsAnalyzer:
             self.logger.error(f"Error verificando Ollama: {str(e)}")
             return False
     
+    # Titles that are clearly not actionable financial news
+    _JUNK_PATTERNS = [
+        'quiz', 'test your', 'iq test', 'what is a ', 'how to invest',
+        'best stocks to buy', 'top picks for', 'should you buy',
+        'beginner guide', 'explained:', 'opinion:', 'review:',
+        'podcast:', 'video:', 'watch:', 'listen:', 'subscribe',
+        'sponsored', 'advertisement', 'promo:', 'giveaway',
+    ]
+
+    def _is_junk_news(self, title):
+        """Pre-filter clickbait, educational, and non-actionable content."""
+        t = (title or '').lower()
+        for pattern in self._JUNK_PATTERNS:
+            if pattern in t:
+                return True
+        return False
+
     def analyze(self, news_id, title, summary, entities, tags):
         """Analyze news and calculate impact score with EUR/USD analysis - REQUIRES AI"""
         try:
+            # Pre-filter junk/clickbait before wasting AI call
+            if self._is_junk_news(title):
+                self.logger.info(f"Junk filter: skipping '{title[:60]}' (non-actionable content)")
+                return {
+                    'news_id': news_id, 'impact_score': 0, 'level': 'BAJA',
+                    'explanation': 'Contenido no operativo (educativo/clickbait)',
+                    'eur_usd_impact': 'NINGUNA', 'market_implications': '',
+                    'should_operate': False, 'direction': 'NEUTRAL', 'confidence': 0,
+                }
+
             # SOLO USAR IA - NO KEYWORDS
             if self.ai_mode not in ['groq', 'ollama', 'claude']:
                 self.logger.error(f"AI NOT AVAILABLE - Groq/Ollama debe estar corriendo. No se analizará la noticia.")
                 return None
-            
+
             result = self._analyze_with_ai(news_id, title, summary, entities, tags)
             if result:
                 return result

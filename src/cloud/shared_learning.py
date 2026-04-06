@@ -40,7 +40,7 @@ def _sb_url(table):
 
 def authenticate_user(username, password):
     """Authenticate user against Supabase users table.
-    Returns (ok, message, user_data)."""
+    Returns (ok, message, user_data). user_data includes password_hash for session persistence."""
     from urllib.parse import quote
     try:
         pwd_hash = hash_password(password)
@@ -52,11 +52,39 @@ def authenticate_user(username, password):
         if resp.status_code == 200:
             users = resp.json()
             if users:
-                return True, "Login exitoso", users[0]
+                user_data = users[0]
+                user_data['password_hash'] = pwd_hash  # include for session persistence
+                return True, "Login exitoso", user_data
             else:
                 return False, "Usuario o clave incorrectos", None
         else:
             return False, f"Error de conexion: {resp.status_code}", None
+    except requests.exceptions.ConnectionError:
+        return False, "Sin conexion a internet", None
+    except Exception as e:
+        return False, f"Error: {str(e)}", None
+
+
+def authenticate_user_by_hash(username, pwd_hash):
+    """Authenticate using stored password hash (for auto-login on restart).
+    Returns (ok, message, user_data)."""
+    from urllib.parse import quote
+    try:
+        resp = requests.get(
+            _sb_url('users') + f'?username=eq.{quote(username, safe="")}&password_hash=eq.{pwd_hash}&select=id,username,created_at',
+            headers=_sb_headers(),
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            users = resp.json()
+            if users:
+                user_data = users[0]
+                user_data['password_hash'] = pwd_hash
+                return True, "Auto-login exitoso", user_data
+            else:
+                return False, "Sesion expirada", None
+        else:
+            return False, f"Error: {resp.status_code}", None
     except requests.exceptions.ConnectionError:
         return False, "Sin conexion a internet", None
     except Exception as e:
@@ -103,6 +131,7 @@ class SharedLearning:
         self._sync_interval = 7200  # 2 hours
         self._last_fetch = 0
         self._tables_verified = False
+        self._insights_has_instance_id = True  # assume yes, fallback on error
 
     def _load_config(self):
         """Load config from SQLite + hardcoded Supabase credentials."""
@@ -407,18 +436,106 @@ class SharedLearning:
             self.logger.warning(f"Shared Learning: trade import error: {e}")
             return 0
 
+    def sync_insights(self):
+        """Upload unsynced local learning insights to Supabase (anonymized)."""
+        if not self.enabled:
+            return 0
+        from src.common.db import get_unsynced_insights, mark_insights_synced
+        import json
+
+        insights = get_unsynced_insights(limit=50)
+        if not insights:
+            return 0
+
+        instance_id = self._config['instance_id']
+        payload = []
+        synced_ids = []
+
+        for ins in insights:
+            # Only sync actionable categories (skip reports and noise)
+            cat = ins.get('category', '')
+            if cat in ('report',):
+                synced_ids.append(ins['id'])  # mark synced to skip next time
+                continue
+
+            # Parse data JSON safely
+            data = ins.get('data')
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except Exception:
+                    data = {}
+
+            # Extract min_trades from data if available
+            min_trades = 0
+            if isinstance(data, dict):
+                min_trades = data.get('total', data.get('count', data.get('min_trades', 0)))
+
+            row = {
+                'category': cat,
+                'insight': ins.get('insight', ''),
+                'data': data if isinstance(data, dict) else {},
+                'min_trades': min_trades,
+            }
+            # instance_id column may not exist yet in Supabase
+            if self._insights_has_instance_id:
+                row['instance_id'] = instance_id
+            payload.append(row)
+            synced_ids.append(ins['id'])
+
+        if not payload:
+            if synced_ids:
+                mark_insights_synced(synced_ids)
+            return 0
+
+        try:
+            resp = requests.post(
+                self._url('shared_insights'),
+                headers={**self._headers(), 'Prefer': 'return=minimal'},
+                json=payload,
+                timeout=15,
+            )
+            if resp.status_code < 300:
+                mark_insights_synced(synced_ids)
+                self.logger.info(f"Shared Learning: synced {len(payload)} insights to cloud")
+                return len(payload)
+            elif resp.status_code == 400 and 'instance_id' in resp.text:
+                # instance_id column doesn't exist yet — retry without it
+                self._insights_has_instance_id = False
+                for row in payload:
+                    row.pop('instance_id', None)
+                resp2 = requests.post(
+                    self._url('shared_insights'),
+                    headers={**self._headers(), 'Prefer': 'return=minimal'},
+                    json=payload,
+                    timeout=15,
+                )
+                if resp2.status_code < 300:
+                    mark_insights_synced(synced_ids)
+                    self.logger.info(f"Shared Learning: synced {len(payload)} insights (no instance_id)")
+                    return len(payload)
+                self.logger.warning(f"Shared Learning: insight sync retry failed {resp2.status_code}")
+                return 0
+            else:
+                self.logger.warning(f"Shared Learning: insight sync failed {resp.status_code}: {resp.text[:200]}")
+                return 0
+        except Exception as e:
+            self.logger.warning(f"Shared Learning: insight sync error: {e}")
+            return 0
+
     def fetch_shared_insights(self):
-        """Download aggregated insights from the cloud."""
+        """Download insights from other instances and save locally."""
         if not self.enabled:
             return []
         try:
+            instance_id = self._config.get('instance_id', '')
             # Get insights from last 7 days
             cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-            resp = requests.get(
-                self._url('shared_insights') + f'?created_at=gte.{cutoff}&order=created_at.desc&limit=50',
-                headers=self._headers(),
-                timeout=10,
-            )
+            url = self._url('shared_insights') + f'?created_at=gte.{cutoff}&order=created_at.desc&limit=100'
+            # Exclude own insights if instance_id column exists
+            if instance_id and self._insights_has_instance_id:
+                url += f'&instance_id=neq.{instance_id}'
+            resp = requests.get(url, headers=self._headers(), timeout=10)
             if resp.status_code == 200:
                 return resp.json()
             return []
@@ -508,13 +625,19 @@ class SharedLearning:
         # Sync trades up
         synced = self.sync_trades()
 
+        # Sync insights up
+        try:
+            self.sync_insights()
+        except Exception as e:
+            self.logger.warning(f"Shared Learning: insight sync error: {e}")
+
         # Import remote trades for cross-instance learning
         try:
             imported = self.import_shared_trades()
         except Exception as e:
             self.logger.warning(f"Shared Learning: trade import error: {e}")
 
-        # Fetch remote insights and save locally
+        # Fetch remote insights from other instances and save locally
         try:
             remote_insights = self.fetch_shared_insights()
             if remote_insights:
