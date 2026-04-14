@@ -16,7 +16,9 @@ from src.common.logging_setup import setup_logging
 from src.common.db import (init_db, get_stats, get_recent_alerts, record_signal_result,
                            get_performance_stats, get_active_strategies, record_strategy_result,
                            get_strategy_performance, get_detailed_trade_history,
-                           get_setup_win_rates, get_learned_lessons)
+                           get_setup_win_rates, get_learned_lessons, toggle_strategy_pause,
+                           get_post_trade_analyses, get_post_trade_stats,
+                           get_planned_strategies)
 from src.analyzer.technical import TechnicalAnalyzer
 from src.analyzer.mtf_analyzer import MTFAnalyzer
 from src.analyzer.smc import SMCEngine
@@ -201,8 +203,8 @@ async def ai_status():
     try:
         r = requests.get('http://localhost:11434/api/tags', timeout=3)
         has_ollama = r.status_code == 200
-    except:
-        pass
+    except Exception:
+        pass  # Ollama not running — expected
     groq_healthy = has_groq and _groq_status["ok"]
     primary = "groq" if groq_healthy else ("ollama" if has_ollama else "keywords")
     result = {
@@ -433,10 +435,10 @@ async def post_signal_result(request: SignalResultRequest):
                         smc.update()
                         status = smc.get_status()
                         ctx['htf_bias'] = status.get('htf_bias', '')
-                    except:
-                        pass
-            except:
-                pass
+                    except Exception:
+                        pass  # SMC optional
+            except Exception:
+                pass  # context enrichment optional
         record_signal_result(request.alert_id, request.result, ctx)
         return JSONResponse({"status": "success"})
     except Exception as e:
@@ -815,9 +817,11 @@ async def list_auto_strategies():
                             snapshot[si]['low'] = pc
                 except Exception:
                     pass
+            mt5_fill = r[21] if len(r) > 21 else None
             strategies.append({
                 "id": r[0], "alert_id": r[1], "news_title": r[2],
-                "direction": r[3], "entry_price": r[4],
+                "direction": r[3],
+                "entry_price": mt5_fill if mt5_fill else r[4],  # Show real fill price when available
                 "stop_loss": r[5], "take_profit": r[6],
                 "confidence": r[7], "impact_score": r[8],
                 "expiry_minutes": r[9], "status": r[10],
@@ -831,6 +835,13 @@ async def list_auto_strategies():
                 "mt5_lot": r[18] if len(r) > 18 else None,
                 "mt5_status": r[19] if len(r) > 19 else None,
                 "mt5_pnl": r[20] if len(r) > 20 else None,
+                # Pre-planner fields
+                "event_time": r[22] if len(r) > 22 else None,
+                "planning_reasoning": r[23] if len(r) > 23 else None,
+                "entry_strategy": r[24] if len(r) > 24 else None,
+                "risk_level": r[25] if len(r) > 25 else None,
+                "sl_pips": r[26] if len(r) > 26 else None,
+                "tp_pips": r[27] if len(r) > 27 else None,
             })
         return JSONResponse({"status": "success", "data": strategies, "count": len(strategies)})
     except Exception as e:
@@ -862,12 +873,45 @@ async def post_strategy_result(req: StrategyResultRequest):
                     smc.update()
                     status = smc.get_status()
                     ctx['htf_bias'] = status.get('htf_bias', '')
-                except:
-                    pass
-        except:
-            pass
+                except Exception:
+                    pass  # SMC optional
+        except Exception:
+            pass  # context enrichment optional
     record_strategy_result(req.strategy_id, req.result, ctx)
     return JSONResponse({"status": "success"})
+
+@app.post("/auto-strategy/{strategy_id}/toggle-pause")
+async def toggle_pause(strategy_id: int):
+    """Toggle pause/resume for an auto-strategy"""
+    try:
+        new_status = toggle_strategy_pause(strategy_id)
+        if new_status is None:
+            return JSONResponse({"status": "error", "message": "Strategy not found or cannot be paused"}, status_code=400)
+        return JSONResponse({"status": "ok", "new_status": new_status})
+    except Exception as e:
+        logger.error(f"Error toggling pause for #{strategy_id}: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+@app.get("/planned-strategies")
+async def list_planned_strategies():
+    """Get pre-planned strategies for upcoming events"""
+    try:
+        strategies = get_planned_strategies()
+        return JSONResponse({"status": "success", "data": strategies, "count": len(strategies)})
+    except Exception as e:
+        logger.error(f"Error fetching planned strategies: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+@app.get("/post-trade-analysis")
+async def list_post_trade_analysis():
+    """Get recent post-trade analyses from Gemma 4"""
+    try:
+        analyses = get_post_trade_analyses(20)
+        stats = get_post_trade_stats()
+        return JSONResponse({"status": "success", "data": analyses, "stats": stats})
+    except Exception as e:
+        logger.error(f"Error fetching post-trade analyses: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 @app.post("/generate-report")
 async def generate_report():
@@ -1711,8 +1755,8 @@ async def mt5_connect(request: Request):
             try:
                 import MetaTrader5 as _mt5
                 err_detail = str(_mt5.last_error())
-            except:
-                pass
+            except Exception:
+                pass  # MT5 not available
             return JSONResponse({"status": "error", "message": f"Connection failed: {err_detail}"}, status_code=400)
     except Exception as e:
         return JSONResponse({"status": "error", "message": f"Exception: {e}"}, status_code=500)

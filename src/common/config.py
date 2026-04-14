@@ -19,14 +19,14 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.5.1"
+APP_VERSION = "3.5.2"
 
 class Config:
     VERSION = APP_VERSION
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-    COLLECTOR_INTERVAL = int(os.getenv("COLLECTOR_INTERVAL", "600"))  # 10 min
-    ANALYZER_INTERVAL = int(os.getenv("ANALYZER_INTERVAL", "60"))     # 1 min
+    COLLECTOR_INTERVAL = int(os.getenv("COLLECTOR_INTERVAL", "60"))   # 1 min
+    ANALYZER_INTERVAL = int(os.getenv("ANALYZER_INTERVAL", "10"))     # 10 sec
     DATA_RETENTION_HOURS = int(os.getenv("DATA_RETENTION_HOURS", "72"))
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "46f407e058674f159a2a176e023ab536")
@@ -40,6 +40,8 @@ class Config:
     ]
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", GROQ_API_KEYS[0])
     GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma4")
+    OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
     GOOGLE_SHEETS_WEBHOOK = os.getenv("GOOGLE_SHEETS_WEBHOOK", "https://script.google.com/macros/s/AKfycbzZqRaz_37eSjky1I4F1-2bnQQtRPC15_wDGA5ohxUvzTPq38ez74mbc7oYoNb4NvfyFw/exec")
 
     # MT5 Broker Integration

@@ -1,4 +1,4 @@
-# AIdan v3.5.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.5.2 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
@@ -6,14 +6,16 @@ Sistema de trading asistido que monitorea noticias financieras en tiempo real, a
 
 ---
 
-## Que hay de nuevo en v3.5.1
+## Que hay de nuevo en v3.5.2
 
-- **Min confidence gate**: las estrategias de Estructura y Calendario ahora respetan el umbral minimo de confianza del perfil. Antes, penalizaciones podian bajar la confianza por debajo del minimo sin bloquearse
-- **Auto-login y auto-connect MT5**: al iniciar, restaura la ultima sesion guardada localmente y reconecta MT5 sin pedir credenciales
-- **Filtro de noticias basura**: descarta titulos clickbait/quiz/podcast antes de enviar a Groq, evitando analisis falsos
-- **Sync de insights a Supabase**: sube aprendizajes locales a la nube y descarga los de otras instancias
-- **Boton Salir en dashboard**: desconecta sesion + MT5 y limpia credenciales guardadas
-- **Tarea programada 4am**: script para arranque automatico Lun-Vie con wake del PC
+- **SL adaptativo por ATR**: Stop Loss calculado como ATR-14 x 0.8, acotado entre el SL del perfil y 2.5x el perfil. TP escala proporcionalmente manteniendo el R:R del perfil. Reemplaza el SL fijo que causaba cierres prematuros
+- **Filtro contra-tendencia**: cuando la tendencia M5 es fuerte, senales en contra requieren confianza >= 75 (en vez de 50). Evita operar contra el momentum dominante
+- **Post-trade analysis con Gemma 4**: cada trade cerrado por MT5 (SL/TP hit) se analiza automaticamente con IA local. Evalua calidad de entrada, salida, timing y genera lecciones accionables guardadas en DB
+- **Confianza direccional mejorada**: la funcion `dynamic_conf()` ahora recibe la direccion de la senal y el sesgo HTF, sumando hasta +20 puntos por alineacion con tendencia y HTF bias, o penalizando -10 a -20 por ir en contra
+- **Base de confianza conservadora**: el punto de partida bajo de 50 a 40 — cada punto se gana con factores reales de mercado
+- **LLM Auditor (Gemma 4)**: segunda opinion en paralelo con Groq para validar senales antes de crear estrategia. Acuerdo = +10 conf, desacuerdo = -15 a -20
+- **Pre-Planner nocturno**: planifica estrategias para eventos HIGH impact del dia siguiente usando Groq + Gemma en consenso. Se activan automaticamente 5 min antes del evento
+- **SL estructural ampliado**: el SL puede ensancharse (no solo achicarse) para respetar soportes/resistencias cercanos
 
 ### v3.5.0 (06 Abr 2026)
 - **Trailing Stop-Loss escalonado**: 3 pasos proporcionales al TP. Mueve SL en MT5 real via TRADE_ACTION_SLTP
@@ -49,6 +51,12 @@ python AIdan_TodoEnUno.py
 ```
 
 Requiere variable de entorno `GROQ_API_KEY` con una API key de [Groq](https://console.groq.com/) (gratis).
+
+**Opcional (recomendado):** para auditoria de senales, analisis post-trade y planificacion nocturna, instalar [Ollama](https://ollama.com/) y descargar Gemma 4:
+```bash
+ollama pull gemma4
+```
+Sin Ollama, AIdan funciona igual pero sin segunda opinion de IA ni analisis post-trade.
 
 ---
 
@@ -106,14 +114,13 @@ Cada senal pasa por **filtros** antes de convertirse en estrategia:
 
 ### SL/TP Adaptativos
 
-El Stop Loss y Take Profit no son fijos — se adaptan a la volatilidad actual:
+El Stop Loss y Take Profit se adaptan a la volatilidad actual usando ATR:
 
-- **SL** = max(perfil, ATR x 1.2) — nunca mas ajustado que el ruido del mercado
-- **TP** = max(perfil, ATR x 2.0) — minimo 2:1 risk/reward
-- El TP se limita al soporte/resistencia mas cercano (no pone TP detras de un muro)
-- El SL se coloca detras del nivel estructural mas cercano
-- Minimo 1.5:1 risk/reward siempre
-- Caps: SL max 15 pips, TP max 30 pips (scalping)
+- **SL** = ATR-14 x 0.8, acotado entre el SL del perfil (piso) y 2.5x perfil (techo)
+- **TP** = SL x ratio R:R del perfil (ej: si perfil es 3.5:15 = 1:4.3, se mantiene esa proporcion)
+- El SL puede ensancharse para respetar el soporte/resistencia mas cercano (sin superar el techo)
+- Si no hay ATR disponible, usa los valores fijos del perfil como fallback
+- Metodo reportado en cada trade: `atr_adaptive`, `atr_adaptive+struct_sl`, o `profile`
 
 ### Expiracion Adaptativa
 
@@ -258,6 +265,9 @@ AIdan_TodoEnUno.exe (~25MB)
   |     +-- MTFAnalyzer: velas H1/M15/M5, swings, estructura
   |     +-- SMCEngine: zonas demanda/oferta + confirmacion LTF
   |     +-- StructureScanner: 7 tipos de setup con filtros
+  |     +-- LLM Auditor: Gemma 4 valida senales en paralelo con Groq
+  |     +-- PostTradeAnalyzer: Gemma 4 evalua cada trade cerrado
+  |     +-- PrePlanner: Groq + Gemma planifican eventos HIGH impact
   |     +-- AutoTuner: optimiza parametros cada 30 min
   |     +-- Alert Evaluator: auto-evalua alertas CALL/PUT a los 30 min
   |
@@ -268,7 +278,8 @@ AIdan_TodoEnUno.exe (~25MB)
 ```
 
 **Modelos de IA:**
-- **Groq API** (gratis) - `llama-3.3-70b-versatile` para chat y analisis
+- **Groq API** (gratis) - `llama-3.3-70b-versatile` para analisis de noticias y chat
+- **Gemma 4** (local via Ollama) - auditor de senales, analisis post-trade, planificacion nocturna
 
 **Datos persistentes** en `%APPDATA%/AIdan/`:
 - `state/financial_news.db` - base de datos SQLite con noticias, alertas, estrategias, resultados y parametros optimizados
@@ -286,6 +297,15 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.5.2 (14 Abr 2026)
+- **SL adaptativo por ATR**: ATR-14 x 0.8 acotado entre perfil y 2.5x perfil. TP escala proporcionalmente
+- **Filtro contra-tendencia**: senales contra tendencia fuerte requieren conf >= 75
+- **Post-trade analysis (Gemma 4)**: cada cierre por MT5 genera analisis de calidad de entrada/salida, timing y lecciones
+- **LLM Auditor (Gemma 4)**: segunda opinion en paralelo para validar senales (+10/-20 conf)
+- **Pre-Planner nocturno**: planifica estrategias HIGH impact con consenso Groq + Gemma
+- **Confianza direccional**: +20 por alineacion con tendencia/HTF, -20 por ir en contra
+- **Base confianza conservadora**: punto de partida baja de 50 a 40
 
 ### v3.5.1 (06 Abr 2026)
 - **Min confidence gate**: Estructura y Calendario respetan umbral minimo del perfil

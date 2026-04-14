@@ -70,29 +70,32 @@ class NewsAnalyzer:
             return False
     
     def _check_ollama(self):
-        """Verifica si Ollama está disponible"""
+        """Verifica si Ollama está disponible (Gemma 4 or any model)"""
         try:
             import requests
-            response = requests.get('http://localhost:11434/api/tags', timeout=3)
+            from src.common.config import Config
+            response = requests.get(f'{Config.OLLAMA_URL}/api/tags', timeout=3)
             if response.status_code == 200:
                 models = response.json().get('models', [])
-                # Verifica si hay algún modelo Llama disponible
-                has_llama = any('llama' in m.get('name', '').lower() for m in models)
-                if has_llama:
+                # Check for Gemma 4 first, then any available model
+                model_names = [m.get('name', '').lower() for m in models]
+                has_gemma = any('gemma' in n for n in model_names)
+                has_llama = any('llama' in n for n in model_names)
+                if has_gemma or has_llama:
                     return True
                 else:
-                    self.logger.warning("Ollama está corriendo pero no tiene modelo Llama instalado")
-                    self.logger.warning("Ejecutar: ollama pull llama3.1:8b")
+                    self.logger.warning("Ollama running but no Gemma/Llama model installed")
+                    self.logger.warning("Run: ollama pull gemma4")
                     return False
             return False
         except requests.exceptions.Timeout:
-            self.logger.warning("Ollama timeout - no está respondiendo")
+            self.logger.warning("Ollama timeout")
             return False
         except requests.exceptions.ConnectionError:
-            self.logger.warning("Ollama no está corriendo en localhost:11434")
+            self.logger.warning("Ollama not running")
             return False
         except Exception as e:
-            self.logger.error(f"Error verificando Ollama: {str(e)}")
+            self.logger.error(f"Ollama check error: {str(e)}")
             return False
     
     # Titles that are clearly not actionable financial news
@@ -104,6 +107,52 @@ class NewsAnalyzer:
         'sponsored', 'advertisement', 'promo:', 'giveaway',
     ]
 
+    # Topics clearly irrelevant to EUR/USD forex trading
+    _IRRELEVANT_TOPICS = [
+        # Tech/AI/Software
+        'artificial intelligence', ' ai ', 'machine learning', 'chatgpt', 'openai',
+        'google cloud', 'microsoft azure', 'iphone', 'android', 'semiconductor',
+        'cybersecurity', 'data breach', 'software update', 'app store',
+        # Crypto
+        'bitcoin', 'ethereum', 'crypto', 'blockchain', 'nft', 'defi',
+        'binance', 'coinbase', 'altcoin', 'memecoin', 'dogecoin', 'solana',
+        # Individual stocks / earnings (not macro)
+        'earnings report', 'quarterly results', 'revenue beat', 'revenue miss',
+        'stock split', 'buyback', 'dividend', 'ipo ', 'spac',
+        # Sports / Entertainment
+        'nfl', 'nba', 'mlb', 'fifa', 'world cup', 'olympic', 'super bowl',
+        'movie', 'netflix', 'disney', 'streaming', 'box office', 'grammy',
+        'oscar', 'emmy', 'celebrity', 'hollywood', 'concert', 'album',
+        # Health / Science (non-macro)
+        'clinical trial', 'fda approv', 'drug approval', 'vaccine',
+        'cancer treatment', 'gene therapy', 'space launch', 'nasa', 'spacex',
+        # Real estate individual / local
+        'home sales in', 'property market in', 'rent prices in',
+        # Social media / lifestyle
+        'tiktok', 'instagram', 'facebook', 'twitter', 'social media',
+        'viral', 'influencer', 'trending',
+    ]
+
+    # Keywords that ALWAYS pass the filter (macro/forex relevant)
+    _ALWAYS_RELEVANT = [
+        'fed ', 'federal reserve', 'ecb', 'european central bank', 'boe',
+        'interest rate', 'rate cut', 'rate hike', 'monetary policy',
+        'inflation', 'cpi', 'ppi', 'pce', 'core inflation',
+        'nfp', 'non-farm', 'nonfarm', 'payroll', 'unemployment', 'jobless',
+        'gdp', 'gross domestic', 'economic growth',
+        'pmi', 'ism', 'manufacturing', 'services sector',
+        'retail sales', 'consumer spending', 'consumer confidence',
+        'eur/usd', 'eurusd', 'dollar index', 'dxy', 'forex',
+        'treasury', 'bond yield', 'yield curve',
+        'tariff', 'trade war', 'trade deal', 'sanctions',
+        'powell', 'lagarde', 'yellen', 'fomc', 'dot plot',
+        'recession', 'soft landing', 'hard landing',
+        'geopolit', 'war ', 'ceasefire', 'invasion',
+        'oil price', 'crude oil', 'opec', 'energy crisis',
+        'banking crisis', 'financial crisis', 'credit crunch',
+        'safe haven', 'risk-off', 'risk-on', 'flight to safety',
+    ]
+
     def _is_junk_news(self, title):
         """Pre-filter clickbait, educational, and non-actionable content."""
         t = (title or '').lower()
@@ -112,10 +161,55 @@ class NewsAnalyzer:
                 return True
         return False
 
+    def _keyword_prefilter(self, title, summary):
+        """Fast keyword pre-filter: skip news clearly irrelevant to EUR/USD.
+        Returns: 'pass' (send to AI), 'skip' (irrelevant), or 'force' (always relevant)."""
+        text = f"{title} {summary[:200]}".lower()
+
+        # Always-relevant keywords bypass all filters
+        for kw in self._ALWAYS_RELEVANT:
+            if kw in text:
+                return 'force'
+
+        # Irrelevant topics get skipped
+        for topic in self._IRRELEVANT_TOPICS:
+            if topic in text:
+                return 'skip'
+
+        return 'pass'  # uncertain — let AI decide
+
+    def _gemma_quick_relevance(self, news_id, title):
+        """Ultra-fast Gemma check: is this news relevant to EUR/USD? ~50 tokens.
+        Returns True if relevant or uncertain, False if clearly irrelevant."""
+        try:
+            import requests
+            from src.common.config import Config
+            if not self._check_ollama():
+                return True  # can't check, assume relevant
+
+            resp = requests.post(f'{Config.OLLAMA_URL}/api/generate',
+                json={
+                    'model': Config.GEMMA_MODEL or 'gemma4',
+                    'prompt': f'Can this news move EUR/USD forex pair? Answer ONLY "YES" or "NO".\n"{title}"',
+                    'stream': False,
+                    'options': {'temperature': 0, 'num_predict': 5}
+                },
+                timeout=15
+            )
+            if resp.status_code == 200:
+                answer = resp.json().get('response', '').strip().upper()
+                relevant = 'YES' in answer or 'NO' not in answer
+                if not relevant:
+                    self.logger.info(f"Gemma pre-filter: #{news_id} NOT relevant to EUR/USD — '{title[:60]}'")
+                return relevant
+        except Exception as e:
+            self.logger.debug(f"Gemma pre-filter error: {e}")
+        return True  # on error, assume relevant
+
     def analyze(self, news_id, title, summary, entities, tags):
         """Analyze news and calculate impact score with EUR/USD analysis - REQUIRES AI"""
         try:
-            # Pre-filter junk/clickbait before wasting AI call
+            # Layer 0: Junk/clickbait filter
             if self._is_junk_news(title):
                 self.logger.info(f"Junk filter: skipping '{title[:60]}' (non-actionable content)")
                 return {
@@ -125,7 +219,31 @@ class NewsAnalyzer:
                     'should_operate': False, 'direction': 'NEUTRAL', 'confidence': 0,
                 }
 
-            # SOLO USAR IA - NO KEYWORDS
+            # Layer 1: Fast keyword pre-filter (0 tokens)
+            kw_result = self._keyword_prefilter(title, summary)
+            if kw_result == 'skip':
+                self.logger.info(f"Keyword filter: skipping '{title[:60]}' (irrelevant topic)")
+                return {
+                    'news_id': news_id, 'impact_score': 5, 'level': 'BAJA',
+                    'explanation': 'Tema no relacionado a EUR/USD (pre-filtro)',
+                    'eur_usd_impact': 'NINGUNA', 'market_implications': '',
+                    'should_operate': False, 'direction': 'NEUTRAL', 'confidence': 0,
+                    'analysis_method': 'keyword_filter',
+                }
+
+            # Layer 2: Gemma quick relevance check (~50 tokens, local, free)
+            # Skip this for always-relevant news (kw_result == 'force')
+            if kw_result == 'pass':
+                if not self._gemma_quick_relevance(news_id, title):
+                    return {
+                        'news_id': news_id, 'impact_score': 10, 'level': 'BAJA',
+                        'explanation': 'No relevante para EUR/USD (Gemma pre-filtro)',
+                        'eur_usd_impact': 'NINGUNA', 'market_implications': '',
+                        'should_operate': False, 'direction': 'NEUTRAL', 'confidence': 0,
+                        'analysis_method': 'gemma_prefilter',
+                    }
+
+            # Layer 3: Full AI analysis (Groq tokens only for relevant news)
             if self.ai_mode not in ['groq', 'ollama', 'claude']:
                 self.logger.error(f"AI NOT AVAILABLE - Groq/Ollama debe estar corriendo. No se analizará la noticia.")
                 return None
@@ -575,16 +693,18 @@ REGLAS OBLIGATORIAS:
         return None
 
     def _analyze_with_ollama(self, news_id, title, summary, entities, tags):
-        """Analiza con Llama local via Ollama (fallback)"""
+        """Analiza con Gemma 4 local via Ollama (fallback intermedio)"""
         try:
             import requests
+            from src.common.config import Config
 
             prompt = self._build_analysis_prompt(title, summary)
-            self.logger.info(f"Analizando noticia #{news_id} con Ollama/Llama-8B...")
+            model = Config.GEMMA_MODEL or 'gemma4'
+            self.logger.info(f"Analizando noticia #{news_id} con Ollama/{model}...")
 
-            response = requests.post('http://localhost:11434/api/generate',
+            response = requests.post(f'{Config.OLLAMA_URL}/api/generate',
                 json={
-                    'model': 'llama3.1:8b',
+                    'model': model,
                     'prompt': prompt,
                     'stream': False,
                     'format': 'json',
@@ -594,7 +714,7 @@ REGLAS OBLIGATORIAS:
                         'num_predict': 500
                     }
                 },
-                timeout=45
+                timeout=60
             )
 
             if response.status_code != 200:

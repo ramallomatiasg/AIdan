@@ -1010,6 +1010,7 @@
             <button class="strat-filter-btn trigger-filter" data-trigger="smc" onclick="setTriggerFilter('smc')">&#x1F9E0; SMC</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="calendar" onclick="setTriggerFilter('calendar')">&#x1F4C5; Calendario</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="pattern" onclick="setTriggerFilter('pattern')">&#x1F56F; Patron</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="pre_planned" onclick="setTriggerFilter('pre_planned')">&#x1F4CB; Planificadas</button>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center;" id="stratPerfBar">
             <button onclick="generateReport()" id="reportBtn" style="background:var(--accent-purple,#9b59b6);color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;" title="Subir reporte diario a Google Sheets">Reporte</button>
@@ -1127,6 +1128,15 @@
     <h3 style="margin:0 0 12px 0">Analisis SL/TP</h3>
     <div id="sltp-analysis" style="overflow-x:auto">
         <div style="text-align:center;padding:20px;opacity:0.5">Cargando...</div>
+    </div>
+</div>
+
+<!-- Post-Trade Analysis (Gemma 4) -->
+<div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 12px 0">Analisis Post-Trade (Gemma 4)</h3>
+    <div id="post-trade-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px"></div>
+    <div id="post-trade-feed" style="max-height:500px;overflow-y:auto">
+        <div style="text-align:center;padding:20px;opacity:0.5">Sin analisis aun. Se generan automaticamente al cerrar trades.</div>
     </div>
 </div>
 
@@ -2130,7 +2140,7 @@
             const filtered = allData.filter(s => {
                 // Status filter
                 if (currentStratFilter !== 'all') {
-                    const isActive = s.status === 'active' && !s.result;
+                    const isActive = (s.status === 'active' || s.status === 'paused' || s.status === 'planned') && !s.result;
                     if (currentStratFilter === 'active' && !isActive) return false;
                     if (currentStratFilter === 'closed' && isActive) return false;
                 }
@@ -2173,7 +2183,8 @@
             grid.innerHTML = filtered.map(s => {
                 const dirColor = s.direction === 'CALL' ? 'var(--accent-green)' : 'var(--accent-red)';
                 const dirBg = s.direction === 'CALL' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)';
-                const isExpired = s.status === 'expired' || (s.expires_at && new Date(s.expires_at) < new Date());
+                const isPaused = s.status === 'paused';
+                const isExpired = !isPaused && (s.status === 'expired' || (s.expires_at && new Date(s.expires_at) < new Date()));
                 const isAutoEval = s.status === 'auto_win' || s.status === 'auto_loss' || s.status === 'auto_break_even';
                 const autoTag = isAutoEval ? ' <span style="font-size:11px;color:var(--text-muted);font-style:italic;">(auto)</span>' : '';
                 const statusBadge = s.result
@@ -2184,12 +2195,23 @@
                         : s.result === 'loss'
                         ? '<span style="color:var(--accent-red);font-weight:700;">&#x274C; LOSS' + autoTag + '</span>'
                         : '<span style="color:var(--text-muted);">&#x23ED; SKIP</span>')
+                    : isPaused
+                    ? '<span style="color:#eab308;font-size:16px;font-weight:700;">&#x23F8; PAUSADA</span>'
                     : isExpired
                     ? '<span style="color:var(--text-muted);font-size:16px;">&#x23F3; Evaluando...</span>'
+                    : s.status === 'planned'
+                    ? '<span style="color:#a78bfa;font-size:16px;font-weight:700;">&#x1F4CB; PLANIFICADA</span>'
                     : '<span style="color:var(--accent-green);font-size:16px;">&#x25CF; ACTIVA</span>';
-                const timeStr = s.created_at ? new Date(s.created_at).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
-                const expiresStr = s.expires_at ? new Date(s.expires_at).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
-                const expiryTag = !s.result && expiresStr ? `<span style="font-size:12px;color:var(--text-muted);margin-left:4px;" title="Expira a las ${expiresStr} (${s.expiry_minutes || '?'}min)">⏱ ${expiresStr}</span>` : '';
+                const _safeDate = (str) => { try { const d = new Date(String(str).replace(' ', 'T')); return isNaN(d.getTime()) ? null : d; } catch { return null; } };
+                const _fmtTime = (d) => d ? d.toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
+                const isPlanned = s.status === 'planned';
+                const createdDate = _safeDate(s.created_at);
+                const eventDate = s.event_time ? _safeDate(s.event_time) : null;
+                const timeStr = isPlanned && eventDate ? _fmtTime(eventDate) : _fmtTime(createdDate);
+                const expiresDate = _safeDate(s.expires_at);
+                const expiresStr = _fmtTime(expiresDate);
+                const eventTimeTag = isPlanned && eventDate ? `<span style="font-size:12px;color:#a78bfa;margin-left:4px;" title="Evento: ${eventDate.toLocaleString('es-AR')}">📅 Evento: ${eventDate.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})} ${_fmtTime(eventDate)}</span>` : '';
+                const expiryTag = !s.result && !isPlanned && expiresStr ? `<span style="font-size:12px;color:var(--text-muted);margin-left:4px;" title="Expira a las ${expiresStr} (${s.expiry_minutes || '?'}min)">⏱ ${expiresStr}</span>` : '';
                 const opacity = isExpired && !s.result ? '0.6' : '1';
                 const chartId = 'strat-chart-' + s.id;
 
@@ -2213,6 +2235,7 @@
                             <span style="background:${dirBg};color:${dirColor};padding:3px 10px;border-radius:6px;font-weight:800;font-size:16px;">${s.direction}</span>
                             <span style="font-size:16px;color:var(--text-muted);">${timeStr}</span>
                             ${statusBadge}
+                            ${eventTimeTag}
                             ${expiryTag}
                             ${mt5Badge}
                         </div>
@@ -2223,10 +2246,21 @@
                     </div>
                     <div id="${chartId}" style="width:100%;height:450px;"></div>
                     <div style="padding:6px 12px;display:flex;justify-content:space-between;font-size:16px;">
+                        ${isPlanned && s.entry_price === 0 ? `
+                        <span>&#x1F7E6; Entry: <strong style="color:#a78bfa;">Pendiente</strong></span>
+                        <span style="color:var(--accent-green);">&#x1F7E9; TP: <strong style="color:#a78bfa;">+${s.tp_pips || '?'}p</strong></span>
+                        <span style="color:var(--accent-red);">&#x1F7E5; SL: <strong style="color:#a78bfa;">-${s.sl_pips || '?'}p</strong></span>
+                        ` : `
                         <span>&#x1F7E6; Entry: <strong>${s.entry_price.toFixed(5)}</strong></span>
                         <span style="color:var(--accent-green);">&#x1F7E9; TP: <strong>${s.take_profit.toFixed(5)}</strong></span>
                         <span style="color:var(--accent-red);">&#x1F7E5; SL: <strong>${s.stop_loss.toFixed(5)}</strong></span>
+                        `}
                     </div>
+                    ${isPlanned && s.planning_reasoning ? `<div style="padding:4px 12px;font-size:13px;color:#a78bfa;border-top:1px solid var(--border-color);font-style:italic;">
+                        <strong>AI Reasoning:</strong> ${escapeHtml(s.planning_reasoning).substring(0, 300)}
+                        ${s.entry_strategy ? ' | Estrategia: <strong>' + escapeHtml(s.entry_strategy) + '</strong>' : ''}
+                        ${s.risk_level ? ' | Riesgo: <strong>' + escapeHtml(s.risk_level) + '</strong>' : ''}
+                    </div>` : ''}
                     <div style="padding:4px 12px;font-size:16px;color:var(--text-secondary);border-top:1px solid var(--border-color);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         <span style="white-space:nowrap;color:var(--accent-yellow);font-weight:700;">&#x23F0; ${timeStr}</span>
                         ${s.profile_name ? '<span style="background:var(--accent-cyan,#00bcd4);color:#000;padding:1px 8px;border-radius:8px;font-size:13px;font-weight:700;">&#x2699; ' + escapeHtml(s.profile_name) + '</span>' : ''}
@@ -2234,15 +2268,19 @@
                             smc: '<span style="background:#e040fb;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F9E0; SMC</span>',
                             structure: '<span style="background:var(--accent-green,#22c55e);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CA; ESTRUCTURA</span>',
                             calendar: '<span style="background:#f97316;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4C5; CALENDARIO</span>',
-                            pattern: '<span style="background:var(--accent-yellow,#eab308);color:#000;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F56F; PATRON</span>'
+                            pattern: '<span style="background:var(--accent-yellow,#eab308);color:#000;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F56F; PATRON</span>',
+                            pre_planned: '<span style="background:#a78bfa;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CB; PRE-PLAN</span>'
                         }[s.trigger_type] || '<span style="background:var(--accent-blue);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4F0; NEWS</span>')}
                         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">${({smc:'&#x1F9E0;',structure:'&#x1F4CA;',calendar:'&#x1F4C5;',pattern:'&#x1F56F;'}[s.trigger_type] || '&#x1F4F0;')} ${escapeHtml(s.news_title)}</span>
                     </div>
                     <div style="padding:8px 12px;display:flex;gap:6px;align-items:center;">
+                        ${isPlanned && !s.result ? '<span style="font-size:13px;color:#a78bfa;">Se activa automáticamente antes del evento</span>' : `
                         ${isAutoEval ? '<span style="font-size:12px;color:var(--text-muted);margin-right:4px;">Corregir:</span>' : ''}
                         <button class="result-btn win ${btnState('win')}" onclick="voteStrategy(${s.id},'win')" ${s.result && !isAutoEval ? 'disabled' : ''}>&#x2705; Win</button>
                         <button class="result-btn loss ${btnState('loss')}" onclick="voteStrategy(${s.id},'loss')" ${s.result && !isAutoEval ? 'disabled' : ''}>&#x274C; Loss</button>
                         <button class="result-btn skip ${btnState('skip')}" onclick="voteStrategy(${s.id},'skip')" ${s.result && !isAutoEval ? 'disabled' : ''}>&#x23ED; Skip</button>
+                        `}
+                        ${(!s.result && (s.status === 'active' || s.status === 'planned' || isPaused)) ? `<button class="result-btn" style="margin-left:auto;background:${isPaused ? 'rgba(34,197,94,0.2)' : 'rgba(234,179,8,0.2)'};color:${isPaused ? 'var(--accent-green)' : '#eab308'};border:1px solid ${isPaused ? 'var(--accent-green)' : '#eab308'};" onclick="togglePause(${s.id})">${isPaused ? '&#x25B6; Reactivar' : '&#x23F8; Pausar'}</button>` : ''}
                     </div>
                 </div>`;
             }).join('');
@@ -2312,6 +2350,16 @@
             });
             loadAutoStrategies();
         } catch(e) {}
+    }
+
+    async function togglePause(id) {
+        try {
+            const res = await fetch(`${API_BASE}/auto-strategy/${id}/toggle-pause`, { method: 'POST' });
+            const data = await res.json();
+            if (data.status === 'ok') {
+                loadAutoStrategies();
+            }
+        } catch(e) { console.error('Toggle pause error:', e); }
     }
 
     async function generateReport() {
@@ -2825,9 +2873,64 @@
             } else {
                 reportEl.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5">Sin reporte aun. Se genera automaticamente cuando el mercado esta cerrado.</div>';
             }
+
+            // Post-trade analysis
+            try {
+                const ptR = await fetch('/post-trade-analysis').then(r=>r.json());
+                if (ptR.status === 'success') renderPostTradeAnalysis(ptR.data || [], ptR.stats || {});
+            } catch(e) { console.debug('Post-trade load error:', e); }
+
         } catch(e) {
             console.error('Learning load error:', e);
         }
+    }
+
+    function renderPostTradeAnalysis(analyses, stats) {
+        const statsEl = document.getElementById('post-trade-stats');
+        const feedEl = document.getElementById('post-trade-feed');
+
+        // Stats badges
+        if (stats.total > 0) {
+            const qualityColors = { good: 'var(--accent-green)', fair: '#eab308', poor: 'var(--accent-red)' };
+            const entryQ = stats.entry_quality || {};
+            const timingQ = stats.timing_assessment || {};
+            const confQ = stats.confidence_was || {};
+            statsEl.innerHTML = `
+                <div class="stat-box"><div class="stat-label">Total Analisis</div><div class="stat-value">${stats.total}</div></div>
+                <div class="stat-box"><div class="stat-label">Entradas Buenas</div><div class="stat-value" style="color:var(--accent-green)">${entryQ.good || 0}</div></div>
+                <div class="stat-box"><div class="stat-label">Timing Optimo</div><div class="stat-value" style="color:var(--accent-green)">${timingQ.optimal || 0}</div></div>
+                <div class="stat-box"><div class="stat-label">Conf Sobreestimada</div><div class="stat-value" style="color:var(--accent-red)">${confQ.overestimated || 0}</div></div>
+            `;
+        }
+
+        if (analyses.length === 0) return;
+
+        const qualityBadge = (q) => {
+            const colors = { good: 'rgba(34,197,94,0.2);color:var(--accent-green)', fair: 'rgba(234,179,8,0.2);color:#eab308', poor: 'rgba(239,68,68,0.2);color:var(--accent-red)' };
+            const icons = { good: '&#x2705;', fair: '&#x1F7E1;', poor: '&#x274C;' };
+            return `<span style="background:${colors[q] || colors.fair};padding:1px 6px;border-radius:6px;font-size:12px;font-weight:600;">${icons[q] || ''} ${q || 'N/A'}</span>`;
+        };
+
+        feedEl.innerHTML = analyses.map(a => `
+            <div style="padding:8px 0;border-bottom:1px solid var(--border-color);font-size:14px;">
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px;">
+                    <strong>#${a.strategy_id}</strong>
+                    <span style="color:${a.result === 'win' ? 'var(--accent-green)' : a.result === 'loss' ? 'var(--accent-red)' : '#eab308'};font-weight:700;">${(a.result || '').toUpperCase()}</span>
+                    <span style="color:var(--text-muted);font-size:12px;">${a.direction || ''} | ${a.trigger_type || ''}</span>
+                    <span style="color:var(--text-muted);font-size:11px;margin-left:auto;">${a.analyzed_at ? new Date(a.analyzed_at + 'Z').toLocaleString('es-AR', {hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : ''}</span>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
+                    <span style="font-size:12px;">Entry: ${qualityBadge(a.entry_quality)}</span>
+                    <span style="font-size:12px;">Exit: ${qualityBadge(a.exit_quality)}</span>
+                    <span style="font-size:12px;">Timing: ${qualityBadge(a.timing_assessment)}</span>
+                    ${a.news_accuracy && a.news_accuracy !== 'neutral' ? '<span style="font-size:12px;">News: ' + qualityBadge(a.news_accuracy === 'accurate' ? 'good' : 'poor') + '</span>' : ''}
+                </div>
+                <div style="color:var(--text-secondary);font-size:13px;">
+                    <strong>Leccion:</strong> ${escapeHtml(a.key_lesson || 'N/A')}
+                </div>
+                ${a.suggested_adjustment ? '<div style="color:var(--accent-cyan);font-size:12px;"><strong>Ajuste:</strong> ' + escapeHtml(a.suggested_adjustment) + '</div>' : ''}
+            </div>
+        `).join('');
     }
 
     async function loadWRTrend() {

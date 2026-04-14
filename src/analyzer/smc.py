@@ -326,11 +326,11 @@ class ConfirmationEngine:
         if h1_trend != 'neutral' and m15_trend in (h1_trend, 'neutral'):
             return h1_trend, 'moderate'
         # They disagree (e.g., H1 bearish, M15 bullish)
-        # Use M15 as the more reactive timeframe with weak confidence
-        if m15_trend != 'neutral':
-            return m15_trend, 'weak'
+        # H1 is the dominant timeframe — use it as bias but with weak confidence
         if h1_trend != 'neutral':
             return h1_trend, 'weak'
+        if m15_trend != 'neutral':
+            return m15_trend, 'weak'
         return 'neutral', 'none'
 
     def _find_active_zone(self, price, zones, htf_bias):

@@ -87,7 +87,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS signal_results (
             id INTEGER PRIMARY KEY,
             alert_id INTEGER UNIQUE,
-            result TEXT CHECK(result IN ('win', 'loss', 'skip')),
+            result TEXT CHECK(result IN ('win', 'loss', 'skip', 'break_even')),
             recorded_at TIMESTAMP,
             FOREIGN KEY(alert_id) REFERENCES alerts(id)
         )
@@ -130,7 +130,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS strategy_results (
             id INTEGER PRIMARY KEY,
             strategy_id INTEGER UNIQUE,
-            result TEXT CHECK(result IN ('win', 'loss', 'skip')),
+            result TEXT CHECK(result IN ('win', 'loss', 'skip', 'break_even')),
             recorded_at TIMESTAMP,
             FOREIGN KEY(strategy_id) REFERENCES auto_strategies(id)
         )
@@ -302,6 +302,25 @@ def init_db():
         )
     """)
 
+    # Post-trade analysis (Gemma 4 insights per closed trade)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS post_trade_analysis (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER NOT NULL,
+            result TEXT,
+            entry_quality TEXT,
+            exit_quality TEXT,
+            news_accuracy TEXT,
+            timing_assessment TEXT,
+            key_lesson TEXT,
+            confidence_was TEXT,
+            suggested_adjustment TEXT,
+            raw_response TEXT,
+            analyzed_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (strategy_id) REFERENCES auto_strategies(id)
+        )
+    """)
+
     # Learning insights (what AIdan discovered)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS learning_insights (
@@ -382,11 +401,81 @@ def init_db():
     except:
         pass
 
+    # Migration: add mt5_fill_price to store actual broker fill price (may differ from signal entry_price)
+    try:
+        cursor.execute("ALTER TABLE auto_strategies ADD COLUMN mt5_fill_price REAL")
+    except:
+        pass
+
+    # Migration: add be_triggered flag — set when trailing SL moves to BE or beyond
+    try:
+        cursor.execute("ALTER TABLE auto_strategies ADD COLUMN be_triggered INTEGER DEFAULT 0")
+    except:
+        pass
+
+    # Migration: add paused_from_status for toggle pause/resume
+    try:
+        cursor.execute("ALTER TABLE auto_strategies ADD COLUMN paused_from_status TEXT DEFAULT NULL")
+    except:
+        pass
+
+    # Migration: add pre-planning columns
+    for col, coltype in [
+        ('event_time', 'TEXT DEFAULT NULL'),
+        ('planning_reasoning', 'TEXT DEFAULT NULL'),
+        ('entry_strategy', 'TEXT DEFAULT NULL'),
+        ('risk_level', 'TEXT DEFAULT NULL'),
+        ('planned_sl_pips', 'REAL DEFAULT NULL'),
+        ('planned_tp_pips', 'REAL DEFAULT NULL'),
+        ('mt5_high_water', 'REAL DEFAULT NULL'),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE auto_strategies ADD COLUMN {col} {coltype}")
+        except:
+            pass
+
+    # Migration: expand strategy_results CHECK constraint to allow 'break_even'
+    try:
+        cursor.execute("SELECT sql FROM sqlite_master WHERE name='strategy_results'")
+        schema = cursor.fetchone()
+        if schema and 'break_even' not in schema[0]:
+            cursor.execute("ALTER TABLE strategy_results RENAME TO strategy_results_old")
+            cursor.execute("""CREATE TABLE strategy_results (
+                id INTEGER PRIMARY KEY, strategy_id INTEGER UNIQUE,
+                result TEXT CHECK(result IN ('win', 'loss', 'skip', 'break_even')),
+                recorded_at TIMESTAMP, entry_price REAL DEFAULT 0, exit_price REAL DEFAULT 0,
+                pips REAL DEFAULT 0, direction TEXT DEFAULT '', confidence REAL DEFAULT 0,
+                setup_type TEXT DEFAULT '', trigger_type TEXT DEFAULT '', market_trend TEXT DEFAULT '',
+                rsi_at_entry REAL DEFAULT 0, htf_bias TEXT DEFAULT '', reported_to_sheets INTEGER DEFAULT 0,
+                FOREIGN KEY(strategy_id) REFERENCES auto_strategies(id))""")
+            cursor.execute("INSERT INTO strategy_results SELECT * FROM strategy_results_old")
+            cursor.execute("DROP TABLE strategy_results_old")
+    except:
+        pass
+
     # Migration: add synced_to_cloud column to learning_insights
     try:
         cursor.execute("ALTER TABLE learning_insights ADD COLUMN synced_to_cloud INTEGER DEFAULT 0")
     except:
         pass
+
+    # Backfill: fix hour_utc and session for trades archived with old code
+    cursor.execute("SELECT id, created_at FROM trade_archive WHERE (hour_utc = 0 OR hour_utc IS NULL OR session = '' OR session IS NULL) AND created_at IS NOT NULL")
+    _fix_rows = cursor.fetchall()
+    if _fix_rows:
+        for _fid, _fca in _fix_rows:
+            try:
+                _fh = int(str(_fca).split(' ')[1].split(':')[0])
+                _fh_utc = (_fh + 3) % 24
+                if 7 <= _fh_utc < 12: _fs = 'london'
+                elif 12 <= _fh_utc < 14: _fs = 'overlap'
+                elif 14 <= _fh_utc < 17: _fs = 'ny'
+                elif 17 <= _fh_utc < 21: _fs = 'late_ny'
+                else: _fs = 'off'
+                cursor.execute("UPDATE trade_archive SET hour_utc = ?, session = ? WHERE id = ?", (_fh_utc, _fs, _fid))
+            except:
+                pass
+        print(f"[DB] Backfill: fixed hour_utc/session for {len(_fix_rows)} trades")
 
     # Backfill: copy existing strategy_results into trade_archive if not already done
     cursor.execute("SELECT COUNT(*) FROM trade_archive")
@@ -638,14 +727,15 @@ def get_active_profile():
         if row:
             import json
             return json.loads(row[0])
-    except:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger('db').debug(f"get_active_profile: {e}")
     finally:
         conn.close()
     # Defaults (conservative)
     return {
         'min_impact': 50, 'min_confidence': 55, 'direction': 'any',
-        'stop_loss_pips': 5, 'take_profit_pips': 15, 'expiry_minutes': 15
+        'stop_loss_pips': 3.5, 'take_profit_pips': 15, 'expiry_minutes': 15
     }
 
 def cleanup_old_data(hours=72):
@@ -703,17 +793,63 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
         cursor.execute("SELECT COUNT(*) FROM auto_strategies")
         count = cursor.fetchone()[0]
         if count >= 6:
+            # Archive closed strategies before deleting them
+            to_delete = count - 5
+            cursor.execute("""
+                SELECT id, direction, entry_price, stop_loss, take_profit, confidence,
+                       impact_score, trigger_type, news_title, profile_name, created_at,
+                       mt5_pnl, mt5_close_price, mt5_status, status
+                FROM auto_strategies ORDER BY created_at ASC LIMIT ?
+            """, (to_delete,))
+            for old_row in cursor.fetchall():
+                old_id, old_dir, old_entry, old_sl, old_tp, old_conf, old_impact, \
+                    old_trigger, old_title, old_profile, old_created, old_mt5_pnl, \
+                    old_close, old_mt5_status, old_status = old_row
+                if old_mt5_status == 'closed' and old_close:
+                    pip = 0.0001
+                    if old_dir == 'CALL':
+                        old_pips = round((old_close - old_entry) / pip, 1) if old_entry else 0
+                        old_sl_pips = round((old_entry - old_sl) / pip, 1) if old_sl else 0
+                        old_tp_pips = round((old_tp - old_entry) / pip, 1) if old_tp else 0
+                    else:
+                        old_pips = round((old_entry - old_close) / pip, 1) if old_entry else 0
+                        old_sl_pips = round((old_sl - old_entry) / pip, 1) if old_sl else 0
+                        old_tp_pips = round((old_entry - old_tp) / pip, 1) if old_tp else 0
+                    old_result = 'win' if old_pips > 0 else 'loss'
+                    sl_hit = 1 if old_result == 'loss' else 0
+                    tp_hit = 1 if old_result == 'win' else 0
+                    # Check not already archived
+                    cursor.execute("SELECT 1 FROM trade_archive WHERE strategy_id = ?", (old_id,))
+                    if not cursor.fetchone():
+                        cursor.execute("""
+                            INSERT INTO trade_archive
+                                (strategy_id, direction, result, entry_price, exit_price, pips,
+                                 stop_loss, take_profit, sl_pips, tp_pips, sl_hit, tp_hit,
+                                 confidence, impact_score, setup_type, trigger_type,
+                                 market_trend, trend_strength, rsi_at_entry, htf_bias,
+                                 volatility, avg_range_pips, session, hour_utc, day_of_week,
+                                 profile_name, mt5_pnl, news_title, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            old_id, old_dir, old_result, old_entry, old_close, old_pips,
+                            old_sl, old_tp, old_sl_pips, old_tp_pips, sl_hit, tp_hit,
+                            old_conf, old_impact, '', old_trigger,
+                            '', '', 0, '', '', 0, '', 0, 0,
+                            old_profile, old_mt5_pnl, old_title, old_created
+                        ))
+                        import logging
+                        logging.getLogger('db').info(f"Auto-archived strategy #{old_id} before cap delete: {old_result} {old_pips}p")
             # Delete oldest + their votes
             cursor.execute("""
                 DELETE FROM strategy_results WHERE strategy_id IN (
                     SELECT id FROM auto_strategies ORDER BY created_at ASC LIMIT ?
                 )
-            """, (count - 5,))
+            """, (to_delete,))
             cursor.execute("""
                 DELETE FROM auto_strategies WHERE id IN (
                     SELECT id FROM auto_strategies ORDER BY created_at ASC LIMIT ?
                 )
-            """, (count - 5,))
+            """, (to_delete,))
 
         now = now_ar()
         expires_at = now + timedelta(minutes=expiry_minutes)
@@ -776,7 +912,7 @@ def get_active_strategies(limit=6):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Expire old ones first
+    # Expire old ones first (but NOT paused strategies)
     cursor.execute("""
         UPDATE auto_strategies SET status = 'expired'
         WHERE expires_at < ? AND status = 'active'
@@ -795,16 +931,30 @@ def get_active_strategies(limit=6):
     prof_col = ', s.profile_name' if has_profile else ", NULL as profile_name"
 
     has_mt5 = 'mt5_ticket' in columns
+    has_fill = 'mt5_fill_price' in columns
     mt5_cols = ', s.mt5_ticket, s.mt5_lot, s.mt5_status, s.mt5_pnl' if has_mt5 else ', NULL, NULL, NULL, NULL'
+    mt5_cols += ', s.mt5_fill_price' if has_fill else ', NULL'
+
+    # Pre-planner columns
+    has_event_time = 'event_time' in columns
+    has_planning = 'planning_reasoning' in columns
+    has_entry_strat = 'entry_strategy' in columns
+    has_risk = 'risk_level' in columns
+    has_plan_pips = 'planned_sl_pips' in columns
+    plan_cols = (f", s.event_time" if has_event_time else ", NULL") + \
+                (f", s.planning_reasoning" if has_planning else ", NULL") + \
+                (f", s.entry_strategy" if has_entry_strat else ", NULL") + \
+                (f", s.risk_level" if has_risk else ", NULL") + \
+                (f", s.planned_sl_pips, s.planned_tp_pips" if has_plan_pips else ", NULL, NULL")
 
     cursor.execute(f"""
         SELECT s.id, s.alert_id, s.news_title, s.direction, s.entry_price,
                s.stop_loss, s.take_profit, s.confidence, s.impact_score,
                s.expiry_minutes, s.status, s.created_at, s.expires_at,
-               sr.result {tt_col} {snap_col} {prof_col} {mt5_cols}
+               sr.result {tt_col} {snap_col} {prof_col} {mt5_cols} {plan_cols}
         FROM auto_strategies s
         LEFT JOIN strategy_results sr ON s.id = sr.strategy_id
-        WHERE date(s.created_at) = date(?)
+        WHERE date(s.created_at) = date(?) OR s.status IN ('active', 'planned', 'paused')
         ORDER BY s.created_at DESC
         LIMIT ?
     """, (today_ar(), limit,))
@@ -836,23 +986,29 @@ def record_strategy_result(strategy_id, result, market_context=None):
         conn.close()
 
 def get_strategy_performance():
-    """Get win/loss/skip stats for auto-strategies (excludes weekend paper trades)"""
+    """Get win/loss/skip stats for auto-strategies from trade_archive (persistent).
+    Falls back to strategy_results for break_even/skip which aren't archived."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    # Primary: trade_archive (persistent, survives 6-cap deletes)
     cursor.execute("""
-        SELECT result, COUNT(*) FROM strategy_results
-        WHERE strftime('%w', recorded_at) NOT IN ('0', '6')
+        SELECT result, COUNT(*) FROM trade_archive
+        WHERE strftime('%w', created_at) NOT IN ('0', '6')
         GROUP BY result
     """)
     rows = cursor.fetchall()
-    conn.close()
     stats = {'wins': 0, 'losses': 0, 'skips': 0, 'break_evens': 0}
     for result, count in rows:
         if result == 'win': stats['wins'] = count
         elif result == 'loss': stats['losses'] = count
-        elif result == 'skip': stats['skips'] = count
-        elif result == 'break_even': stats['break_evens'] = count
-    total = stats['wins'] + stats['losses']  # BE excluded from win rate
+    # Break-evens from strategy_results (not archived)
+    cursor.execute("""
+        SELECT COUNT(*) FROM strategy_results
+        WHERE result = 'break_even' AND strftime('%w', recorded_at) NOT IN ('0', '6')
+    """)
+    stats['break_evens'] = cursor.fetchone()[0]
+    conn.close()
+    total = stats['wins'] + stats['losses']
     stats['total'] = total
     stats['total_resolved'] = total + stats['break_evens']
     stats['win_rate'] = round((stats['wins'] / total * 100) if total > 0 else 0, 1)
@@ -871,7 +1027,7 @@ def get_strategies_pending_evaluation():
     cursor.execute("""
         SELECT s.id, s.direction, s.entry_price, s.stop_loss, s.take_profit,
                s.confidence, s.expiry_minutes, s.created_at, s.expires_at,
-               s.news_title, s.trigger_type
+               s.news_title, s.trigger_type, s.be_triggered
         FROM auto_strategies s
         LEFT JOIN strategy_results sr ON s.id = sr.strategy_id
         WHERE s.expires_at < ?
@@ -913,13 +1069,30 @@ def auto_evaluate_strategy(strategy_id, result, exit_price, pips, market_context
 
 
 def get_news_fetch_time(news_id):
-    """Get the effective time of a news item (published_at if available, else fetched_at)"""
+    """Get the effective time of a news item in AR time.
+    published_at is UTC (from RSS feeds), fetched_at is already AR time (from now_ar()).
+    Convert published_at to AR (UTC-3) for consistent comparison."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT COALESCE(published_at, fetched_at) FROM news WHERE id = ?", (news_id,))
+    cursor.execute("""
+        SELECT published_at, fetched_at FROM news WHERE id = ?
+    """, (news_id,))
     row = cursor.fetchone()
     conn.close()
-    return row[0] if row else None
+    if not row:
+        return None
+    pub_utc, fetched_ar = row
+    if pub_utc:
+        # Convert UTC published_at to AR time (UTC-3)
+        try:
+            from datetime import datetime, timedelta
+            _pub_str = str(pub_utc).split('.')[0].replace('T', ' ')
+            pub_dt = datetime.strptime(_pub_str, '%Y-%m-%d %H:%M:%S')
+            pub_ar = pub_dt - timedelta(hours=3)
+            return pub_ar.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return pub_utc  # fallback: return as-is
+    return fetched_ar
 
 
 # ── Learning / Feedback Loop Functions ──
@@ -1219,14 +1392,20 @@ def get_learned_lessons():
 
 # ── MT5 helper functions ──
 
-def update_mt5_ticket(strategy_id, ticket, lot, status):
+def update_mt5_ticket(strategy_id, ticket, lot, status, fill_price=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
-        cursor.execute("""
-            UPDATE auto_strategies SET mt5_ticket = ?, mt5_lot = ?, mt5_status = ?
-            WHERE id = ?
-        """, (ticket, lot, status, strategy_id))
+        if fill_price is not None:
+            cursor.execute("""
+                UPDATE auto_strategies SET mt5_ticket = ?, mt5_lot = ?, mt5_status = ?, mt5_fill_price = ?
+                WHERE id = ?
+            """, (ticket, lot, status, fill_price, strategy_id))
+        else:
+            cursor.execute("""
+                UPDATE auto_strategies SET mt5_ticket = ?, mt5_lot = ?, mt5_status = ?
+                WHERE id = ?
+            """, (ticket, lot, status, strategy_id))
         conn.commit()
     finally:
         conn.close()
@@ -1276,7 +1455,8 @@ def get_strategies_with_open_mt5():
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, mt5_ticket, direction, entry_price, stop_loss, take_profit,
-               mt5_lot, created_at, news_title, mt5_trailing_step
+               mt5_lot, created_at, news_title, mt5_trailing_step, mt5_fill_price,
+               mt5_high_water, confidence
         FROM auto_strategies
         WHERE mt5_status = 'filled' AND mt5_ticket IS NOT NULL
     """)
@@ -1286,21 +1466,188 @@ def get_strategies_with_open_mt5():
 
 
 def update_mt5_trailing_step(strategy_id, step):
-    """Update the trailing SL step for a strategy."""
+    """Update the trailing SL step for a strategy. Sets be_triggered=1 when step >= 1."""
     conn = sqlite3.connect(DB_PATH)
     conn.execute("UPDATE auto_strategies SET mt5_trailing_step = ? WHERE id = ?", (step, strategy_id))
+    if step >= 1:
+        conn.execute("UPDATE auto_strategies SET be_triggered = 1 WHERE id = ?", (strategy_id,))
     conn.commit()
     conn.close()
 
+
+def update_mt5_trailing_data(strategy_id, step, high_water=None):
+    """Update trailing step + high water mark. Sets be_triggered=1 when step >= 1."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE auto_strategies SET mt5_trailing_step = ? WHERE id = ?", (step, strategy_id))
+    if high_water is not None:
+        conn.execute("UPDATE auto_strategies SET mt5_high_water = ? WHERE id = ?", (high_water, strategy_id))
+    if step >= 1:
+        conn.execute("UPDATE auto_strategies SET be_triggered = 1 WHERE id = ?", (strategy_id,))
+    conn.commit()
+    conn.close()
+
+
+def mark_be_triggered(strategy_id):
+    """Mark a strategy as having reached breakeven (trailing SL moved to BE)."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE auto_strategies SET be_triggered = 1 WHERE id = ?", (strategy_id,))
+    conn.commit()
+    conn.close()
+
+
+def add_planned_strategy(news_title, direction, confidence, sl_pips, tp_pips,
+                         trigger_type='pre_planned', event_time=None,
+                         planning_reasoning=None, entry_strategy=None, risk_level=None):
+    """Add a pre-planned strategy (status='planned') for a future event.
+    Entry/exit prices are set to 0 — they'll be calculated at activation time.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        # Dedup: skip if planned strategy with same event already exists (any direction)
+        cursor.execute("""
+            SELECT id, direction FROM auto_strategies
+            WHERE status = 'planned' AND news_title = ?
+        """, (news_title,))
+        existing = cursor.fetchone()
+        if existing:
+            import logging
+            logging.getLogger('db').info(f"Pre-plan dedup: '{news_title}' already planned as #{existing[0]} {existing[1]}, skipping {direction}")
+            conn.close()
+            return None  # duplicate event
+
+        now = now_ar()
+        # Planned strategies expire 30 min after the event
+        try:
+            from datetime import datetime as _dt
+            evt = _dt.fromisoformat(event_time.replace('Z', '+00:00')) if event_time else now
+            expires_at = evt + timedelta(minutes=30)
+        except Exception:
+            expires_at = now + timedelta(hours=24)
+
+        cursor.execute("""
+            INSERT INTO auto_strategies
+            (alert_id, news_title, direction, entry_price, stop_loss, take_profit,
+             confidence, impact_score, expiry_minutes, status, created_at, expires_at,
+             trigger_type, event_time, planning_reasoning, entry_strategy, risk_level,
+             planned_sl_pips, planned_tp_pips)
+            VALUES (NULL, ?, ?, 0, 0, 0, ?, 0, 30, 'planned', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (news_title, direction, confidence, now, expires_at,
+              trigger_type, event_time, planning_reasoning, entry_strategy, risk_level,
+              sl_pips, tp_pips))
+        conn.commit()
+        return cursor.lastrowid
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[DB] add_planned_strategy FAILED: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def activate_due_planned_strategies(minutes_before=5):
+    """Activate planned strategies whose event is within minutes_before.
+    Returns list of strategy IDs that were activated.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        now = datetime.now(timezone.utc)
+        window_start = now
+        window_end = now + timedelta(minutes=minutes_before)
+
+        cursor.execute("""
+            SELECT id, event_time FROM auto_strategies
+            WHERE status = 'planned' AND event_time IS NOT NULL
+        """)
+        activated = []
+        for row in cursor.fetchall():
+            sid, evt_str = row
+            try:
+                if 'T' in str(evt_str):
+                    evt = datetime.fromisoformat(str(evt_str).replace('Z', '+00:00'))
+                else:
+                    evt = datetime.strptime(str(evt_str)[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+
+                if evt.tzinfo is None:
+                    evt = evt.replace(tzinfo=timezone.utc)
+
+                if window_start <= evt <= window_end:
+                    cursor.execute("UPDATE auto_strategies SET status = 'active' WHERE id = ?", (sid,))
+                    activated.append(sid)
+            except Exception:
+                continue
+
+        if activated:
+            conn.commit()
+        return activated
+    finally:
+        conn.close()
+
+
+def get_planned_strategies():
+    """Get all planned strategies for dashboard display."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM auto_strategies
+        WHERE status IN ('planned', 'paused') AND event_time IS NOT NULL
+        ORDER BY event_time ASC
+    """)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def toggle_strategy_pause(strategy_id):
+    """Toggle pause/resume for a strategy.
+    - If active/planned → paused (saves original status in paused_from_status)
+    - If paused → restored to original status
+    Returns new status string or None if strategy not found / not pausable.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT status, paused_from_status FROM auto_strategies WHERE id = ?", (strategy_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        current_status, paused_from = row
+
+        if current_status == 'paused':
+            # Resume: restore original status
+            new_status = paused_from or 'active'
+            cursor.execute("""
+                UPDATE auto_strategies SET status = ?, paused_from_status = NULL WHERE id = ?
+            """, (new_status, strategy_id))
+            conn.commit()
+            return new_status
+        elif current_status in ('active', 'planned'):
+            # Pause: save current status and set to paused
+            cursor.execute("""
+                UPDATE auto_strategies SET status = 'paused', paused_from_status = ? WHERE id = ?
+            """, (current_status, strategy_id))
+            conn.commit()
+            return 'paused'
+        else:
+            # Can't pause expired/evaluated strategies
+            return None
+    finally:
+        conn.close()
+
+
 def get_evaluated_open_mt5():
-    """Get strategies that were evaluated (auto_win/auto_loss) but MT5 position still marked as filled."""
+    """Get strategies that were evaluated/expired but MT5 position still marked as filled."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, result, mt5_ticket
+        SELECT id, status, mt5_ticket
         FROM auto_strategies
         WHERE mt5_status = 'filled' AND mt5_ticket IS NOT NULL
-          AND status IN ('auto_win', 'auto_loss')
+          AND status IN ('auto_win', 'auto_loss', 'expired')
     """)
     rows = cursor.fetchall()
     conn.close()
@@ -1355,26 +1702,37 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
+        # Check not already archived
+        cursor.execute("SELECT 1 FROM trade_archive WHERE strategy_id = ?", (strategy_id,))
+        if cursor.fetchone():
+            conn.close()
+            return  # already archived
         # Get strategy data for enrichment
         cursor.execute("""
             SELECT direction, entry_price, stop_loss, take_profit, confidence,
                    impact_score, trigger_type, news_title, profile_name, created_at,
-                   mt5_pnl
+                   mt5_pnl, mt5_fill_price
             FROM auto_strategies WHERE id = ?
         """, (strategy_id,))
         row = cursor.fetchone()
         if not row:
+            import logging
+            logging.getLogger('db').warning(f"archive_trade: strategy #{strategy_id} not found (deleted by cap?)")
+            conn.close()
             return
-        direction, entry, sl, tp, conf, impact, trigger, title, profile, created, mt5_pnl = row
+        direction, entry, sl, tp, conf, impact, trigger, title, profile, created, mt5_pnl, fill_price = row
 
+        # Use fill_price (actual MT5 execution price) for SL/TP distance calculation
+        # entry_price is the signal price; fill_price is where the order actually filled
+        ref_price = fill_price if fill_price else entry
         # Calculate SL/TP distances in pips
         pip = 0.0001
         if direction == 'CALL':
-            sl_pips = round((entry - sl) / pip, 1) if sl else 0
-            tp_pips = round((tp - entry) / pip, 1) if tp else 0
+            sl_pips = round((ref_price - sl) / pip, 1) if sl else 0
+            tp_pips = round((tp - ref_price) / pip, 1) if tp else 0
         else:
-            sl_pips = round((sl - entry) / pip, 1) if sl else 0
-            tp_pips = round((entry - tp) / pip, 1) if tp else 0
+            sl_pips = round((sl - ref_price) / pip, 1) if sl else 0
+            tp_pips = round((ref_price - tp) / pip, 1) if tp else 0
 
         # Determine if SL/TP was hit
         sl_hit = 1 if result == 'loss' and pips < 0 else 0
@@ -1410,7 +1768,7 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
                  profile_name, mt5_pnl, news_title, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            strategy_id, direction, result, entry, exit_price, pips,
+            strategy_id, direction, result, ref_price, exit_price, pips,
             sl, tp, sl_pips, tp_pips, sl_hit, tp_hit,
             conf, impact, ctx.get('setup_type', ''), trigger,
             ctx.get('market_trend', ''), ctx.get('trend_strength', ''),
@@ -1464,6 +1822,68 @@ def get_archive_stats():
         'avg_pips': round(row[3], 2), 'total_pips': round(row[4], 2),
         'first_trade': row[5], 'last_trade': row[6]
     }
+
+
+def save_post_trade_analysis(strategy_id, analysis, result=None):
+    """Save post-trade analysis from Gemma 4."""
+    import json as _json
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO post_trade_analysis
+            (strategy_id, result, entry_quality, exit_quality, news_accuracy,
+             timing_assessment, key_lesson, confidence_was, suggested_adjustment, raw_response)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            strategy_id,
+            result or analysis.get('result', ''),
+            analysis.get('entry_quality', ''),
+            analysis.get('exit_quality', ''),
+            analysis.get('news_accuracy', ''),
+            analysis.get('timing_assessment', ''),
+            analysis.get('key_lesson', ''),
+            analysis.get('confidence_was', ''),
+            analysis.get('suggested_adjustment', ''),
+            _json.dumps(analysis)
+        ))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_post_trade_analyses(limit=20):
+    """Get recent post-trade analyses for dashboard."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT p.*, a.direction, a.news_title, a.trigger_type, a.confidence as orig_confidence
+        FROM post_trade_analysis p
+        LEFT JOIN auto_strategies a ON p.strategy_id = a.id
+        ORDER BY p.analyzed_at DESC LIMIT ?
+    """, (limit,))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_post_trade_stats():
+    """Get aggregate stats from post-trade analyses."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    stats = {}
+
+    # Quality distributions
+    for field in ('entry_quality', 'exit_quality', 'timing_assessment', 'news_accuracy', 'confidence_was'):
+        cursor.execute(f"SELECT {field}, COUNT(*) FROM post_trade_analysis WHERE {field} != '' GROUP BY {field}")
+        stats[field] = {r[0]: r[1] for r in cursor.fetchall()}
+
+    cursor.execute("SELECT COUNT(*) FROM post_trade_analysis")
+    stats['total'] = cursor.fetchone()[0]
+
+    conn.close()
+    return stats
 
 
 def save_learning_insight(category, insight, data=None, action_taken=None):
@@ -1528,6 +1948,7 @@ def get_learning_adjustments():
     adjustments = {
         'session_penalties': {},      # e.g. {'off': -15, 'london': +5}
         'trigger_penalties': {},      # e.g. {'news': -10, 'smc': +5}
+        'news_category_penalties': {},# e.g. {'geopolitical': -10, 'inflation': +5}
         'blocked_patterns': [],       # patterns to avoid
         'sl_tp_advice': {},           # e.g. {'news': 'increase_sl', 'structure': 'ok'}
     }
@@ -1553,16 +1974,27 @@ def get_learning_adjustments():
                 session = data.get('session', '')
                 wr = data.get('win_rate', 50)
                 total = data.get('total', 0) or data.get('trades', 0)
+                ev = data.get('expected_value', None)
                 if total >= min_trades:
-                    if wr < 35:
-                        penalty = int(-15 * weight)
-                        # Local insights override shared
-                        if session not in adjustments['session_penalties'] or not is_shared:
-                            adjustments['session_penalties'][session] = penalty
-                    elif wr > 65:
-                        bonus = int(5 * weight)
-                        if session not in adjustments['session_penalties'] or not is_shared:
-                            adjustments['session_penalties'][session] = bonus
+                    # Use expected value if available, otherwise fall back to WR
+                    if ev is not None:
+                        if ev < -1.0:
+                            penalty = int(-15 * weight)
+                            if session not in adjustments['session_penalties'] or not is_shared:
+                                adjustments['session_penalties'][session] = penalty
+                        elif ev > 1.0:
+                            bonus = int(5 * weight)
+                            if session not in adjustments['session_penalties'] or not is_shared:
+                                adjustments['session_penalties'][session] = bonus
+                    else:
+                        if wr < 20:
+                            penalty = int(-15 * weight)
+                            if session not in adjustments['session_penalties'] or not is_shared:
+                                adjustments['session_penalties'][session] = penalty
+                        elif wr > 65:
+                            bonus = int(5 * weight)
+                            if session not in adjustments['session_penalties'] or not is_shared:
+                                adjustments['session_penalties'][session] = bonus
 
             elif base_cat == 'sl_tp':
                 trigger = data.get('trigger_type', '')
@@ -1587,17 +2019,103 @@ def get_learning_adjustments():
                 trigger = data.get('trigger_type', '')
                 wr = data.get('win_rate', 50)
                 total = data.get('total', 0)
+                ev = data.get('expected_value', None)
                 if total >= min_trades:
-                    if wr < 35:
-                        penalty = int(-15 * weight)
-                        if trigger not in adjustments['trigger_penalties'] or not is_shared:
-                            adjustments['trigger_penalties'][trigger] = penalty
-                    elif wr > 65:
-                        bonus = int(5 * weight)
-                        if trigger not in adjustments['trigger_penalties'] or not is_shared:
-                            adjustments['trigger_penalties'][trigger] = bonus
+                    if ev is not None:
+                        if ev < -1.0:
+                            penalty = int(-15 * weight)
+                            if trigger not in adjustments['trigger_penalties'] or not is_shared:
+                                adjustments['trigger_penalties'][trigger] = penalty
+                        elif ev > 1.0:
+                            bonus = int(5 * weight)
+                            if trigger not in adjustments['trigger_penalties'] or not is_shared:
+                                adjustments['trigger_penalties'][trigger] = bonus
+                    else:
+                        if wr < 20:
+                            penalty = int(-15 * weight)
+                            if trigger not in adjustments['trigger_penalties'] or not is_shared:
+                                adjustments['trigger_penalties'][trigger] = penalty
+                        elif wr > 65:
+                            bonus = int(5 * weight)
+                            if trigger not in adjustments['trigger_penalties'] or not is_shared:
+                                adjustments['trigger_penalties'][trigger] = bonus
+
+            elif base_cat == 'news_category':
+                ncat = data.get('news_category', '')
+                wr = data.get('win_rate', 50)
+                total = data.get('total', 0)
+                ev = data.get('expected_value', None)
+                if ncat and total >= min_trades:
+                    if ev is not None:
+                        if ev < -1.0:
+                            penalty = int(-10 * weight)
+                            if ncat not in adjustments['news_category_penalties'] or not is_shared:
+                                adjustments['news_category_penalties'][ncat] = penalty
+                        elif ev > 1.0:
+                            bonus = int(8 * weight)
+                            if ncat not in adjustments['news_category_penalties'] or not is_shared:
+                                adjustments['news_category_penalties'][ncat] = bonus
+                    else:
+                        if wr < 20:
+                            adjustments['news_category_penalties'][ncat] = int(-10 * weight)
+                        elif wr > 65:
+                            adjustments['news_category_penalties'][ncat] = int(8 * weight)
     except Exception:
         pass
+
+    # Compute EV-based adjustments directly from trade_archive (most reliable source)
+    try:
+        cursor2 = conn.cursor()
+        # EV by trigger_type from trade_archive
+        cursor2.execute("""
+            SELECT trigger_type,
+                SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins,
+                SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) as losses,
+                AVG(CASE WHEN result='win' THEN mt5_pnl ELSE NULL END) as avg_win,
+                AVG(CASE WHEN result='loss' THEN mt5_pnl ELSE NULL END) as avg_loss
+            FROM trade_archive WHERE trigger_type != 'mt5_recovered'
+            GROUP BY trigger_type
+        """)
+        for tt, w, l, avg_w, avg_l in cursor2.fetchall():
+            total = w + l
+            if total >= 3:
+                wr = w / total
+                avg_w = avg_w or 0
+                avg_l = avg_l or 0
+                ev = wr * avg_w + (1 - wr) * avg_l  # EV per trade in $
+                if tt not in adjustments['trigger_penalties']:
+                    if ev < -1.0:
+                        adjustments['trigger_penalties'][tt] = -15
+                    elif ev > 1.0:
+                        adjustments['trigger_penalties'][tt] = 5
+
+        # EV by news_category from signal_results
+        if not adjustments['news_category_penalties']:
+            cursor2.execute("""
+                SELECT news_category,
+                    SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) as losses,
+                    AVG(CASE WHEN result='win' THEN pips ELSE NULL END) as avg_win_pips,
+                    AVG(CASE WHEN result='loss' THEN pips ELSE NULL END) as avg_loss_pips
+                FROM signal_results
+                WHERE news_category != '' AND news_category != 'other'
+                  AND result IN ('win', 'loss')
+                GROUP BY news_category
+            """)
+            for nc, w, l, avg_wp, avg_lp in cursor2.fetchall():
+                total = w + l
+                if total >= 3:
+                    wr = w / total
+                    avg_wp = avg_wp or 0
+                    avg_lp = avg_lp or 0
+                    ev_pips = wr * avg_wp + (1 - wr) * avg_lp
+                    if ev_pips < -2.0:
+                        adjustments['news_category_penalties'][nc] = -10
+                    elif ev_pips > 2.0:
+                        adjustments['news_category_penalties'][nc] = 8
+    except Exception:
+        pass
+
     conn.close()
     return adjustments
 

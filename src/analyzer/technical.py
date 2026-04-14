@@ -151,6 +151,10 @@ class TechnicalAnalyzer:
 
     def _compute_indicators(self, candles):
         """Compute RSI, MAs, trend, momentum from candle data."""
+        if not candles or len(candles) < 21:
+            self.logger.warning(f"Not enough candles for indicators: {len(candles) if candles else 0} (need 21+)")
+            return self._fallback_state()
+
         closes = [c['close'] for c in candles]
         current_price = closes[-1]
 
@@ -308,10 +312,11 @@ class TechnicalAnalyzer:
             'source': 'live'
         }
 
-    def detect_structure_signals(self, min_confidence=50):
+    def detect_structure_signals(self, min_confidence=50, htf_bias=None):
         """
         Scan market structure for actionable setups (no news needed).
         min_confidence comes from the user's active profile.
+        htf_bias: 'bullish', 'bearish', or None/neutral from SMC engine.
         Returns list of signal dicts or empty list.
         Each signal: {direction, confidence, reason, setup_type, key_level}
         """
@@ -334,8 +339,8 @@ class TechnicalAnalyzer:
         try:
             from src.common.db import get_setup_win_rates
             setup_win_rates = get_setup_win_rates()
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.debug(f"Setup win rates: {e}")
 
         # Cleanup old triggered levels (every 30 min)
         now = time.time()
@@ -381,11 +386,12 @@ class TechnicalAnalyzer:
             key = f"{round(level, 5)}_{direction}"
             self._triggered_levels[key] = time.time()
 
-        def dynamic_conf(_unused_base, setup_type):
+        def dynamic_conf(_unused_base, setup_type, signal_direction=None):
             """Calculate confidence 100% from market conditions — NO hardcoded bases.
-            Every point of confidence is earned from real market factors."""
+            Every point of confidence is earned from real market factors.
+            signal_direction: 'CALL' or 'PUT' — used for trend/HTF alignment scoring."""
             import random
-            conf = 50  # Neutral starting point for ALL setup types
+            conf = 40  # Conservative starting point — must earn confidence from real factors
 
             # ── 1. Setup-specific market alignment (0 to +20) ──
             if 'breakout' in setup_type or 'breakdown' in setup_type:
@@ -480,7 +486,51 @@ class TechnicalAnalyzer:
             session_info = TechnicalAnalyzer.get_session_info()
             conf += session_info['conf_adj']
 
-            # ── 8. Random jitter to avoid identical values (±3) ──
+            # ── 8. Trend + HTF alignment (±20) — core directional reasoning ──
+            if signal_direction:
+                # Directional scoring: trend + HTF combined (avoid double-counting)
+                is_with_trend = (
+                    (signal_direction == 'CALL' and trend == 'bullish') or
+                    (signal_direction == 'PUT' and trend == 'bearish')
+                )
+                is_against_trend = (
+                    (signal_direction == 'CALL' and trend == 'bearish') or
+                    (signal_direction == 'PUT' and trend == 'bullish')
+                )
+                is_with_htf = htf_bias and (
+                    (signal_direction == 'CALL' and htf_bias == 'bullish') or
+                    (signal_direction == 'PUT' and htf_bias == 'bearish')
+                )
+                is_against_htf = htf_bias and htf_bias != 'neutral' and (
+                    (signal_direction == 'CALL' and htf_bias == 'bearish') or
+                    (signal_direction == 'PUT' and htf_bias == 'bullish')
+                )
+
+                # Apply SINGLE directional adjustment (strongest signal wins, no double-count)
+                if is_with_trend and is_with_htf:
+                    conf += 15  # strong alignment: trend + HTF agree
+                elif is_with_trend or is_with_htf:
+                    conf += 8   # partial alignment
+                elif is_against_trend and is_against_htf:
+                    conf -= 18  # strong counter-trend: both disagree
+                elif is_against_trend or is_against_htf:
+                    conf -= 10  # partial counter-trend
+
+                # Momentum alignment
+                is_with_momentum = (
+                    (signal_direction == 'CALL' and momentum == 'up') or
+                    (signal_direction == 'PUT' and momentum == 'down')
+                )
+                is_against_momentum = (
+                    (signal_direction == 'CALL' and momentum == 'down') or
+                    (signal_direction == 'PUT' and momentum == 'up')
+                )
+                if is_with_momentum:
+                    conf += 5
+                elif is_against_momentum:
+                    conf -= 5
+
+            # ── 9. Random jitter to avoid identical values (±3) ──
             conf += random.randint(-3, 3)
 
             return max(20, min(95, conf))
@@ -530,7 +580,7 @@ class TechnicalAnalyzer:
             candle_confirmed = prev1['close'] > res
             if 0.3 < dist < tuner_params.get('breakout_dist_max', 15) and crossed_above(res) and candle_confirmed:
                 if not already_triggered(res, 'CALL'):
-                    conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakout_resistance')
+                    conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakout_resistance', 'CALL')
                     if trend == 'bullish':
                         conf += 10
                     if momentum == 'up':
@@ -556,7 +606,7 @@ class TechnicalAnalyzer:
             candle_confirmed = prev1['close'] < sup
             if 0.3 < dist < tuner_params.get('breakdown_dist_max', 15) and crossed_below(sup) and candle_confirmed:
                 if not already_triggered(sup, 'PUT'):
-                    conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakdown_support')
+                    conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakdown_support', 'PUT')
                     if trend == 'bearish':
                         conf += 10
                     if momentum == 'down':
@@ -581,7 +631,7 @@ class TechnicalAnalyzer:
             nearest_sup = min(supports, key=lambda s: abs(price - s))
             if abs(price - nearest_sup) * 10000 < rsi_prox:
                 if not already_triggered(nearest_sup, 'RSI_CALL'):
-                    conf = dynamic_conf(tuner_params.get('conf_rsi_reversal', 72), 'rsi_reversal_support')
+                    conf = dynamic_conf(tuner_params.get('conf_rsi_reversal', 72), 'rsi_reversal_support', 'CALL')
                     if trend == 'bullish':
                         conf += 8
                     if prev1['close'] > prev1['open']:  # green candle bonus
@@ -600,7 +650,7 @@ class TechnicalAnalyzer:
             nearest_res = min(resistances, key=lambda r: abs(price - r))
             if abs(price - nearest_res) * 10000 < rsi_prox:
                 if not already_triggered(nearest_res, 'RSI_PUT'):
-                    conf = dynamic_conf(tuner_params.get('conf_rsi_reversal', 72), 'rsi_reversal_resistance')
+                    conf = dynamic_conf(tuner_params.get('conf_rsi_reversal', 72), 'rsi_reversal_resistance', 'PUT')
                     if trend == 'bearish':
                         conf += 8
                     if prev1['close'] < prev1['open']:  # red candle bonus
@@ -626,7 +676,7 @@ class TechnicalAnalyzer:
                 nearest_res = min(resistances, key=lambda r: abs(price - r))
                 if abs(price - nearest_res) * 10000 < bb_sr_prox:
                     if not already_triggered(bb_upper, 'BB_PUT'):
-                        conf = dynamic_conf(tuner_params.get('conf_bb_rejection', 68), 'bb_rejection_upper')
+                        conf = dynamic_conf(tuner_params.get('conf_bb_rejection', 68), 'bb_rejection_upper', 'PUT')
                         if conf >= min_confidence:
                             signals.append({
                                 'direction': 'PUT',
@@ -642,7 +692,7 @@ class TechnicalAnalyzer:
                 nearest_sup = min(supports, key=lambda s: abs(price - s))
                 if abs(price - nearest_sup) * 10000 < bb_sr_prox:
                     if not already_triggered(bb_lower, 'BB_CALL'):
-                        conf = dynamic_conf(tuner_params.get('conf_bb_rejection', 68), 'bb_rejection_lower')
+                        conf = dynamic_conf(tuner_params.get('conf_bb_rejection', 68), 'bb_rejection_lower', 'CALL')
                         if conf >= min_confidence:
                             signals.append({
                                 'direction': 'CALL',
@@ -669,7 +719,7 @@ class TechnicalAnalyzer:
                     direction = 'CALL' if body > 0 else 'PUT'
                     key = round(prev1['close'], 5)
                     if not already_triggered(key, f'MOMENTUM_{direction}'):
-                        conf = dynamic_conf(tuner_params.get('conf_momentum', 72), 'momentum_expansion')
+                        conf = dynamic_conf(tuner_params.get('conf_momentum', 72), 'momentum_expansion', direction)
                         if conf >= min_confidence:
                             signals.append({
                                 'direction': direction,
@@ -690,7 +740,7 @@ class TechnicalAnalyzer:
             # Golden cross: MA9 crosses above MA21
             if prev_ma_fast <= prev_ma_slow and ma_fast > ma_slow:
                 if not already_triggered(ma_fast, 'MA_CALL'):
-                    conf = dynamic_conf(tuner_params.get('conf_ma_crossover', 65), 'ma_crossover_bull')
+                    conf = dynamic_conf(tuner_params.get('conf_ma_crossover', 65), 'ma_crossover_bull', 'CALL')
                     if momentum == 'up':
                         conf += 5
                     if conf >= min_confidence:
@@ -706,7 +756,7 @@ class TechnicalAnalyzer:
             # Death cross: MA9 crosses below MA21
             elif prev_ma_fast >= prev_ma_slow and ma_fast < ma_slow:
                 if not already_triggered(ma_fast, 'MA_PUT'):
-                    conf = dynamic_conf(tuner_params.get('conf_ma_crossover', 65), 'ma_crossover_bear')
+                    conf = dynamic_conf(tuner_params.get('conf_ma_crossover', 65), 'ma_crossover_bear', 'PUT')
                     if momentum == 'down':
                         conf += 5
                     if conf >= min_confidence:
@@ -726,7 +776,7 @@ class TechnicalAnalyzer:
             dist_to_sup = (price - nearest_sup) * 10000
             if 0 < dist_to_sup < tc_prox and has_recent_green:
                 if not already_triggered(nearest_sup, 'TREND_CALL'):
-                    conf = dynamic_conf(tuner_params.get('conf_trend_cont', 62), 'trend_continuation_bull')
+                    conf = dynamic_conf(tuner_params.get('conf_trend_cont', 62), 'trend_continuation_bull', 'CALL')
                     if momentum == 'up':
                         conf += 5
                     if trend_strength == 'strong':
@@ -746,7 +796,7 @@ class TechnicalAnalyzer:
             dist_to_res = (nearest_res - price) * 10000
             if 0 < dist_to_res < tc_prox and has_recent_red:
                 if not already_triggered(nearest_res, 'TREND_PUT'):
-                    conf = dynamic_conf(tuner_params.get('conf_trend_cont', 62), 'trend_continuation_bear')
+                    conf = dynamic_conf(tuner_params.get('conf_trend_cont', 62), 'trend_continuation_bear', 'PUT')
                     if momentum == 'down':
                         conf += 5
                     if trend_strength == 'strong':
@@ -761,49 +811,8 @@ class TechnicalAnalyzer:
                         })
                         mark_triggered(nearest_res, 'TREND_PUT')
 
-        # ── 8. PRICE AT KEY LEVEL: simple proximity to S/R when market is active ──
-        lv_prox = tuner_params.get('level_proximity_pips', 5)
-        avg_range = sum((c['high'] - c['low']) * 10000 for c in recent_candles) / len(recent_candles)
-        if avg_range > 0.5:
-            for sup in supports:
-                dist = abs(price - sup) * 10000
-                if dist < lv_prox:
-                    if not already_triggered(sup, 'LEVEL_CALL'):
-                        conf = dynamic_conf(tuner_params.get('conf_level_bounce', 55), 'level_bounce')
-                        if trend == 'bullish':
-                            conf += 8
-                        if has_recent_green:
-                            conf += 5
-                        if conf >= min_confidence:
-                            signals.append({
-                                'direction': 'CALL',
-                                'confidence': min(conf, 80),
-                                'reason': f"Precio en soporte clave {sup:.5f} (dist {dist:.1f}p). Posible rebote.",
-                                'setup_type': 'level_bounce',
-                                'key_level': sup
-                            })
-                            mark_triggered(sup, 'LEVEL_CALL')
-                        break  # only closest
-
-            for res in resistances:
-                dist = abs(price - res) * 10000
-                if dist < lv_prox:
-                    if not already_triggered(res, 'LEVEL_PUT'):
-                        conf = dynamic_conf(tuner_params.get('conf_level_bounce', 55), 'level_rejection')
-                        if trend == 'bearish':
-                            conf += 8
-                        if has_recent_red:
-                            conf += 5
-                        if conf >= min_confidence:
-                            signals.append({
-                                'direction': 'PUT',
-                                'confidence': min(conf, 80),
-                                'reason': f"Precio en resistencia clave {res:.5f} (dist {dist:.1f}p). Posible rechazo.",
-                                'setup_type': 'level_rejection',
-                                'key_level': res
-                            })
-                            mark_triggered(res, 'LEVEL_PUT')
-                        break
+        # ── 8. PRICE AT KEY LEVEL: DISABLED — 24% WR in 17 trades, worst performing setup ──
+        # level_bounce and level_rejection removed based on statistical evidence
 
         # ── Candlestick pattern confirmation ──
         try:
@@ -828,6 +837,24 @@ class TechnicalAnalyzer:
                 elif pat['direction'] == 'bearish' and sig['direction'] == 'CALL':
                     sig['confidence'] = max(sig['confidence'] - pat['confidence_boost'] // 2, 20)
                     sig['reason'] += f" Precaución: patrón {pat['pattern']} contradice (bajista)."
+
+        # ── Counter-trend filter: require higher confidence when fighting strong trend ──
+        if trend_strength == 'strong' and signals:
+            filtered = []
+            for sig in signals:
+                is_counter = (
+                    (sig['direction'] == 'CALL' and trend == 'bearish') or
+                    (sig['direction'] == 'PUT' and trend == 'bullish')
+                )
+                if is_counter:
+                    if sig['confidence'] >= 75:
+                        sig['reason'] += f" [contra-tendencia fuerte, conf {sig['confidence']} >= 75 OK]"
+                        filtered.append(sig)
+                    else:
+                        self.logger.info(f"Counter-trend filter: blocked {sig['direction']} {sig['setup_type']} conf={sig['confidence']} < 75 (trend={trend} strong)")
+                else:
+                    filtered.append(sig)
+            signals = filtered
 
         if signals:
             self.logger.info(f"Structure scanner: {len(signals)} signals detected")
@@ -1080,87 +1107,76 @@ class TechnicalAnalyzer:
         utc_hour = datetime.now(timezone.utc).hour
         if 7 <= utc_hour < 12:
             return {'session': 'london', 'conf_adj': 8, 'spread_est': 0.6, 'label': 'London'}
-        elif 12 <= utc_hour < 17:
-            return {'session': 'ny_overlap', 'conf_adj': 10, 'spread_est': 0.8, 'label': 'NY Overlap'}
-        elif 17 <= utc_hour < 20:
-            return {'session': 'late_ny', 'conf_adj': 0, 'spread_est': 1.0, 'label': 'Late NY'}
+        elif 12 <= utc_hour < 16:
+            # London/NY overlap — best liquidity for EURUSD
+            return {'session': 'overlap', 'conf_adj': 5, 'spread_est': 0.5, 'label': 'London/NY Overlap'}
+        elif 16 <= utc_hour < 20:
+            return {'session': 'ny', 'conf_adj': -5, 'spread_est': 0.8, 'label': 'NY'}
         else:
             return {'session': 'off_hours', 'conf_adj': -15, 'spread_est': 1.5, 'label': 'Off-hours'}
 
     def compute_adaptive_sl_tp(self, direction, price, market_state, profile):
         """
-        Compute SL/TP adapted to current volatility (ATR-14) and structure levels.
-        - SL: max(profile_sl, ATR * 1.2) -- never tighter than market noise
-        - TP: max(profile_tp, ATR * 2.0) -- minimum 2:1 initial target
-        - Minimum 1.5:1 risk:reward ratio enforced
-        - Caps: SL <= 15 pips, TP <= 30 pips (scalping limits)
+        Compute SL/TP adapted to current volatility via ATR-14.
+        - SL: ATR * 0.8, clamped between profile min and profile * 2.5
+        - TP: maintains profile R:R ratio relative to SL
+        - Falls back to profile values if ATR unavailable
         """
         pip = 0.0001
         prof_sl = profile.get('stop_loss_pips', 5)
-        prof_tp = profile.get('take_profit_pips', 15)
-        atr_pips = market_state.get('avg_range_pips', 5.0)
+        prof_tp = profile.get('take_profit_pips', 25)
         structures = market_state.get('chart_structures', {})
         supports = structures.get('supports', [])
         resistances = structures.get('resistances', [])
 
-        # ATR-adaptive base: SL never tighter than market noise, TP at least 2x ATR
-        atr_sl = max(prof_sl, round(atr_pips * 1.2, 1))
-        atr_tp = max(prof_tp, round(atr_pips * 2.0, 1))
+        # ATR-based SL: use 80% of ATR-14, clamped to profile bounds
+        atr = market_state.get('avg_range_pips', 0)
+        if atr > 0:
+            atr_sl = round(atr * 0.8, 1)
+            sl_min = prof_sl                      # profile SL as floor
+            sl_max = round(prof_sl * 2.5, 1)      # 2.5x profile as ceiling
+            final_sl = max(sl_min, min(sl_max, atr_sl))
+        else:
+            final_sl = prof_sl
 
-        # Clamp SL behind structural level
+        # TP: maintain R:R ratio from profile (e.g. 3.5:15 = 1:4.3)
+        rr_ratio = prof_tp / prof_sl if prof_sl > 0 else 4.0
+        final_tp = round(final_sl * rr_ratio, 1)
+
+        # Optionally place SL behind nearest structural level (can WIDEN, not narrow)
+        sl_max_struct = round(prof_sl * 2.5, 1) if atr > 0 else prof_sl
         if direction == 'CALL' and supports:
-            # Find nearest support BELOW price
             below_sups = [s for s in supports if s < price]
             if below_sups:
-                nearest_sup = max(below_sups)  # closest below
-                structural_sl = (price - nearest_sup) * 10000 + 1.0  # 1 pip beyond
-                atr_sl = max(atr_sl, min(structural_sl, prof_sl * 2.5))  # don't go crazy
+                nearest_sup = max(below_sups)
+                structural_sl = (price - nearest_sup) * 10000 + 1.0
+                if structural_sl > final_sl and structural_sl <= sl_max_struct:
+                    final_sl = round(structural_sl, 1)
+                    final_tp = round(final_sl * rr_ratio, 1)
         elif direction == 'PUT' and resistances:
             above_res = [r for r in resistances if r > price]
             if above_res:
-                nearest_res = min(above_res)  # closest above
-                structural_sl = (nearest_res - price) * 10000 + 1.0
-                atr_sl = max(atr_sl, min(structural_sl, prof_sl * 2.5))
-
-        # Limit TP to nearest opposing level
-        if direction == 'CALL' and resistances:
-            above_res = [r for r in resistances if r > price + 2 * pip]
-            if above_res:
                 nearest_res = min(above_res)
-                level_tp = (nearest_res - price) * 10000 - 0.5  # half pip inside
-                if level_tp > atr_sl * 1.5:  # only if R:R stays good
-                    atr_tp = min(atr_tp, max(level_tp, prof_tp))
-        elif direction == 'PUT' and supports:
-            below_sups = [s for s in supports if s < price - 2 * pip]
-            if below_sups:
-                nearest_sup = max(below_sups)
-                level_tp = (price - nearest_sup) * 10000 - 0.5
-                if level_tp > atr_sl * 1.5:
-                    atr_tp = min(atr_tp, max(level_tp, prof_tp))
+                structural_sl = (nearest_res - price) * 10000 + 1.0
+                if structural_sl > final_sl and structural_sl <= sl_max_struct:
+                    final_sl = round(structural_sl, 1)
+                    final_tp = round(final_sl * rr_ratio, 1)
 
-        # Enforce minimum 1.5:1 R:R
-        if atr_tp < atr_sl * 1.5:
-            atr_tp = atr_sl * 1.5
-
-        # Cap maximum values for scalping
-        atr_sl = min(atr_sl, 15.0)  # max 15 pips SL
-        atr_tp = min(atr_tp, 30.0)  # max 30 pips TP
-
-        method = f'atr({atr_pips:.1f}p)'
+        method = 'atr_adaptive' if atr > 0 else 'profile'
         if supports or resistances:
-            method += '+struct'
+            method += '+struct_sl'
 
         # Calculate actual prices
         if direction == 'CALL':
-            sl = round(price - atr_sl * pip, 5)
-            tp = round(price + atr_tp * pip, 5)
+            sl = round(price - final_sl * pip, 5)
+            tp = round(price + final_tp * pip, 5)
         else:
-            sl = round(price + atr_sl * pip, 5)
-            tp = round(price - atr_tp * pip, 5)
+            sl = round(price + final_sl * pip, 5)
+            tp = round(price - final_tp * pip, 5)
 
         return {
             'sl': sl, 'tp': tp,
-            'sl_pips': round(atr_sl, 1), 'tp_pips': round(atr_tp, 1),
-            'rr_ratio': round(atr_tp / atr_sl, 2) if atr_sl > 0 else 2.0,
+            'sl_pips': round(final_sl, 1), 'tp_pips': round(final_tp, 1),
+            'rr_ratio': round(final_tp / final_sl, 2) if final_sl > 0 else 5.0,
             'method': method
         }

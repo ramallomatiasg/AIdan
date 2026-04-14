@@ -41,6 +41,31 @@ sys.path.insert(0, _APP_DIR)
 DASHBOARD_URL = "http://localhost:8000"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# NEWS CATEGORY CLASSIFIER
+# ─────────────────────────────────────────────────────────────────────────────
+
+_NEWS_CATEGORIES = {
+    'fed_rate': ['fed ', 'federal reserve', 'fomc', 'interest rate', 'rate decision', 'rate hike', 'rate cut', 'powell', 'tasa de interés'],
+    'employment': ['nonfarm', 'non-farm', 'payroll', 'unemployment', 'jobless', 'jobs report', 'employment', 'hiring', 'empleo', 'desempleo'],
+    'inflation': ['cpi', 'ppi', 'pce', 'inflation', 'consumer price', 'producer price', 'core price', 'inflación'],
+    'gdp_growth': ['gdp', 'gross domestic', 'economic growth', 'pib', 'crecimiento'],
+    'central_bank': ['ecb', 'boe', 'boj', 'central bank', 'lagarde', 'banco central', 'monetary policy'],
+    'geopolitical': ['war', 'tariff', 'sanction', 'trade war', 'ceasefire', 'conflict', 'guerra', 'arancel'],
+    'oil_energy': ['oil', 'crude', 'opec', 'energy', 'petróleo', 'gas natural'],
+    'market_sentiment': ['rally', 'crash', 'sell-off', 'selloff', 'risk-on', 'risk-off', 'volatility', 'vix', 'futures'],
+}
+
+def _classify_news_category(title: str) -> str:
+    """Classify a news title into a category for learning."""
+    if not title:
+        return 'other'
+    t = title.lower()
+    for cat, keywords in _NEWS_CATEGORIES.items():
+        if any(kw in t for kw in keywords):
+            return cat
+    return 'other'
+
 # STRATEGY TOAST NOTIFICATION
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -333,6 +358,8 @@ class AIdan:
         self.threads = []
         self.root = None
         self.status_label = None
+        from threading import Lock
+        self._mt5_lock = Lock()
         
     # ── Color palette ──
     BG = '#0a0e14'
@@ -715,6 +742,7 @@ class AIdan:
                                        has_active_opposite_strategy)
             from src.analyzer.news_analyzer import NewsAnalyzer
             from src.analyzer.technical import TechnicalAnalyzer
+            from src.analyzer.llm_auditor import audit_signal, build_signal_context
             
             logger = setup_logging("analyzer", Config.LOG_LEVEL)
             logger.info("Initializing analyzer...")
@@ -741,8 +769,8 @@ class AIdan:
             try:
                 from src.admin.main import set_learning_engine
                 set_learning_engine(learner)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Learning engine API export: {e}")
             logger.info("Analyzer + SMC + AutoTuner + LearningEngine ready")
 
             # Calendar pre-news: track already-traded events across cycles
@@ -750,20 +778,21 @@ class AIdan:
 
             # MT5 Executor initialization
             mt5_exec = None
-            self._mt5_exec = None  # expose for API endpoints
+            self._mt5_exec = None  # expose for API endpoints (protected by _mt5_lock)
             if Config.MT5_ENABLED:
                 try:
                     from src.broker.mt5_executor import MT5Executor
                     mt5_exec = MT5Executor(logger)
                     if mt5_exec.connect():
                         logger.info("MT5 execution enabled")
-                        self._mt5_exec = mt5_exec
+                        with self._mt5_lock:
+                            self._mt5_exec = mt5_exec
                         # Expose to API endpoints
                         try:
                             from src.admin.main import set_mt5_executor
                             set_mt5_executor(mt5_exec)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"MT5 API export: {e}")
                     else:
                         logger.warning("MT5 connection failed - paper mode only")
                         mt5_exec = None
@@ -781,8 +810,8 @@ class AIdan:
                         if utc_now.weekday() == 4 and utc_now.hour == 20 and utc_now.minute >= 50:
                             logger.info(f"MT5 blocked: market closing soon, skipping #{sid}")
                             return None
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"MT5 market-close check: {e}")
                     try:
                         ticket = mt5_exec.open_position(sid, direction, entry_price, sl, tp, confidence)
                         if ticket:
@@ -792,8 +821,8 @@ class AIdan:
                         logger.error(f"MT5 execution error for #{sid}: {e}")
                 return None
 
-            def _apply_learning_adjustments(conf, trigger_type, session=None, direction=None, htf_bias=None):
-                """Apply learning engine confidence adjustments including blocked patterns."""
+            def _apply_learning_adjustments(conf, trigger_type, session=None, direction=None, htf_bias=None, news_title=None):
+                """Apply learning engine confidence adjustments including blocked patterns and news categories."""
                 adj = 0
                 if not _learn_adj:
                     return conf
@@ -804,6 +833,12 @@ class AIdan:
                 if session:
                     sp = _learn_adj.get('session_penalties', {}).get(session, 0)
                     adj += sp
+                # News category penalty/bonus (for news/calendar triggers)
+                ncp = 0
+                if news_title and trigger_type in ('news', 'calendar', 'pre_planned'):
+                    ncat = _classify_news_category(news_title)
+                    ncp = _learn_adj.get('news_category_penalties', {}).get(ncat, 0)
+                    adj += ncp
                 # Blocked pattern penalty: if this exact combo was identified as a loser
                 blocked = _learn_adj.get('blocked_patterns', [])
                 if blocked and direction and session:
@@ -814,7 +849,7 @@ class AIdan:
                         logger.info(f"Learning BLOCKED PATTERN: {pattern_key} → conf -{25}")
                 new_conf = max(5, min(95, conf + adj))
                 if adj != 0:
-                    logger.info(f"Learning adj: {trigger_type} conf {conf}→{new_conf} (trigger={tp}, session={_learn_adj.get('session_penalties', {}).get(session, 0) if session else 0}, pattern={'blocked' if adj <= -25 else 'ok'})")
+                    logger.info(f"Learning adj: {trigger_type} conf {conf}→{new_conf} (trigger={tp}, session={_learn_adj.get('session_penalties', {}).get(session, 0) if session else 0}, news_cat={ncp}, pattern={'blocked' if adj <= -25 else 'ok'})")
                 return new_conf
 
             def _fetch_candles_snapshot(count=30):
@@ -826,16 +861,16 @@ class AIdan:
                             return [{'o': round(c['open'], 5), 'h': round(c['high'], 5),
                                      'l': round(c['low'], 5), 'c': round(c['close'], 5),
                                      't': c['datetime']} for c in raw[-count:]]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Candle snapshot MT5: {e}")
                 try:
                     raw = tech._fetch_candles()
                     if raw:
                         return [{'o': round(c['open'], 5), 'h': round(c['high'], 5),
                                  'l': round(c['low'], 5), 'c': round(c['close'], 5),
                                  't': c['datetime']} for c in raw[-count:]]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Candle snapshot Yahoo: {e}")
                 return None
 
             # ── Startup: expire and evaluate pending strategies from previous session ──
@@ -861,15 +896,17 @@ class AIdan:
                         conf, expiry_min = row[5], row[6]
                         created_at_str, expires_at_str = row[7], row[8]
                         news_title, trigger_type = row[9], row[10]
+                        be_triggered = bool(row[11]) if len(row) > 11 and row[11] else False
                         if not current_price or not entry_price:
                             continue
                         hit_tp, hit_sl, hit_be = False, False, False
-                        # 3-step trailing: divide TP distance into 3 equal steps
+                        # SL/TP fijos — trailing desactivado.
+                        # Solo trackea HWM para learning.
                         tp_distance = abs(tp - entry_price)
-                        step_size = tp_distance / 3.0 if tp_distance > 0 else 0
                         trailing_step = 0
                         effective_sl = sl
-                        if candles and step_size > 0:
+                        _high_water = 0
+                        if candles and tp_distance > 0.00005:
                             from datetime import datetime as dt
                             try:
                                 entry_ts = dt.strptime(str(created_at_str).split('.')[0], '%Y-%m-%d %H:%M:%S')
@@ -888,17 +925,11 @@ class AIdan:
                                         continue
                                     if c_time < entry_ts:
                                         continue
-                                    # Update trailing step based on favorable price movement
                                     if direction == 'CALL':
                                         progress = c['high'] - entry_price
                                     else:
                                         progress = entry_price - c['low']
-                                    if progress >= step_size * 2 and trailing_step < 2:
-                                        trailing_step = 2
-                                        effective_sl = (entry_price + step_size) if direction == 'CALL' else (entry_price - step_size)
-                                    elif progress >= step_size and trailing_step < 1:
-                                        trailing_step = 1
-                                        effective_sl = entry_price  # BE
+                                    _high_water = max(_high_water, progress)
                                     # Check TP/SL hits
                                     if direction == 'CALL':
                                         if c['high'] >= tp:
@@ -920,28 +951,38 @@ class AIdan:
                                             else:
                                                 hit_sl = True
                                             break
+                        # Persist be_triggered flag to DB if detected during candle analysis
+                        if be_triggered:
+                            try:
+                                from src.common.db import mark_be_triggered
+                                mark_be_triggered(sid)
+                            except Exception as e:
+                                logger.debug(f"mark_be_triggered: {e}")
                         pip = 0.0001
                         try:
                             est_spread = tech.get_session_info()['spread_est']
                         except Exception:
-                            est_spread = 1.0
+                            est_spread = 1.0  # safe default
                         if hit_tp:
                             result = 'win'
                             pips_result = abs(tp - entry_price) / pip - est_spread
-                        elif hit_be:
+                        elif hit_be or be_triggered:
+                            # BE flag: trailing SL reached BE — evaluate as break_even
+                            # Calculate actual pips lost to spread for display
+                            if direction == 'CALL':
+                                spread_loss = (current_price - entry_price) / pip
+                            else:
+                                spread_loss = (entry_price - current_price) / pip
                             result = 'break_even'
-                            pips_result = 0.0
+                            pips_result = round(spread_loss, 1)  # show real spread impact
+                            logger.info(f"Strategy #{sid} BE flag: spread cost {pips_result:+.1f}p -> evaluated as BREAK_EVEN")
                         elif hit_sl:
                             result = 'loss'
                             pips_result = -(abs(sl - entry_price) / pip + est_spread)
                         else:
                             pips_result = ((current_price - entry_price) / pip - est_spread) if direction == 'CALL' else ((entry_price - current_price) / pip - est_spread)
                             min_pips = tuner.get_params().get('min_pips_for_win', 1.5)
-                            if be_triggered and pips_result < min_pips:
-                                result = 'break_even'
-                                pips_result = 0.0
-                            else:
-                                result = 'win' if pips_result >= min_pips else 'loss'
+                            result = 'win' if pips_result >= min_pips else 'loss'
                         exit_px = tp if hit_tp else (entry_price if hit_be else (sl if hit_sl else current_price))
                         _setup_type = ''
                         _title_lower = (news_title or '').lower()
@@ -962,8 +1003,34 @@ class AIdan:
                             ctx['avg_range_pips'] = ms.get('avg_range_pips', 0)
                             ctx['htf_bias'] = ctx.get('htf_bias', '')
                             archive_trade(sid, result, exit_px, round(pips_result, 1), ctx)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Archive trade #{sid}: {e}")
+                        # Post-trade analysis in background thread
+                        try:
+                            from src.analyzer.post_trade_analyzer import analyze_closed_trade
+                            from src.common.db import save_post_trade_analysis, save_learning_insight
+                            _pt_data = {
+                                'result': result, 'pips': round(pips_result, 1), 'direction': direction,
+                                'trigger_type': trigger_type or '', 'entry_price': entry_price, 'exit_price': exit_px,
+                                'stop_loss': sl, 'take_profit': tp, 'sl_pips': abs(sl - entry_price) / pip,
+                                'tp_pips': abs(tp - entry_price) / pip, 'session': ctx.get('session', ''),
+                                'rsi': ctx.get('rsi_at_entry', 50), 'trend': ctx.get('market_trend', ''),
+                                'trend_strength': ctx.get('trend_strength', ''), 'htf_bias': ctx.get('htf_bias', ''),
+                                'volatility': ctx.get('volatility', ''), 'news_title': news_title or '',
+                                'confidence': conf, 'duration_min': expiry_min or 15, 'mt5_pnl': 0,
+                            }
+                            def _run_pt(s_id, data, res):
+                                try:
+                                    analysis = analyze_closed_trade(data)
+                                    if analysis:
+                                        save_post_trade_analysis(s_id, analysis, res)
+                                        save_learning_insight('post_trade', analysis.get('key_lesson', ''), data=analysis)
+                                        logger.info(f"Post-trade #{s_id}: {analysis.get('key_lesson', '')}")
+                                except Exception as _e:
+                                    logger.debug(f"Post-trade analysis #{s_id} error: {_e}")
+                            Thread(target=_run_pt, args=(sid, _pt_data, result), daemon=True).start()
+                        except Exception as e:
+                            logger.debug(f"Post-trade thread #{sid}: {e}")
                         logger.info(f"Startup eval #{sid}: {result.upper()} | {direction} entry={entry_price:.5f} exit={exit_px:.5f} | {pips_result:+.1f}p")
                     logger.info(f"Startup: evaluated {len(pending)} pending strategies")
             except Exception as e:
@@ -971,6 +1038,8 @@ class AIdan:
 
             iteration = 0
             _weekend_logged = False
+            _planned_today = False
+            _planned_date = None
             while True:
                 try:
                     iteration += 1
@@ -988,6 +1057,67 @@ class AIdan:
                         continue
                     _weekend_logged = False
 
+                    # ── Pre-plan strategies for tomorrow (20:00-23:00 UTC) ──
+                    try:
+                        _hour_utc = _w_utc.hour
+                        _today_str = _w_utc.strftime('%Y-%m-%d')
+                        if 20 <= _hour_utc <= 23 and (_planned_date != _today_str):
+                            from src.analyzer.pre_planner import plan_next_day_strategies
+                            ms = tech.get_market_state()
+                            _plan_ctx = {
+                                'trend': ms.get('trend', 'unknown'),
+                                'rsi': ms.get('rsi', 50),
+                                'volatility': ms.get('volatility', 'normal'),
+                            }
+                            logger.info(f"Pre-planner: running for {_today_str} (hour UTC={_hour_utc})")
+                            planned_ids = plan_next_day_strategies(_plan_ctx)
+                            _planned_date = _today_str
+                            if planned_ids:
+                                logger.info(f"Pre-planner: created {len(planned_ids)} strategies for tomorrow")
+                            else:
+                                logger.info(f"Pre-planner: no strategies generated (Gemma may have skipped events)")
+                    except Exception as _pe:
+                        logger.warning(f"Pre-planner error: {_pe}", exc_info=True)
+
+                    # ── Activate planned strategies close to event time ──
+                    try:
+                        from src.common.db import activate_due_planned_strategies
+                        activated = activate_due_planned_strategies(minutes_before=5)
+                        if activated:
+                            logger.info(f"Activated {len(activated)} planned strategies: {activated}")
+                            # Update prices for newly activated planned strategies
+                            for _act_id in activated:
+                                try:
+                                    import sqlite3 as _sq3
+                                    _act_price = tech.get_market_state().get('price', 0)
+                                    if _act_price > 0:
+                                        _profile = get_active_profile()
+                                        _sl_p = _profile.get('sl_pips', 5)
+                                        _tp_p = _profile.get('tp_pips', 15)
+                                        _pip = 0.0001
+                                        _conn = _sq3.connect(DB_PATH)
+                                        _cur = _conn.cursor()
+                                        _cur.execute("SELECT direction, confidence FROM auto_strategies WHERE id = ?", (_act_id,))
+                                        _row = _cur.fetchone()
+                                        if _row:
+                                            _dir = _row[0]
+                                            if _dir == 'CALL':
+                                                _sl = _act_price - _sl_p * _pip
+                                                _tp = _act_price + _tp_p * _pip
+                                            else:
+                                                _sl = _act_price + _sl_p * _pip
+                                                _tp = _act_price - _tp_p * _pip
+                                            _cur.execute("""
+                                                UPDATE auto_strategies SET entry_price = ?, stop_loss = ?, take_profit = ?,
+                                                    expires_at = ? WHERE id = ?
+                                            """, (_act_price, _sl, _tp, now_ar() + timedelta(minutes=30), _act_id))
+                                            _conn.commit()
+                                        _conn.close()
+                                except Exception as e:
+                                    logger.debug(f"Planned activation DB: {e}")
+                    except Exception as _ae:
+                        logger.warning(f"Planned activation error: {_ae}", exc_info=True)
+
                     news_items = get_unprocessed_news()
                     
                     alerts_sent = 0
@@ -999,14 +1129,29 @@ class AIdan:
                     try:
                         from src.common.db import get_learning_adjustments
                         _learn_adj = get_learning_adjustments()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Learning adjustments: {e}")
                     # Source conflict resolution: track directions from each source
                     cycle_signals = []  # list of {'source': str, 'direction': str, 'confidence': int}
                     for news_id, url, title, summary, entities, tags in news_items:
                         result = analyzer.analyze(news_id, title, summary, entities, tags)
 
                         if result:
+                            # Freshness check: stale news (>30min) get price=0 so they don't show as "Evaluando"
+                            _use_price = _alert_price
+                            try:
+                                from datetime import datetime as _fdt
+                                _fts = get_news_fetch_time(news_id)
+                                if _fts:
+                                    _ft = _fdt.strptime(str(_fts).split('.')[0].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                                    from datetime import timezone, timedelta as _ftd
+                                    _ar_tz = timezone(_ftd(hours=-3))
+                                    _age = (_fdt.now(_ar_tz).replace(tzinfo=None) - _ft).total_seconds() / 60
+                                    if _age > 30:
+                                        _use_price = 0
+                                        logger.info(f"Stale news #{news_id} ({_age:.0f}min old): alert without price (no eval)")
+                            except Exception as e:
+                                logger.debug(f"Stale news check: {e}")
                             add_alert(news_id, result['impact_score'], result['level'],
                                     result['explanation'], result['eur_usd_impact'],
                                     result['market_implications'],
@@ -1014,7 +1159,7 @@ class AIdan:
                                     result.get('should_operate', False),
                                     result.get('direction', 'NEUTRAL'),
                                     result.get('confidence', 50),
-                                    price_at_alert=_alert_price)
+                                    price_at_alert=_use_price)
                             alerts_sent += 1
 
                         # Auto-strategy: check against active profile (independent of should_alert)
@@ -1038,7 +1183,7 @@ class AIdan:
                                     fetch_ts = get_news_fetch_time(news_id)
                                     is_fresh = True
                                     if fetch_ts:
-                                        fetch_time = dt.strptime(str(fetch_ts).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                                        fetch_time = dt.strptime(str(fetch_ts).split('.')[0].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
                                         from datetime import timezone, timedelta as td
                                         ar_tz = timezone(td(hours=-3))
                                         age_min = (dt.now(ar_tz).replace(tzinfo=None) - fetch_time).total_seconds() / 60
@@ -1067,7 +1212,9 @@ class AIdan:
                                                         logger.info(f"Session filter: skipping news {direction}, outside active sessions (UTC {_n_utc_h}h)")
                                                         price = 0
 
-                                            # HTF bias filter: block news signals against H1 trend
+                                            # HTF bias filter: penalize (not block) news signals against H1 trend
+                                            # High-impact news can reverse trends, so we reduce confidence instead of blocking
+                                            _htf_penalty = 0
                                             if price > 0:
                                                 try:
                                                     _news_htf = None
@@ -1076,10 +1223,10 @@ class AIdan:
                                                         _news_htf = _news_smc_st.get('htf_bias', None)
                                                     if _news_htf and _news_htf != 'neutral':
                                                         if (direction == 'CALL' and _news_htf == 'bearish') or (direction == 'PUT' and _news_htf == 'bullish'):
-                                                            logger.info(f"HTF filter: blocking news {direction} — H1 bias is {_news_htf}")
-                                                            price = 0
-                                                except Exception:
-                                                    pass
+                                                            _htf_penalty = 10  # will reduce confidence later instead of blocking
+                                                            logger.info(f"HTF filter: penalizing news {direction} -10 conf (H1 bias is {_news_htf})")
+                                                except Exception as e:
+                                                    logger.debug(f"HTF filter: {e}")
 
                                             # Dedup: skip if similar news strategy exists recently
                                             if price > 0 and has_recent_similar_strategy(direction, price, 'news', 30):
@@ -1098,11 +1245,11 @@ class AIdan:
                                             expiry_min = max(15, int(adaptive['tp_pips'] / avg_range_pips * 5))
                                             expiry_min = min(expiry_min, 60)  # cap at 60 min
 
-                                            # Spread gate: skip if estimated spread > 25% of SL
+                                            # Spread gate: skip if estimated spread > 50% of SL
                                             session_info = TechnicalAnalyzer.get_session_info()
                                             est_spread = session_info['spread_est']
-                                            if est_spread > adaptive['sl_pips'] * 0.25:
-                                                logger.info(f"Spread gate: skipping news strategy, spread {est_spread:.1f}p > 25% of SL {adaptive['sl_pips']:.1f}p")
+                                            if est_spread > adaptive['sl_pips'] * 0.50:
+                                                logger.info(f"Spread gate: skipping news strategy, spread {est_spread:.1f}p > 50% of SL {adaptive['sl_pips']:.1f}p")
                                             else:
                                                 # Adjust entry price for spread
                                                 half_spread = est_spread / 2
@@ -1126,8 +1273,14 @@ class AIdan:
                                                         logger.info(f"Anti-contradiction: skipping {direction} news, active #{opposite[0]} {opposite[1]}")
                                                     elif row:
                                                         news_snap = _fetch_candles_snapshot(30)
-                                                        _news_session = tech.get_session_info().get('session', '')
-                                                        _news_conf = _apply_learning_adjustments(result.get('confidence', 50), 'news', _news_session, direction=direction)
+                                                        _news_session_info = tech.get_session_info()
+                                                        _news_session = _news_session_info.get('session', '')
+                                                        _news_conf = _apply_learning_adjustments(result.get('confidence', 50), 'news', _news_session, direction=direction, news_title=title)
+                                                        if _htf_penalty > 0:
+                                                            _news_conf = max(10, _news_conf - _htf_penalty)
+                                                        _news_base_conf = prof_min_conf  # min confidence from active profile
+
+                                                        # FAST PATH: create strategy + MT5 order FIRST, audit async
                                                         sid = add_auto_strategy(
                                                             alert_id=row[0], news_title=title,
                                                             direction=direction, entry_price=price,
@@ -1139,8 +1292,40 @@ class AIdan:
                                                         if sid:
                                                             strategies_created += 1
                                                             cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': _news_conf})
-                                                            logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}]")
+                                                            logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}] (audit pending)")
                                                             _try_mt5_execute(sid, direction, price, sl, tp, _news_conf)
+
+                                                            # Gemma 4 audit in background — veto closes position if needed
+                                                            def _async_news_audit(_sid=sid, _dir=direction, _price=price, _conf=_news_conf, _base=_news_base_conf,
+                                                                                  _ms=ms, _adaptive=adaptive, _sess_info=_news_session_info):
+                                                                try:
+                                                                    _actx = build_signal_context(_dir, _price, _ms, _adaptive, _sess_info, _conf, setup_type='news', source='news')
+                                                                    _aud = audit_signal(_actx)
+                                                                    if _aud:
+                                                                        if _aud['agree']:
+                                                                            _new_conf = min(95, _conf + min(_aud['confidence_adjustment'], 10))
+                                                                            logger.info(f"Gemma audit NEWS #{_sid}: AGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_new_conf} | {_aud['reasoning']}")
+                                                                            # Update confidence in DB
+                                                                            import sqlite3 as _sq
+                                                                            _cn = _sq.connect(DB_PATH)
+                                                                            _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_new_conf, _sid))
+                                                                            _cn.commit(); _cn.close()
+                                                                        else:
+                                                                            _new_conf = max(10, _conf + _aud['confidence_adjustment'])
+                                                                            logger.info(f"Gemma audit NEWS #{_sid}: DISAGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_new_conf} | {_aud['reasoning']}")
+                                                                            # Don't close MT5 position — SL/TP handle risk.
+                                                                            # Just record reduced confidence for learning.
+                                                                            import sqlite3 as _sq
+                                                                            _cn = _sq.connect(DB_PATH)
+                                                                            _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_new_conf, _sid))
+                                                                            _cn.commit(); _cn.close()
+                                                                            if _new_conf < _base:
+                                                                                logger.info(f"Gemma low-conf NEWS #{_sid}: conf {_new_conf} < {_base} — keeping open, SL/TP protect")
+                                                                    else:
+                                                                        logger.info(f"Gemma audit NEWS #{_sid}: no response — strategy stands")
+                                                                except Exception as _e:
+                                                                    logger.warning(f"Gemma async audit error for #{_sid}: {_e}")
+                                                            Thread(target=_async_news_audit, daemon=True).start()
                                 except Exception as e:
                                     logger.error(f"Auto-strategy error: {e}")
 
@@ -1166,8 +1351,8 @@ class AIdan:
                         # Reload learning adjustments after tick so strategies use fresh insights
                         try:
                             _learn_adj = get_learning_adjustments()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Refresh learning adj: {e}")
                     except Exception as e:
                         logger.error(f"LearningEngine error: {e}", exc_info=True)
 
@@ -1286,11 +1471,11 @@ class AIdan:
                                         sl = adaptive['sl']
                                         tp = adaptive['tp']
 
-                                        # Spread gate: skip if estimated spread > 25% of SL
+                                        # Spread gate: skip if estimated spread > 50% of SL
                                         session_info = tech.get_session_info()
                                         est_spread = session_info['spread_est']
-                                        if est_spread > adaptive['sl_pips'] * 0.25:
-                                            logger.info(f"Spread gate: skipping calendar {direction}, spread {est_spread:.1f}p > 25% of SL {adaptive['sl_pips']:.1f}p")
+                                        if est_spread > adaptive['sl_pips'] * 0.50:
+                                            logger.info(f"Spread gate: skipping calendar {direction}, spread {est_spread:.1f}p > 50% of SL {adaptive['sl_pips']:.1f}p")
                                             continue
 
                                         # Adjust entry price for spread
@@ -1337,14 +1522,16 @@ class AIdan:
                                             logger.info(f"Anti-contradiction: skipping {direction} calendar, active #{opposite[0]} {opposite[1]}")
                                             continue
 
-                                        _cal_session = tech.get_session_info().get('session', '')
-                                        conf = _apply_learning_adjustments(conf, 'calendar', _cal_session, direction=direction, htf_bias=_cal_htf)
+                                        _cal_session_info = tech.get_session_info()
+                                        _cal_session = _cal_session_info.get('session', '')
+                                        conf = _apply_learning_adjustments(conf, 'calendar', _cal_session, direction=direction, htf_bias=_cal_htf, news_title=evt_name)
 
                                         # Min confidence gate: skip if below profile threshold after all adjustments
                                         if conf < base_conf:
                                             logger.info(f"Min confidence gate: skipping calendar {direction}, conf {conf} < profile min {base_conf}")
                                             continue
 
+                                        # FAST PATH: create strategy + MT5 order FIRST, Gemma audits async
                                         sid = add_auto_strategy(
                                             alert_id=None,
                                             news_title=news_title_cal,
@@ -1361,8 +1548,34 @@ class AIdan:
                                         if sid:
                                             strategies_created += 1
                                             cycle_signals.append({'source': 'calendar', 'direction': direction, 'confidence': conf})
-                                            logger.info(f"Calendar strategy #{sid}: {direction} @ {entry_px:.5f} SL={sl:.5f} TP={tp:.5f} | {evt_name} in {minutes_until:.0f}min")
+                                            logger.info(f"Calendar strategy #{sid}: {direction} @ {entry_px:.5f} SL={sl:.5f} TP={tp:.5f} | {evt_name} in {minutes_until:.0f}min (audit pending)")
                                             _try_mt5_execute(sid, direction, entry_px, sl, tp, conf)
+
+                                            # Gemma 4 audit in background — veto closes position
+                                            def _async_cal_audit(_sid=sid, _dir=direction, _px=entry_px, _conf=conf, _base=base_conf,
+                                                                 _ms=ms, _adaptive=adaptive, _sess=_cal_session_info, _htf=_cal_htf):
+                                                try:
+                                                    _actx = build_signal_context(_dir, _px, _ms, _adaptive, _sess, _conf, setup_type='calendar', source='calendar', htf_bias=_htf)
+                                                    _aud = audit_signal(_actx)
+                                                    if _aud:
+                                                        if _aud['agree']:
+                                                            _nc = min(95, _conf + min(_aud['confidence_adjustment'], 10))
+                                                            logger.info(f"Gemma audit CALENDAR #{_sid}: AGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_nc} | {_aud['reasoning']}")
+                                                            import sqlite3 as _sq
+                                                            _cn = _sq.connect(DB_PATH); _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_nc, _sid)); _cn.commit(); _cn.close()
+                                                        else:
+                                                            _nc = max(10, _conf + _aud['confidence_adjustment'])
+                                                            logger.info(f"Gemma audit CALENDAR #{_sid}: DISAGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_nc} | {_aud['reasoning']}")
+                                                            # Don't close MT5 position — SL/TP handle risk.
+                                                            import sqlite3 as _sq
+                                                            _cn = _sq.connect(DB_PATH); _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_nc, _sid)); _cn.commit(); _cn.close()
+                                                            if _nc < _base:
+                                                                logger.info(f"Gemma low-conf CALENDAR #{_sid}: conf {_nc} < {_base} — keeping open, SL/TP protect")
+                                                    else:
+                                                        logger.info(f"Gemma audit CALENDAR #{_sid}: no response — strategy stands")
+                                                except Exception as _e:
+                                                    logger.warning(f"Gemma async audit error for #{_sid}: {_e}")
+                                            Thread(target=_async_cal_audit, daemon=True).start()
 
                                     # Mark this event as traded so we don't create duplicates next cycle
                                     _traded_calendar_events.add(evt_key)
@@ -1398,9 +1611,18 @@ class AIdan:
                                 logger.info(f"[{iteration}] AutoTuner: outside active sessions (UTC {utc_hour}h), skipping structure scan")
 
                         if not skip_session:
+                            # Get HTF bias BEFORE signal generation so scanner can reason about it
+                            htf_bias = None
+                            try:
+                                if smc:
+                                    smc_status = smc.get_status()
+                                    htf_bias = smc_status.get('htf_bias', None)
+                            except Exception:
+                                htf_bias = None
+
                             structure_signals = tech.detect_structure_signals(
-                                min_confidence=min_conf)
-                            logger.info(f"[{iteration}] Structure signals: {len(structure_signals)}")
+                                min_confidence=min_conf, htf_bias=htf_bias)
+                            logger.info(f"[{iteration}] Structure signals: {len(structure_signals)} (htf_bias={htf_bias})")
 
                             # AutoTuner: block setup types with poor win rates
                             before_block = len(structure_signals)
@@ -1412,23 +1634,6 @@ class AIdan:
 
                             prof_sl = profile.get('stop_loss_pips', 5)
                             prof_tp = profile.get('take_profit_pips', 10)
-
-                            # HTF bias filter: block counter-trend signals when bias is strong
-                            htf_bias = None
-                            try:
-                                if smc:
-                                    smc_status = smc.get_status()
-                                    htf_bias = smc_status.get('htf_bias', None)
-                            except Exception:
-                                htf_bias = None
-
-                            if htf_bias and htf_bias != 'neutral':
-                                blocked_dir = 'CALL' if htf_bias == 'bearish' else 'PUT'
-                                before_count = len(structure_signals)
-                                structure_signals = [s for s in structure_signals if s['direction'] != blocked_dir]
-                                blocked = before_count - len(structure_signals)
-                                if blocked > 0:
-                                    logger.info(f"[{iteration}] HTF bias {htf_bias}: blocked {blocked} {blocked_dir} signal(s)")
 
                             # Consensus: pick SINGLE direction with strongest total confidence
                             call_sigs = [s for s in structure_signals if s['direction'] == 'CALL']
@@ -1461,16 +1666,28 @@ class AIdan:
                                 if price <= 0:
                                     break
 
+                                # Use structure key_level for better entry when available
+                                key_level = sig.get('key_level', 0)
+                                if key_level and key_level > 0:
+                                    # For CALL: prefer lower price (closer to support)
+                                    # For PUT: prefer higher price (closer to resistance)
+                                    if direction == 'CALL' and key_level < price:
+                                        logger.info(f"Structure entry: using key_level {key_level:.5f} instead of market {price:.5f} (better CALL entry)")
+                                        price = key_level
+                                    elif direction == 'PUT' and key_level > price:
+                                        logger.info(f"Structure entry: using key_level {key_level:.5f} instead of market {price:.5f} (better PUT entry)")
+                                        price = key_level
+
                                 # Adaptive SL/TP based on ATR + structure levels
                                 adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
                                 sl = adaptive['sl']
                                 tp = adaptive['tp']
 
-                                # Spread gate: skip if estimated spread > 25% of SL
+                                # Spread gate: skip if estimated spread > 50% of SL
                                 session_info = tech.get_session_info()
                                 est_spread = session_info['spread_est']
-                                if est_spread > adaptive['sl_pips'] * 0.25:
-                                    logger.info(f"Spread gate: skipping structure strategy, spread {est_spread:.1f}p > 25% of SL {adaptive['sl_pips']:.1f}p")
+                                if est_spread > adaptive['sl_pips'] * 0.50:
+                                    logger.info(f"Spread gate: skipping structure strategy, spread {est_spread:.1f}p > 50% of SL {adaptive['sl_pips']:.1f}p")
                                     continue
                                 # Adjust entry price for spread
                                 half_spread = est_spread / 2
@@ -1535,13 +1752,32 @@ class AIdan:
                                     logger.info(f"Anti-contradiction: skipping {direction} structure, active #{opposite[0]} {opposite[1]} (conf={opposite[2]})")
                                     continue
 
-                                _struct_session = tech.get_session_info().get('session', '')
+                                _struct_session_info = tech.get_session_info()
+                                _struct_session = _struct_session_info.get('session', '')
                                 conf = _apply_learning_adjustments(conf, 'structure', _struct_session, direction=direction, htf_bias=htf_bias)
 
                                 # Min confidence gate: skip if below profile threshold after all adjustments
                                 if conf < min_conf:
                                     logger.info(f"Min confidence gate: skipping structure {direction}, conf {conf} < profile min {min_conf}")
                                     continue
+
+                                # Gemma 4 audit
+                                _audit_ctx = build_signal_context(
+                                    direction, price, ms, adaptive, _struct_session_info,
+                                    conf, setup_type=sig.get('setup_type', 'structure'),
+                                    source='structure', htf_bias=htf_bias,
+                                    key_level=sig.get('key_level', 'none'))
+                                _audit = audit_signal(_audit_ctx)
+                                if _audit:
+                                    if _audit['agree']:
+                                        conf = min(95, conf + min(_audit['confidence_adjustment'], 10))
+                                        logger.info(f"Gemma audit STRUCTURE: AGREE | adj={_audit['confidence_adjustment']:+d} -> conf={conf} | {_audit['reasoning']}")
+                                    else:
+                                        conf = max(10, conf + _audit['confidence_adjustment'])
+                                        logger.info(f"Gemma audit STRUCTURE: DISAGREE | adj={_audit['confidence_adjustment']:+d} -> conf={conf} | {_audit['reasoning']}")
+                                        if conf < min_conf:
+                                            logger.info(f"Gemma vetoed structure signal: conf {conf} < {min_conf}")
+                                            continue
 
                                 sid = add_auto_strategy(
                                     alert_id=None,
@@ -1606,11 +1842,11 @@ class AIdan:
                             sl = adaptive['sl']
                             tp = adaptive['tp']
 
-                            # Spread gate: skip if estimated spread > 25% of SL
+                            # Spread gate: skip if estimated spread > 50% of SL
                             session_info = tech.get_session_info()
                             est_spread = session_info['spread_est']
-                            if est_spread > adaptive['sl_pips'] * 0.25:
-                                logger.info(f"Spread gate: skipping SMC strategy, spread {est_spread:.1f}p > 25% of SL {adaptive['sl_pips']:.1f}p")
+                            if est_spread > adaptive['sl_pips'] * 0.50:
+                                logger.info(f"Spread gate: skipping SMC strategy, spread {est_spread:.1f}p > 50% of SL {adaptive['sl_pips']:.1f}p")
                                 continue
                             # Adjust entry price for spread
                             half_spread = est_spread / 2
@@ -1631,8 +1867,8 @@ class AIdan:
                                 smc_wr = get_setup_win_rates().get(setup.get('setup_type', 'smc'), {})
                                 if smc_wr.get('total', 0) >= 3:
                                     smc_impact = int(30 + smc_wr['win_rate'] * 0.7)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"SMC win rate lookup: {e}")
 
                             # Source conflict resolution: adjust conf based on agreement/conflict with prior signals
                             for prior in cycle_signals:
@@ -1651,8 +1887,8 @@ class AIdan:
                                     if (direction == 'CALL' and smc_htf == 'bearish') or (direction == 'PUT' and smc_htf == 'bullish'):
                                         logger.info(f"HTF filter: blocking SMC {direction} — H1 bias is {smc_htf}")
                                         continue
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"SMC HTF filter: {e}")
 
                             # Dedup: skip if similar SMC strategy exists
                             if has_recent_similar_strategy(direction, price, 'smc', 30):
@@ -1666,9 +1902,29 @@ class AIdan:
                                 continue
 
                             smc_snap = _fetch_candles_snapshot(30)
-                            _smc_session = tech.get_session_info().get('session', '')
+                            _smc_session_info = tech.get_session_info()
+                            _smc_session = _smc_session_info.get('session', '')
                             _smc_htf_val = setup.get('htf_bias') or (smc_status.get('htf_bias') if 'smc_status' in dir() and smc_status else None)
                             conf = _apply_learning_adjustments(conf, 'smc', _smc_session, direction=direction, htf_bias=_smc_htf_val)
+
+                            # Gemma 4 audit
+                            _audit_ctx = build_signal_context(
+                                direction, price, ms, adaptive, _smc_session_info,
+                                conf, setup_type=setup.get('setup_type', 'smc'),
+                                source='smc', htf_bias=_smc_htf_val,
+                                key_level=setup.get('key_level', 'none'))
+                            _audit = audit_signal(_audit_ctx)
+                            if _audit:
+                                if _audit['agree']:
+                                    conf = min(95, conf + min(_audit['confidence_adjustment'], 10))
+                                    logger.info(f"Gemma audit SMC: AGREE | adj={_audit['confidence_adjustment']:+d} -> conf={conf} | {_audit['reasoning']}")
+                                else:
+                                    conf = max(10, conf + _audit['confidence_adjustment'])
+                                    logger.info(f"Gemma audit SMC: DISAGREE | adj={_audit['confidence_adjustment']:+d} -> conf={conf} | {_audit['reasoning']}")
+                                    if conf < min_conf:
+                                        logger.info(f"Gemma vetoed SMC signal: conf {conf} < {min_conf}")
+                                        continue
+
                             sid = add_auto_strategy(
                                 alert_id=None,
                                 news_title=f"[SMC] {setup['reason'][:80]}",
@@ -1701,8 +1957,8 @@ class AIdan:
                             """, (now_ar(),))
                             _conn.commit()
                             _conn.close()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Expire old strategies: {e}")
                         pending = get_strategies_pending_evaluation()
                         if pending:
                             candles = tech._fetch_candles()
@@ -1713,6 +1969,7 @@ class AIdan:
                                 conf, expiry_min = row[5], row[6]
                                 created_at_str, expires_at_str = row[7], row[8]
                                 news_title, trigger_type = row[9], row[10]
+                                be_triggered = bool(row[11]) if len(row) > 11 and row[11] else False
 
                                 if not current_price or not entry_price:
                                     continue
@@ -1721,13 +1978,13 @@ class AIdan:
                                 hit_tp = False
                                 hit_sl = False
                                 hit_be = False
-                                # 3-step trailing: divide TP distance into 3 equal steps
+                                # SL/TP fijos — trailing desactivado. Solo trackea HWM.
                                 tp_distance = abs(tp - entry_price)
-                                step_size = tp_distance / 3.0 if tp_distance > 0 else 0
                                 trailing_step = 0
                                 effective_sl = sl
+                                _high_water = 0
 
-                                if candles and step_size > 0:
+                                if candles and tp_distance > 0.00005:
                                     from datetime import datetime as dt
                                     try:
                                         entry_ts = dt.strptime(str(created_at_str).split('.')[0], '%Y-%m-%d %H:%M:%S')
@@ -1749,18 +2006,11 @@ class AIdan:
                                             if c_time < entry_ts:
                                                 continue
 
-                                            # Update trailing step based on favorable price movement
                                             if direction == 'CALL':
                                                 progress = c['high'] - entry_price
                                             else:
                                                 progress = entry_price - c['low']
-
-                                            if progress >= step_size * 2 and trailing_step < 2:
-                                                trailing_step = 2
-                                                effective_sl = (entry_price + step_size) if direction == 'CALL' else (entry_price - step_size)
-                                            elif progress >= step_size and trailing_step < 1:
-                                                trailing_step = 1
-                                                effective_sl = entry_price  # BE
+                                            _high_water = max(_high_water, progress)
 
                                             # Check TP/SL hits
                                             if direction == 'CALL':
@@ -1784,6 +2034,14 @@ class AIdan:
                                                         hit_sl = True
                                                     break
 
+                                # Persist be_triggered flag to DB if detected during candle analysis
+                                if be_triggered:
+                                    try:
+                                        from src.common.db import mark_be_triggered
+                                        mark_be_triggered(sid)
+                                    except Exception as e:
+                                        logger.debug(f"mark_be_triggered eval: {e}")
+
                                 # Determine result (accounting for estimated spread)
                                 pip = 0.0001
                                 try:
@@ -1795,9 +2053,15 @@ class AIdan:
                                 if hit_tp:
                                     result = 'win'
                                     pips_result = abs(tp - entry_price) / pip - est_spread
-                                elif hit_be:
+                                elif hit_be or be_triggered:
+                                    # BE flag: trailing SL reached BE — evaluate as break_even
+                                    if direction == 'CALL':
+                                        spread_loss = (current_price - entry_price) / pip
+                                    else:
+                                        spread_loss = (entry_price - current_price) / pip
                                     result = 'break_even'
-                                    pips_result = 0.0
+                                    pips_result = round(spread_loss, 1)
+                                    logger.info(f"Strategy #{sid} BE flag: spread cost {pips_result:+.1f}p -> evaluated as BREAK_EVEN")
                                 elif hit_sl:
                                     result = 'loss'
                                     pips_result = -(abs(sl - entry_price) / pip + est_spread)
@@ -1807,13 +2071,8 @@ class AIdan:
                                         pips_result = (current_price - entry_price) / pip - est_spread
                                     else:
                                         pips_result = (entry_price - current_price) / pip - est_spread
-                                    # AutoTuner: require minimum pip movement to count as win
                                     min_pips = tuner.get_params().get('min_pips_for_win', 1.5)
-                                    if be_triggered and pips_result < min_pips:
-                                        result = 'break_even'
-                                        pips_result = 0.0
-                                    else:
-                                        result = 'win' if pips_result >= min_pips else 'loss'
+                                    result = 'win' if pips_result >= min_pips else 'loss'
 
                                 exit_px = tp if hit_tp else (entry_price if hit_be else (sl if hit_sl else current_price))
 
@@ -1849,12 +2108,17 @@ class AIdan:
                                         # Use MT5 ground truth: real P&L -> pips
                                         lot = mt5_data['lot'] or 0.1
                                         pips_result = round(mt5_data['pnl'] / (lot * 10), 1)
-                                        result = 'win' if mt5_data['pnl'] > 0 else 'loss'
+                                        # BE flag overrides: if SL was at BE, it's break_even regardless of spread loss
+                                        if be_triggered and mt5_data['pnl'] <= 0:
+                                            result = 'break_even'
+                                            logger.info(f"Strategy #{sid} BE flag + MT5 P&L ${mt5_data['pnl']:.2f} ({pips_result:+.1f}p spread cost) -> BREAK_EVEN")
+                                        else:
+                                            result = 'win' if mt5_data['pnl'] > 0 else 'loss'
                                         exit_px = mt5_data['close_price'] or exit_px
                                         logger.info(f"Strategy #{sid} using MT5 P&L: ${mt5_data['pnl']:.2f} = {pips_result:+.1f}p -> {result}")
                                         mt5_closed_price = None  # skip next block
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug(f"MT5 P&L lookup #{sid}: {e}")
 
                                 # Fallback: if MT5 just closed, use close price (no spread deduction)
                                 if mt5_closed_price and isinstance(mt5_closed_price, (int, float)) and mt5_closed_price > 0:
@@ -1863,7 +2127,12 @@ class AIdan:
                                         pips_result = (exit_px - entry_price) / pip
                                     else:
                                         pips_result = (entry_price - exit_px) / pip
-                                    result = 'win' if pips_result > 0 else 'loss'
+                                    # BE flag overrides: if SL was at BE, it's break_even
+                                    if be_triggered and pips_result <= 0:
+                                        result = 'break_even'
+                                        logger.info(f"Strategy #{sid} BE flag + close price: {pips_result:+.1f}p spread cost -> BREAK_EVEN")
+                                    else:
+                                        result = 'win' if pips_result > 0 else 'loss'
 
                                 auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
                                 try:
@@ -1874,8 +2143,41 @@ class AIdan:
                                     ctx['avg_range_pips'] = ms.get('avg_range_pips', 0)
                                     ctx['htf_bias'] = ctx.get('htf_bias', '')
                                     archive_trade(sid, result, exit_px, round(pips_result, 1), ctx)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.warning(f"Archive trade eval #{sid}: {e}")
+                                # Post-trade analysis in background thread
+                                try:
+                                    from src.analyzer.post_trade_analyzer import analyze_closed_trade
+                                    from src.common.db import save_post_trade_analysis, save_learning_insight
+                                    _mt5_pnl_val = 0
+                                    try:
+                                        _mt5d = get_mt5_pnl_for_strategy(sid)
+                                        if _mt5d and _mt5d.get('pnl') is not None:
+                                            _mt5_pnl_val = _mt5d['pnl']
+                                    except Exception as e:
+                                        logger.debug(f"MT5 P&L for post-trade: {e}")
+                                    _pt_data = {
+                                        'result': result, 'pips': round(pips_result, 1), 'direction': direction,
+                                        'trigger_type': trigger_type or '', 'entry_price': entry_price, 'exit_price': exit_px,
+                                        'stop_loss': sl, 'take_profit': tp, 'sl_pips': abs(sl - entry_price) / pip,
+                                        'tp_pips': abs(tp - entry_price) / pip, 'session': ctx.get('session', ''),
+                                        'rsi': ctx.get('rsi_at_entry', 50), 'trend': ctx.get('market_trend', ''),
+                                        'trend_strength': ctx.get('trend_strength', ''), 'htf_bias': ctx.get('htf_bias', ''),
+                                        'volatility': ctx.get('volatility', ''), 'news_title': news_title or '',
+                                        'confidence': conf, 'duration_min': expiry_min or 15, 'mt5_pnl': _mt5_pnl_val,
+                                    }
+                                    def _run_pt_eval(s_id, data, res):
+                                        try:
+                                            analysis = analyze_closed_trade(data)
+                                            if analysis:
+                                                save_post_trade_analysis(s_id, analysis, res)
+                                                save_learning_insight('post_trade', analysis.get('key_lesson', ''), data=analysis)
+                                                logger.info(f"Post-trade #{s_id}: {analysis.get('key_lesson', '')}")
+                                        except Exception as _e:
+                                            logger.debug(f"Post-trade analysis #{s_id} error: {_e}")
+                                    Thread(target=_run_pt_eval, args=(sid, _pt_data, result), daemon=True).start()
+                                except Exception as e:
+                                    logger.debug(f"Post-trade thread eval: {e}")
 
                                 method = 'TP hit' if hit_tp else ('BE hit' if hit_be else ('SL hit' if hit_sl else f'price eval {current_price:.5f}'))
                                 logger.info(f"Auto-eval #{sid}: {result.upper()} | {direction} entry={entry_price:.5f} exit={exit_px:.5f} | {pips_result:+.1f}p | {method}")
@@ -1921,6 +2223,7 @@ class AIdan:
                                         'trigger_type': 'news',
                                         'market_trend': tech.get_market_state().get('trend', ''),
                                         'rsi_at_entry': tech.get_market_state().get('rsi', 0),
+                                        'news_category': _classify_news_category(a_title),
                                     })
                                     logger.info(f"Alert eval #{aid}: {a_result.upper()} | {a_dir} entry={a_entry:.5f} exit={current_price:.5f} | {pips_move:+.1f}p | {a_title[:50]}")
                                 logger.info(f"Evaluated {len(pending_alerts)} pending news alerts")
@@ -1934,10 +2237,11 @@ class AIdan:
                             api_mt5 = _get_mt5()
                             if api_mt5 and api_mt5.connected:
                                 mt5_exec = api_mt5
-                                self._mt5_exec = mt5_exec
+                                with self._mt5_lock:
+                                    self._mt5_exec = mt5_exec
                                 logger.info("MT5 adopted from dashboard connection")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"MT5 dashboard adopt: {e}")
 
                     # ── MT5: reconnect if disconnected ──
                     if mt5_exec and not mt5_exec.connected:
@@ -1948,8 +2252,8 @@ class AIdan:
                                 try:
                                     from src.admin.main import set_mt5_executor
                                     set_mt5_executor(mt5_exec)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug(f"MT5 reconnect API export: {e}")
                             else:
                                 logger.debug("MT5 reconnect failed, will retry next cycle")
                         except Exception as e:
@@ -1960,12 +2264,13 @@ class AIdan:
                             mt5_exec = MT5Executor(logger)
                             if mt5_exec.connect():
                                 logger.info("MT5 late-connect succeeded")
-                                self._mt5_exec = mt5_exec
+                                with self._mt5_lock:
+                                    self._mt5_exec = mt5_exec
                                 try:
                                     from src.admin.main import set_mt5_executor
                                     set_mt5_executor(mt5_exec)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.debug(f"MT5 late-connect API export: {e}")
                             else:
                                 mt5_exec = None
                         except Exception as e:
@@ -1990,49 +2295,7 @@ class AIdan:
                         except Exception as e:
                             logger.error(f"MT5 retry execution error: {e}")
 
-                    # ── MT5: stepped trailing stop-loss ──
-                    if mt5_exec and mt5_exec.is_ready():
-                        try:
-                            from src.common.db import get_strategies_with_open_mt5, update_mt5_trailing_step
-                            open_mt5 = get_strategies_with_open_mt5()
-                            for row in open_mt5:
-                                sid, ticket, direction = row[0], row[1], row[2]
-                                entry_price, sl, tp = row[3], row[4], row[5]
-                                current_step = row[9] if len(row) > 9 else 0
-
-                                tp_distance = abs(tp - entry_price)
-                                if tp_distance < 0.00005:  # skip if TP too close
-                                    continue
-                                step_size = tp_distance / 3.0
-
-                                tick = mt5_exec.get_tick()
-                                if not tick:
-                                    continue
-                                current_price = tick['bid'] if direction == 'CALL' else tick['ask']
-
-                                if direction == 'CALL':
-                                    progress = current_price - entry_price
-                                else:
-                                    progress = entry_price - current_price
-
-                                reached_step = 0
-                                if progress >= step_size * 2:
-                                    reached_step = 2
-                                elif progress >= step_size:
-                                    reached_step = 1
-
-                                if reached_step > (current_step or 0):
-                                    if direction == 'CALL':
-                                        new_sl = entry_price if reached_step == 1 else entry_price + step_size
-                                    else:
-                                        new_sl = entry_price if reached_step == 1 else entry_price - step_size
-
-                                    success = mt5_exec.modify_position_sl(ticket, new_sl)
-                                    if success:
-                                        update_mt5_trailing_step(sid, reached_step)
-                                        logger.info(f"Trailing SL: #{ticket} strategy #{sid} step {current_step}->{reached_step} SL->{new_sl:.5f} (progress {progress/0.0001:+.1f}p)")
-                        except Exception as e:
-                            logger.error(f"MT5 trailing SL error: {e}")
+                    # ── MT5 trailing SL: handled by dedicated 1s thread (run_trailing_monitor) ──
 
                     # ── MT5: close positions for evaluated strategies ──
                     if mt5_exec and mt5_exec.is_ready():
@@ -2118,8 +2381,112 @@ class AIdan:
             traceback.print_exc()
             self.log(f"Error API: {e}", "red")
     
+    def run_trailing_monitor(self):
+        """Dedicated thread: scan MT5 positions every 1s for trailing SL.
+        Hybrid stepped + dynamic trail algorithm."""
+        import time as _time
+        import logging
+        _logger = logging.getLogger("analyzer")
+        _logger.info("Trailing monitor started (1s interval)")
+
+        # Trailing DISABLED — SL/TP fijos.
+        # Analysis of 69 trades showed trailing destroys R:R (avg win $2.5 vs avg loss $3.2).
+        # Without trailing: 29% WR * 3.4:1 R:R = +$80 vs trailing's -$50.
+        # Thread still runs for: sync_pending_orders + HWM tracking for learning.
+        TRAILING_ENABLED = False
+        BE_TRIGGER = 0.35
+        TRAIL_PIPS = 4.0
+        TRAIL_DIST = TRAIL_PIPS * 0.0001
+        MIN_SL_MOVE = 0.00003
+
+        while True:
+            try:
+                with self._mt5_lock:
+                    mt5 = self._mt5_exec
+                if not mt5 or not mt5.is_ready():
+                    _time.sleep(2)
+                    continue
+
+                # Sync pending limit orders (detect fills/expirations)
+                try:
+                    mt5.sync_pending_orders()
+                except Exception as e:
+                    _logger.debug(f"Sync pending orders: {e}")
+
+                from src.common.db import get_strategies_with_open_mt5, update_mt5_trailing_data
+                open_mt5 = get_strategies_with_open_mt5()
+                if not open_mt5:
+                    _time.sleep(1)
+                    continue
+
+                tick = mt5.get_tick()
+                if not tick:
+                    _time.sleep(1)
+                    continue
+
+                for row in open_mt5:
+                    sid, ticket, direction = row[0], row[1], row[2]
+                    entry_price, sl, tp = row[3], row[4], row[5]
+                    current_step = row[9] if len(row) > 9 else 0
+                    fill_price = row[10] if len(row) > 10 and row[10] else entry_price
+                    stored_hwm = row[11] if len(row) > 11 else None
+
+                    tp_distance = abs(tp - fill_price)
+                    if tp_distance < 0.00005:
+                        continue
+
+                    current_price = tick['bid'] if direction == 'CALL' else tick['ask']
+
+                    # Progress from fill price
+                    progress = (current_price - fill_price) if direction == 'CALL' else (fill_price - current_price)
+
+                    # Update high-water mark (best price reached)
+                    high_water = max(stored_hwm or 0, progress)
+
+                    # Continuous trailing: once price reaches BE_TRIGGER, SL follows HWM - TRAIL_DIST
+                    be_threshold = tp_distance * BE_TRIGGER
+                    trailing_active = high_water >= be_threshold
+
+                    new_sl = None
+                    new_step = current_step or 0
+
+                    if TRAILING_ENABLED and trailing_active:
+                        new_step = max(new_step, 1)
+                        _spread_buf = 0.00015
+                        if direction == 'CALL':
+                            trail_sl = fill_price + high_water - TRAIL_DIST
+                            floor_sl = fill_price + _spread_buf
+                            candidate = max(trail_sl, floor_sl)
+                            if candidate > sl + MIN_SL_MOVE:
+                                new_sl = round(candidate, 5)
+                        else:
+                            trail_sl = fill_price - high_water + TRAIL_DIST
+                            floor_sl = fill_price - _spread_buf
+                            candidate = min(trail_sl, floor_sl)
+                            if candidate < sl - MIN_SL_MOVE:
+                                new_sl = round(candidate, 5)
+
+                    # Execute SL modification (only if trailing enabled)
+                    if new_sl is not None:
+                        success = mt5.modify_position_sl(ticket, new_sl)
+                        if success:
+                            locked_pips = (new_sl - fill_price) / 0.0001 if direction == 'CALL' else (fill_price - new_sl) / 0.0001
+                            update_mt5_trailing_data(sid, new_step, high_water)
+                            _logger.info(
+                                f"Trailing: #{ticket} strat#{sid} SL->{new_sl:.5f} "
+                                f"(lock={locked_pips:+.1f}p hwm={high_water/0.0001:+.1f}p "
+                                f"progress={progress/0.0001:+.1f}p trail={TRAIL_PIPS}p)")
+                    elif high_water != (stored_hwm or 0) and high_water > 0:
+                        # Always track HWM for learning even with trailing disabled
+                        update_mt5_trailing_data(sid, new_step, high_water)
+
+            except Exception as e:
+                _logger.error(f"Trailing monitor error: {e}")
+
+            _time.sleep(1)
+
     def start_services(self):
-        """Iniciar los 3 servicios como threads"""
+        """Iniciar los 4 servicios como threads"""
         self.log("🚀 Iniciando servicios integrados...", "blue")
         
         # Collector thread
@@ -2142,7 +2509,12 @@ class AIdan:
         api_thread.start()
         self.threads.append(api_thread)
         time.sleep(3)
-        
+
+        # Trailing monitor thread (1s interval)
+        trailing_thread = Thread(target=self.run_trailing_monitor, daemon=True)
+        trailing_thread.start()
+        self.threads.append(trailing_thread)
+
         return True
     
     def open_dashboard(self):

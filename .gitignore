@@ -68,8 +68,15 @@ AIdan_Portable.zip
 # Temporal
 check_db.py
 tmp_alerts.json
+backfill_gemma.py
 .coverage
 .pytest_cache/
+
+# Claude Code
+.claude/
+
+# Ejecutable compilado
+AIdan.exe
 
 # Archivos obsoletos
 about.html
