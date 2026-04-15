@@ -607,11 +607,26 @@ class MT5Executor:
                     if 'CALENDARIO' in _nt: _tt = 'calendar'
                     elif 'SMC' in _nt: _tt = 'smc'
                     elif 'NOTICIA' in _nt: _tt = 'news'
+                # Get current market state for trend context
+                _mt5_trend = ''
+                _mt5_trend_str = ''
+                _mt5_htf = ''
+                try:
+                    from src.analyzer.technical import TechnicalAnalyzer
+                    _t = TechnicalAnalyzer(self.logger)
+                    _ms = _t.get_market_state()
+                    _mt5_trend = _ms.get('trend', '')
+                    _mt5_trend_str = _ms.get('trend_strength', '')
+                except Exception:
+                    pass
                 ctx = {
                     'entry_price': entry_price,
                     'direction': direction,
                     'trigger_type': _tt,
                     'auto_evaluated': True,
+                    'market_trend': _mt5_trend,
+                    'trend_strength': _mt5_trend_str,
+                    'htf_bias': _mt5_htf,
                 }
                 auto_evaluate_strategy(sid, result, close_price, pips_result, ctx)
                 self.logger.info(f"MT5 instant eval: #{sid} {result.upper()} {pips_result:+.1f}p (P&L ${pnl:.2f})")

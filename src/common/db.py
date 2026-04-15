@@ -798,24 +798,27 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
             cursor.execute("""
                 SELECT id, direction, entry_price, stop_loss, take_profit, confidence,
                        impact_score, trigger_type, news_title, profile_name, created_at,
-                       mt5_pnl, mt5_close_price, mt5_status, status
+                       mt5_pnl, mt5_close_price, mt5_status, status, mt5_fill_price
                 FROM auto_strategies ORDER BY created_at ASC LIMIT ?
             """, (to_delete,))
             for old_row in cursor.fetchall():
                 old_id, old_dir, old_entry, old_sl, old_tp, old_conf, old_impact, \
                     old_trigger, old_title, old_profile, old_created, old_mt5_pnl, \
-                    old_close, old_mt5_status, old_status = old_row
+                    old_close, old_mt5_status, old_status, old_fill = old_row
                 if old_mt5_status == 'closed' and old_close:
                     pip = 0.0001
+                    # Use fill_price (actual MT5 execution) for pip calculations, fallback to entry_price
+                    old_ref = old_fill if old_fill else old_entry
                     if old_dir == 'CALL':
-                        old_pips = round((old_close - old_entry) / pip, 1) if old_entry else 0
-                        old_sl_pips = round((old_entry - old_sl) / pip, 1) if old_sl else 0
-                        old_tp_pips = round((old_tp - old_entry) / pip, 1) if old_tp else 0
+                        old_pips = round((old_close - old_ref) / pip, 1) if old_ref else 0
+                        old_sl_pips = round((old_ref - old_sl) / pip, 1) if old_sl else 0
+                        old_tp_pips = round((old_tp - old_ref) / pip, 1) if old_tp else 0
                     else:
-                        old_pips = round((old_entry - old_close) / pip, 1) if old_entry else 0
-                        old_sl_pips = round((old_sl - old_entry) / pip, 1) if old_sl else 0
-                        old_tp_pips = round((old_entry - old_tp) / pip, 1) if old_tp else 0
-                    old_result = 'win' if old_pips > 0 else 'loss'
+                        old_pips = round((old_ref - old_close) / pip, 1) if old_ref else 0
+                        old_sl_pips = round((old_sl - old_ref) / pip, 1) if old_sl else 0
+                        old_tp_pips = round((old_ref - old_tp) / pip, 1) if old_tp else 0
+                    # Use MT5 P&L as ground truth when available (entry_price != fill_price causes mismatches)
+                    old_result = 'win' if (old_mt5_pnl or old_pips) > 0 else 'loss'
                     sl_hit = 1 if old_result == 'loss' else 0
                     tp_hit = 1 if old_result == 'win' else 0
                     # Check not already archived

@@ -1280,52 +1280,56 @@ class AIdan:
                                                             _news_conf = max(10, _news_conf - _htf_penalty)
                                                         _news_base_conf = prof_min_conf  # min confidence from active profile
 
-                                                        # FAST PATH: create strategy + MT5 order FIRST, audit async
-                                                        sid = add_auto_strategy(
-                                                            alert_id=row[0], news_title=title,
-                                                            direction=direction, entry_price=price,
-                                                            stop_loss=sl, take_profit=tp,
-                                                            confidence=_news_conf,
-                                                            impact_score=result['impact_score'],
-                                                            candles_snapshot=news_snap,
-                                                            expiry_minutes=expiry_min)
-                                                        if sid:
-                                                            strategies_created += 1
-                                                            cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': _news_conf})
-                                                            logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}] (audit pending)")
-                                                            _try_mt5_execute(sid, direction, price, sl, tp, _news_conf)
+                                                        # Min confidence gate: skip if below profile threshold after learning adjustments
+                                                        if _news_conf < prof_min_conf:
+                                                            logger.info(f"Min confidence gate: skipping news {direction}, conf {_news_conf} < profile min {prof_min_conf}")
+                                                        else:
+                                                            # FAST PATH: create strategy + MT5 order FIRST, audit async
+                                                            sid = add_auto_strategy(
+                                                                alert_id=row[0], news_title=title,
+                                                                direction=direction, entry_price=price,
+                                                                stop_loss=sl, take_profit=tp,
+                                                                confidence=_news_conf,
+                                                                impact_score=result['impact_score'],
+                                                                candles_snapshot=news_snap,
+                                                                expiry_minutes=expiry_min)
+                                                            if sid:
+                                                                strategies_created += 1
+                                                                cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': _news_conf})
+                                                                logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}] (audit pending)")
+                                                                _try_mt5_execute(sid, direction, price, sl, tp, _news_conf)
 
-                                                            # Gemma 4 audit in background — veto closes position if needed
-                                                            def _async_news_audit(_sid=sid, _dir=direction, _price=price, _conf=_news_conf, _base=_news_base_conf,
-                                                                                  _ms=ms, _adaptive=adaptive, _sess_info=_news_session_info):
-                                                                try:
-                                                                    _actx = build_signal_context(_dir, _price, _ms, _adaptive, _sess_info, _conf, setup_type='news', source='news')
-                                                                    _aud = audit_signal(_actx)
-                                                                    if _aud:
-                                                                        if _aud['agree']:
-                                                                            _new_conf = min(95, _conf + min(_aud['confidence_adjustment'], 10))
-                                                                            logger.info(f"Gemma audit NEWS #{_sid}: AGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_new_conf} | {_aud['reasoning']}")
-                                                                            # Update confidence in DB
-                                                                            import sqlite3 as _sq
-                                                                            _cn = _sq.connect(DB_PATH)
-                                                                            _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_new_conf, _sid))
-                                                                            _cn.commit(); _cn.close()
+                                                                # Gemma 4 audit in background — veto closes position if needed
+                                                                def _async_news_audit(_sid=sid, _dir=direction, _price=price, _conf=_news_conf, _base=_news_base_conf,
+                                                                                      _ms=ms, _adaptive=adaptive, _sess_info=_news_session_info):
+                                                                    try:
+                                                                        _actx = build_signal_context(_dir, _price, _ms, _adaptive, _sess_info, _conf, setup_type='news', source='news')
+                                                                        _aud = audit_signal(_actx)
+                                                                        if _aud:
+                                                                            if _aud['agree']:
+                                                                                _new_conf = min(95, _conf + min(_aud['confidence_adjustment'], 10))
+                                                                                logger.info(f"Gemma audit NEWS #{_sid}: AGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_new_conf} | {_aud['reasoning']}")
+                                                                                # Update confidence in DB
+                                                                                import sqlite3 as _sq
+                                                                                _cn = _sq.connect(DB_PATH)
+                                                                                _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_new_conf, _sid))
+                                                                                _cn.commit(); _cn.close()
+                                                                            else:
+                                                                                _new_conf = max(10, _conf + _aud['confidence_adjustment'])
+                                                                                logger.info(f"Gemma audit NEWS #{_sid}: DISAGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_new_conf} | {_aud['reasoning']}")
+                                                                                # Don't close MT5 position — SL/TP handle risk.
+                                                                                # Just record reduced confidence for learning.
+                                                                                import sqlite3 as _sq
+                                                                                _cn = _sq.connect(DB_PATH)
+                                                                                _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_new_conf, _sid))
+                                                                                _cn.commit(); _cn.close()
+                                                                                if _new_conf < _base:
+                                                                                    logger.info(f"Gemma low-conf NEWS #{_sid}: conf {_new_conf} < {_base} — keeping open, SL/TP protect")
                                                                         else:
-                                                                            _new_conf = max(10, _conf + _aud['confidence_adjustment'])
-                                                                            logger.info(f"Gemma audit NEWS #{_sid}: DISAGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_new_conf} | {_aud['reasoning']}")
-                                                                            # Don't close MT5 position — SL/TP handle risk.
-                                                                            # Just record reduced confidence for learning.
-                                                                            import sqlite3 as _sq
-                                                                            _cn = _sq.connect(DB_PATH)
-                                                                            _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_new_conf, _sid))
-                                                                            _cn.commit(); _cn.close()
-                                                                            if _new_conf < _base:
-                                                                                logger.info(f"Gemma low-conf NEWS #{_sid}: conf {_new_conf} < {_base} — keeping open, SL/TP protect")
-                                                                    else:
-                                                                        logger.info(f"Gemma audit NEWS #{_sid}: no response — strategy stands")
-                                                                except Exception as _e:
-                                                                    logger.warning(f"Gemma async audit error for #{_sid}: {_e}")
-                                                            Thread(target=_async_news_audit, daemon=True).start()
+                                                                            logger.info(f"Gemma audit NEWS #{_sid}: no response — strategy stands")
+                                                                    except Exception as _e:
+                                                                        logger.warning(f"Gemma async audit error for #{_sid}: {_e}")
+                                                                Thread(target=_async_news_audit, daemon=True).start()
                                 except Exception as e:
                                     logger.error(f"Auto-strategy error: {e}")
 

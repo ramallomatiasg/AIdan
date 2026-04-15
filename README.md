@@ -1,4 +1,4 @@
-# AIdan v3.5.2 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.5.3 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
@@ -6,16 +6,15 @@ Sistema de trading asistido que monitorea noticias financieras en tiempo real, a
 
 ---
 
-## Que hay de nuevo en v3.5.2
+## Que hay de nuevo en v3.5.3
 
-- **SL adaptativo por ATR**: Stop Loss calculado como ATR-14 x 0.8, acotado entre el SL del perfil y 2.5x el perfil. TP escala proporcionalmente manteniendo el R:R del perfil. Reemplaza el SL fijo que causaba cierres prematuros
-- **Filtro contra-tendencia**: cuando la tendencia M5 es fuerte, senales en contra requieren confianza >= 75 (en vez de 50). Evita operar contra el momentum dominante
-- **Post-trade analysis con Gemma 4**: cada trade cerrado por MT5 (SL/TP hit) se analiza automaticamente con IA local. Evalua calidad de entrada, salida, timing y genera lecciones accionables guardadas en DB
-- **Confianza direccional mejorada**: la funcion `dynamic_conf()` ahora recibe la direccion de la senal y el sesgo HTF, sumando hasta +20 puntos por alineacion con tendencia y HTF bias, o penalizando -10 a -20 por ir en contra
-- **Base de confianza conservadora**: el punto de partida bajo de 50 a 40 — cada punto se gana con factores reales de mercado
-- **LLM Auditor (Gemma 4)**: segunda opinion en paralelo con Groq para validar senales antes de crear estrategia. Acuerdo = +10 conf, desacuerdo = -15 a -20
-- **Pre-Planner nocturno**: planifica estrategias para eventos HIGH impact del dia siguiente usando Groq + Gemma en consenso. Se activan automaticamente 5 min antes del evento
-- **SL estructural ampliado**: el SL puede ensancharse (no solo achicarse) para respetar soportes/resistencias cercanos
+- **Filtro contra-tendencia corregido**: el filtro ahora aplica en TODA tendencia detectada (bullish/bearish), no solo en "strong". Antes, en M5 la tendencia casi siempre era "weak" (MA spread < 3 pips) y el filtro nunca se activaba — los PUTs pasaban libremente en mercado alcista. Ahora: weak >= 60 conf, moderate >= 70, strong >= 80
+- **MA spread calibrado para M5**: los thresholds de fuerza de tendencia se ajustaron al timeframe real. Antes strong=8p/moderate=3p (valores de H1), ahora strong=3p/moderate=1.5p — realista para velas de 5 minutos
+- **Min confidence gate en news**: las estrategias de noticias ahora respetan el umbral minimo del perfil DESPUES de aplicar learning adjustments. Antes, el gate se chequeaba con la confianza raw de Groq pero no despues de penalizaciones, dejando pasar trades con conf 13-45 (16 trades basura, -$28.80 de perdida)
+- **Win/loss por MT5 P&L real**: el resultado del trade se determina por el P&L real de MT5, no por pips teoricos calculados desde entry_price. Corrige 16 falsos wins + 10 falsos losses en el historial
+- **SL minimo 2.0 pips**: hard floor para evitar SLs de fracciones de pip que causan cierres instantaneos
+- **Trend context en archive**: mt5_executor ahora guarda market_trend, trend_strength y htf_bias al archivar trades (antes eran NULL, impidiendo analisis de tendencia en el historial)
+- **Fill price en archive**: los pips y distancias SL/TP se calculan desde el precio de ejecucion real de MT5, no desde el precio teorico de la senal
 
 ### v3.5.0 (06 Abr 2026)
 - **Trailing Stop-Loss escalonado**: 3 pasos proporcionales al TP. Mueve SL en MT5 real via TRADE_ACTION_SLTP
@@ -297,6 +296,14 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.5.3 (15 Abr 2026)
+- **Fix critico filtro contra-tendencia**: aplicaba solo en tendencia strong/moderate (MA spread >3p), inalcanzable en M5. Ahora aplica en toda tendencia con thresholds calibrados para M5
+- **Min confidence gate en news**: bloquea trades de noticias con confianza ajustada < perfil minimo
+- **Win/loss por MT5 P&L real**: corrige 26 trades mal clasificados en historial
+- **SL minimo 2.0 pips**: previene SLs de fracciones de pip
+- **Trend context en archive**: mt5_executor guarda trend/strength/htf al cerrar trades
+- **Fill price en archive**: pips calculados desde precio de ejecucion real
 
 ### v3.5.2 (14 Abr 2026)
 - **SL adaptativo por ATR**: ATR-14 x 0.8 acotado entre perfil y 2.5x perfil. TP escala proporcionalmente

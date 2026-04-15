@@ -186,11 +186,11 @@ class TechnicalAnalyzer:
         else:
             trend = 'neutral'
 
-        # Trend strength
+        # Trend strength (calibrated for M5 timeframe — MAs are always close)
         ma_spread = abs(ma_fast - ma_slow) / current_price * 10000  # in pips
-        if ma_spread > 8:
+        if ma_spread > 3:
             trend_strength = 'strong'
-        elif ma_spread > 3:
+        elif ma_spread > 1.5:
             trend_strength = 'moderate'
         else:
             trend_strength = 'weak'
@@ -838,20 +838,29 @@ class TechnicalAnalyzer:
                     sig['confidence'] = max(sig['confidence'] - pat['confidence_boost'] // 2, 20)
                     sig['reason'] += f" Precaución: patrón {pat['pattern']} contradice (bajista)."
 
-        # ── Counter-trend filter: require higher confidence when fighting strong trend ──
-        if trend_strength == 'strong' and signals:
+        # ── Counter-trend filter: require higher confidence when fighting ANY detected trend ──
+        # strong trend   → need conf >= 80
+        # moderate trend → need conf >= 70
+        # weak trend     → need conf >= 60 (still a real trend, just less pronounced on M5)
+        if trend in ('bullish', 'bearish') and signals:
             filtered = []
+            if trend_strength == 'strong':
+                min_counter_conf = 80
+            elif trend_strength == 'moderate':
+                min_counter_conf = 70
+            else:  # weak — still a trend, M5 MAs are always close
+                min_counter_conf = 60
             for sig in signals:
                 is_counter = (
                     (sig['direction'] == 'CALL' and trend == 'bearish') or
                     (sig['direction'] == 'PUT' and trend == 'bullish')
                 )
                 if is_counter:
-                    if sig['confidence'] >= 75:
-                        sig['reason'] += f" [contra-tendencia fuerte, conf {sig['confidence']} >= 75 OK]"
+                    if sig['confidence'] >= min_counter_conf:
+                        sig['reason'] += f" [contra-tendencia {trend_strength}, conf {sig['confidence']} >= {min_counter_conf} OK]"
                         filtered.append(sig)
                     else:
-                        self.logger.info(f"Counter-trend filter: blocked {sig['direction']} {sig['setup_type']} conf={sig['confidence']} < 75 (trend={trend} strong)")
+                        self.logger.info(f"Counter-trend filter: blocked {sig['direction']} {sig['setup_type']} conf={sig['confidence']} < {min_counter_conf} (trend={trend} {trend_strength})")
                 else:
                     filtered.append(sig)
             signals = filtered
@@ -1130,14 +1139,16 @@ class TechnicalAnalyzer:
         resistances = structures.get('resistances', [])
 
         # ATR-based SL: use 80% of ATR-14, clamped to profile bounds
+        # Hard minimum: never below 2.0 pips regardless of ATR or profile
+        SL_HARD_MIN = 2.0
         atr = market_state.get('avg_range_pips', 0)
         if atr > 0:
             atr_sl = round(atr * 0.8, 1)
-            sl_min = prof_sl                      # profile SL as floor
+            sl_min = max(prof_sl, SL_HARD_MIN)    # profile SL as floor (min 2.0p)
             sl_max = round(prof_sl * 2.5, 1)      # 2.5x profile as ceiling
             final_sl = max(sl_min, min(sl_max, atr_sl))
         else:
-            final_sl = prof_sl
+            final_sl = max(prof_sl, SL_HARD_MIN)
 
         # TP: maintain R:R ratio from profile (e.g. 3.5:15 = 1:4.3)
         rr_ratio = prof_tp / prof_sl if prof_sl > 0 else 4.0
