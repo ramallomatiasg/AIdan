@@ -1,4 +1,4 @@
-# AIdan v3.5.3 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.5.4 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
@@ -6,7 +6,7 @@ Sistema de trading asistido que monitorea noticias financieras en tiempo real, a
 
 ---
 
-## Que hay de nuevo en v3.5.3
+## Que hay de nuevo en v3.5.4
 
 - **Filtro contra-tendencia corregido**: el filtro ahora aplica en TODA tendencia detectada (bullish/bearish), no solo en "strong". Antes, en M5 la tendencia casi siempre era "weak" (MA spread < 3 pips) y el filtro nunca se activaba — los PUTs pasaban libremente en mercado alcista. Ahora: weak >= 60 conf, moderate >= 70, strong >= 80
 - **MA spread calibrado para M5**: los thresholds de fuerza de tendencia se ajustaron al timeframe real. Antes strong=8p/moderate=3p (valores de H1), ahora strong=3p/moderate=1.5p — realista para velas de 5 minutos
@@ -15,6 +15,9 @@ Sistema de trading asistido que monitorea noticias financieras en tiempo real, a
 - **SL minimo 2.0 pips**: hard floor para evitar SLs de fracciones de pip que causan cierres instantaneos
 - **Trend context en archive**: mt5_executor ahora guarda market_trend, trend_strength y htf_bias al archivar trades (antes eran NULL, impidiendo analisis de tendencia en el historial)
 - **Fill price en archive**: los pips y distancias SL/TP se calculan desde el precio de ejecucion real de MT5, no desde el precio teorico de la senal
+- **MT5 como fuente primaria de velas**: cuando MT5 esta conectado, las velas se obtienen via `copy_rates_from_pos()` (instantaneo, sin red). Yahoo Finance pasa a fallback. Elimina el delay de 500ms-2s que causaba entradas tardias
+- **Cache de market state reducido a 5s**: el precio se refresca 3x mas seguido (antes 15s), alineando el precio de la senal con el precio de ejecucion
+- **Price deviation gate**: si el precio del broker se desvia mas del 40% del SL respecto al precio de la senal, la orden se rechaza. Safety net para evitar entradas en el peor momento de la vela
 
 ### v3.5.0 (06 Abr 2026)
 - **Trailing Stop-Loss escalonado**: 3 pasos proporcionales al TP. Mueve SL en MT5 real via TRADE_ACTION_SLTP
@@ -296,6 +299,11 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.5.4 (16 Abr 2026)
+- **MT5 como fuente primaria de velas**: `copy_rates_from_pos()` instantaneo sin latencia de red. Yahoo como fallback
+- **Cache market state 5s**: precio 3x mas fresco (antes 15s), mejor alineacion senal-ejecucion
+- **Price deviation gate**: rechaza ordenes si el precio se desvia >40% del SL desde la senal
 
 ### v3.5.3 (15 Abr 2026)
 - **Fix critico filtro contra-tendencia**: aplicaba solo en tendencia strong/moderate (MA spread >3p), inalcanzable en M5. Ahora aplica en toda tendencia con thresholds calibrados para M5

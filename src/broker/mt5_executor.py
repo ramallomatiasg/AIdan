@@ -183,6 +183,17 @@ class MT5Executor:
             update_mt5_ticket(strategy_id, None, 0, 'error')
             return None
 
+        # Price deviation gate: reject if broker price moved too far from signal price
+        # This prevents entering at the bottom/top of a candle after the move already happened
+        broker_price = tick.ask if direction == 'CALL' else tick.bid
+        price_deviation = abs(broker_price - entry_price) / 0.0001  # in pips
+        max_deviation = sl_pips * 0.40  # max 40% of SL distance
+        max_deviation = max(max_deviation, 2.0)  # at least 2 pips tolerance
+        if price_deviation > max_deviation:
+            self.logger.warning(f"MT5: price deviation {price_deviation:.1f}p > max {max_deviation:.1f}p (40% of SL {sl_pips:.1f}p) — signal price {entry_price:.5f} vs broker {broker_price:.5f} — skipping #{strategy_id}")
+            update_mt5_ticket(strategy_id, None, 0, 'error')
+            return None
+
         # Try limit order first for better entry price
         LIMIT_DISCOUNT_PIPS = 1.5  # pips discount from current price
         discount = LIMIT_DISCOUNT_PIPS * 0.0001

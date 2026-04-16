@@ -13,7 +13,7 @@ class TechnicalAnalyzer:
     def __init__(self, logger):
         self.logger = logger
         self._cache = {}
-        self._cache_ttl = 15  # seconds — faster price refresh for dashboard
+        self._cache_ttl = 5  # seconds — MT5 data is instant, keep price fresh
         self._triggered_levels = {}  # {level_key: timestamp} — avoid duplicate signals
         self._last_trigger_cleanup = 0
 

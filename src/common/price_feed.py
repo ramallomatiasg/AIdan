@@ -50,7 +50,17 @@ def fetch_candles(interval='5min', count=100, logger=None):
     """
     global _last_source_used
 
-    # 1. Yahoo Finance first — best precision (7+ decimals), real-time price, no API key
+    # 0. MT5 first — real-time broker data, zero latency, most accurate for execution
+    candles = _fetch_mt5(interval, count, logger)
+    if candles:
+        _last_source_used = 'mt5'
+        if len(candles) > count:
+            candles = candles[-count:]
+        if logger:
+            logger.info(f"PriceFeed: last close={candles[-1]['close']:.5f} from mt5 ({interval})")
+        return candles
+
+    # 1. Yahoo Finance — good precision, real-time price, no API key
     yh_interval, yh_range = _map_interval_to_yahoo(interval, count)
     candles = _fetch_yahoo(yh_interval, yh_range, logger)
     if candles:
@@ -80,6 +90,51 @@ def fetch_candles(interval='5min', count=100, logger=None):
         return candles
 
     return None
+
+
+def _fetch_mt5(interval, count, logger=None):
+    """Fetch candles directly from MetaTrader 5 — zero network latency."""
+    try:
+        import MetaTrader5 as mt5
+        if not mt5.terminal_info():
+            return None  # MT5 not connected
+
+        # Map interval string to MT5 timeframe
+        tf_map = {
+            '1min': mt5.TIMEFRAME_M1, '5min': mt5.TIMEFRAME_M5,
+            '15min': mt5.TIMEFRAME_M15, '1h': mt5.TIMEFRAME_H1,
+            '4h': mt5.TIMEFRAME_H4, '1d': mt5.TIMEFRAME_D1,
+        }
+        timeframe = tf_map.get(interval)
+        if not timeframe:
+            return None
+
+        from src.common.config import Config
+        symbol = getattr(Config, 'MT5_SYMBOL', 'EURUSD')
+
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count + 5)
+        if rates is None or len(rates) < 25:
+            return None
+
+        candles = []
+        for r in rates:
+            candles.append({
+                'open': float(r['open']),
+                'high': float(r['high']),
+                'low': float(r['low']),
+                'close': float(r['close']),
+                'datetime': str(datetime.fromtimestamp(r['time'], tz=timezone.utc)),
+            })
+
+        if len(candles) > count:
+            candles = candles[-count:]
+        return candles
+    except ImportError:
+        return None  # MetaTrader5 not installed
+    except Exception as e:
+        if logger:
+            logger.debug(f"PriceFeed MT5: {e}")
+        return None
 
 
 # ── FXCM ──────────────────────────────────────────────────────────────────────
