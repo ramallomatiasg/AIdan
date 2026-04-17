@@ -358,8 +358,9 @@ class AIdan:
         self.threads = []
         self.root = None
         self.status_label = None
-        from threading import Lock
+        from threading import Lock, Event
         self._mt5_lock = Lock()
+        self._shutdown_event = Event()  # signals all service loops to exit cleanly
         
     # ── Color palette ──
     BG = '#0a0e14'
@@ -438,8 +439,13 @@ class AIdan:
                 pass
 
     def _on_close(self):
-        """Clean shutdown — upload daily report before exiting."""
+        """Clean shutdown — signal threads, upload report, then destroy UI."""
         self._anim_running = False
+        # Signal all service loops to exit their main while loops
+        try:
+            self._shutdown_event.set()
+        except Exception:
+            pass
         # Try to upload daily report on close
         try:
             from src.reports.daily_report import generate_daily_report
@@ -448,6 +454,9 @@ class AIdan:
                 print(f"Daily report uploaded: {result.get('message')}")
         except Exception as e:
             print(f"Report upload skipped: {e}")
+        # Give background threads a moment to finish in-flight DB writes
+        import time as _t
+        _t.sleep(0.5)
         self.root.destroy()
     
     def _ollama_is_running(self):
@@ -783,6 +792,7 @@ class AIdan:
                 try:
                     from src.broker.mt5_executor import MT5Executor
                     mt5_exec = MT5Executor(logger)
+                    mt5_exec.set_smc_ref(smc)  # Inject SMC so executor can read htf_bias at archive time
                     if mt5_exec.connect():
                         logger.info("MT5 execution enabled")
                         with self._mt5_lock:
@@ -996,12 +1006,27 @@ class AIdan:
                                'rsi_at_entry': tech.get_market_state().get('rsi', 0)}
                         auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
                         try:
-                            from src.common.db import archive_trade
+                            from src.common.db import archive_trade, get_entry_context
                             ms = tech.get_market_state()
-                            ctx['volatility'] = ms.get('volatility', '')
-                            ctx['trend_strength'] = ms.get('trend_strength', '')
-                            ctx['avg_range_pips'] = ms.get('avg_range_pips', 0)
-                            ctx['htf_bias'] = ctx.get('htf_bias', '')
+                            # Prefer entry-time snapshot over exit-time (for accurate learning)
+                            entry_ctx = get_entry_context(sid)
+                            if entry_ctx:
+                                ctx['rsi_at_entry'] = entry_ctx.get('rsi', 0)
+                                ctx['avg_range_pips'] = entry_ctx.get('avg_range_pips', 0)
+                                ctx['volatility'] = entry_ctx.get('volatility', '')
+                                ctx['market_trend'] = entry_ctx.get('trend') or ms.get('trend', '')
+                                ctx['trend_strength'] = entry_ctx.get('trend_strength') or ms.get('trend_strength', '')
+                                ctx['htf_bias'] = entry_ctx.get('htf_bias', '')
+                            else:
+                                # Fallback: use exit-time snapshot
+                                ctx['volatility'] = ms.get('volatility', '')
+                                ctx['trend_strength'] = ms.get('trend_strength', '')
+                                ctx['avg_range_pips'] = ms.get('avg_range_pips', 0)
+                                try:
+                                    if smc:
+                                        ctx['htf_bias'] = smc.get_status().get('htf_bias', '') or ''
+                                except Exception:
+                                    ctx['htf_bias'] = ''
                             archive_trade(sid, result, exit_px, round(pips_result, 1), ctx)
                         except Exception as e:
                             logger.warning(f"Archive trade #{sid}: {e}")
@@ -1040,7 +1065,8 @@ class AIdan:
             _weekend_logged = False
             _planned_today = False
             _planned_date = None
-            while True:
+            while not self._shutdown_event.is_set():
+                _cycle_start = time.time()
                 try:
                     iteration += 1
 
@@ -1167,7 +1193,7 @@ class AIdan:
                             from src.common.db import get_active_profile
                             profile = get_active_profile()
                             prof_min_impact = profile.get('min_impact', 75)
-                            prof_min_conf = profile.get('min_confidence', 65)
+                            prof_min_conf = profile.get('min_confidence', 50)  # centralized default matching profile schema
                             prof_direction = profile.get('direction', 'any')
                             prof_sl = profile.get('stop_loss_pips', 5)
                             prof_tp = profile.get('take_profit_pips', 10)
@@ -1285,6 +1311,23 @@ class AIdan:
                                                             logger.info(f"Min confidence gate: skipping news {direction}, conf {_news_conf} < profile min {prof_min_conf}")
                                                         else:
                                                             # FAST PATH: create strategy + MT5 order FIRST, audit async
+                                                            # Build entry context for atomic persist (avoids race with fast MT5 fills)
+                                                            _news_htf_real = ''
+                                                            try:
+                                                                if smc:
+                                                                    _news_htf_real = smc.get_status().get('htf_bias', '') or ''
+                                                            except Exception:
+                                                                pass
+                                                            _news_entry_ctx = {
+                                                                'rsi': market.get('rsi', 0),
+                                                                'rsi_zone': market.get('rsi_zone', ''),
+                                                                'avg_range_pips': market.get('avg_range_pips', 0),
+                                                                'volatility': market.get('volatility', ''),
+                                                                'trend': market.get('trend', ''),
+                                                                'trend_strength': market.get('trend_strength', ''),
+                                                                'momentum': market.get('momentum', ''),
+                                                                'htf_bias': _news_htf_real,
+                                                            }
                                                             sid = add_auto_strategy(
                                                                 alert_id=row[0], news_title=title,
                                                                 direction=direction, entry_price=price,
@@ -1292,7 +1335,8 @@ class AIdan:
                                                                 confidence=_news_conf,
                                                                 impact_score=result['impact_score'],
                                                                 candles_snapshot=news_snap,
-                                                                expiry_minutes=expiry_min)
+                                                                expiry_minutes=expiry_min,
+                                                                entry_context=_news_entry_ctx)
                                                             if sid:
                                                                 strategies_created += 1
                                                                 cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': _news_conf})
@@ -1312,7 +1356,7 @@ class AIdan:
                                                                                 # Update confidence in DB
                                                                                 import sqlite3 as _sq
                                                                                 _cn = _sq.connect(DB_PATH)
-                                                                                _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_new_conf, _sid))
+                                                                                _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ? AND status = 'active' AND (mt5_status IS NULL OR mt5_status NOT IN ('closed', 'error'))", (_new_conf, _sid))
                                                                                 _cn.commit(); _cn.close()
                                                                             else:
                                                                                 _new_conf = max(10, _conf + _aud['confidence_adjustment'])
@@ -1321,7 +1365,7 @@ class AIdan:
                                                                                 # Just record reduced confidence for learning.
                                                                                 import sqlite3 as _sq
                                                                                 _cn = _sq.connect(DB_PATH)
-                                                                                _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_new_conf, _sid))
+                                                                                _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ? AND status = 'active' AND (mt5_status IS NULL OR mt5_status NOT IN ('closed', 'error'))", (_new_conf, _sid))
                                                                                 _cn.commit(); _cn.close()
                                                                                 if _new_conf < _base:
                                                                                     logger.info(f"Gemma low-conf NEWS #{_sid}: conf {_new_conf} < {_base} — keeping open, SL/TP protect")
@@ -1419,7 +1463,7 @@ class AIdan:
                                     profile = get_active_profile()
 
                                     # Confidence boost based on impact
-                                    base_conf = profile.get('min_confidence', 60)
+                                    base_conf = profile.get('min_confidence', 50)  # centralized default matching profile schema
                                     if evt_impact == 'High':
                                         cal_conf_bonus = 15
                                     else:
@@ -1536,6 +1580,16 @@ class AIdan:
                                             continue
 
                                         # FAST PATH: create strategy + MT5 order FIRST, Gemma audits async
+                                        _cal_entry_ctx = {
+                                            'rsi': ms.get('rsi', 0),
+                                            'rsi_zone': ms.get('rsi_zone', ''),
+                                            'avg_range_pips': ms.get('avg_range_pips', 0),
+                                            'volatility': ms.get('volatility', ''),
+                                            'trend': ms.get('trend', ''),
+                                            'trend_strength': ms.get('trend_strength', ''),
+                                            'momentum': ms.get('momentum', ''),
+                                            'htf_bias': _cal_htf or '',
+                                        }
                                         sid = add_auto_strategy(
                                             alert_id=None,
                                             news_title=news_title_cal,
@@ -1548,7 +1602,8 @@ class AIdan:
                                             trigger_type='calendar',
                                             candles_snapshot=cal_candles_snap,
                                             profile_name=prof_name,
-                                            expiry_minutes=expiry_min)
+                                            expiry_minutes=expiry_min,
+                                            entry_context=_cal_entry_ctx)
                                         if sid:
                                             strategies_created += 1
                                             cycle_signals.append({'source': 'calendar', 'direction': direction, 'confidence': conf})
@@ -1566,13 +1621,13 @@ class AIdan:
                                                             _nc = min(95, _conf + min(_aud['confidence_adjustment'], 10))
                                                             logger.info(f"Gemma audit CALENDAR #{_sid}: AGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_nc} | {_aud['reasoning']}")
                                                             import sqlite3 as _sq
-                                                            _cn = _sq.connect(DB_PATH); _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_nc, _sid)); _cn.commit(); _cn.close()
+                                                            _cn = _sq.connect(DB_PATH); _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ? AND status = 'active' AND (mt5_status IS NULL OR mt5_status NOT IN ('closed', 'error'))", (_nc, _sid)); _cn.commit(); _cn.close()
                                                         else:
                                                             _nc = max(10, _conf + _aud['confidence_adjustment'])
                                                             logger.info(f"Gemma audit CALENDAR #{_sid}: DISAGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_nc} | {_aud['reasoning']}")
                                                             # Don't close MT5 position — SL/TP handle risk.
                                                             import sqlite3 as _sq
-                                                            _cn = _sq.connect(DB_PATH); _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ?", (_nc, _sid)); _cn.commit(); _cn.close()
+                                                            _cn = _sq.connect(DB_PATH); _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ? AND status = 'active' AND (mt5_status IS NULL OR mt5_status NOT IN ('closed', 'error'))", (_nc, _sid)); _cn.commit(); _cn.close()
                                                             if _nc < _base:
                                                                 logger.info(f"Gemma low-conf CALENDAR #{_sid}: conf {_nc} < {_base} — keeping open, SL/TP protect")
                                                     else:
@@ -1599,7 +1654,7 @@ class AIdan:
                         from src.common.db import get_active_profile
                         profile = get_active_profile()
                         prof_name = profile.get('name', 'default')
-                        min_conf = profile.get('min_confidence', 60)
+                        min_conf = profile.get('min_confidence', 50)  # centralized default matching profile schema
                         logger.info(f"[{iteration}] Structure scan: profile='{prof_name}' min_conf={min_conf}")
 
                         # Session filter: skip if outside active sessions and tuner says to block
@@ -1624,9 +1679,17 @@ class AIdan:
                             except Exception:
                                 htf_bias = None
 
+                            # Daily macro context: today's high/low, position in range, prev day close
+                            daily_ctx = None
+                            try:
+                                daily_ctx = mtf.get_daily_context()
+                            except Exception as _dce:
+                                logger.debug(f"Daily context: {_dce}")
+
                             structure_signals = tech.detect_structure_signals(
-                                min_confidence=min_conf, htf_bias=htf_bias)
-                            logger.info(f"[{iteration}] Structure signals: {len(structure_signals)} (htf_bias={htf_bias})")
+                                min_confidence=min_conf, htf_bias=htf_bias, daily_context=daily_ctx)
+                            _dc_info = f" day_pos={daily_ctx['today_pos']:.0%}" if daily_ctx and daily_ctx.get('today_pos') is not None else ''
+                            logger.info(f"[{iteration}] Structure signals: {len(structure_signals)} (htf_bias={htf_bias}{_dc_info})")
 
                             # AutoTuner: block setup types with poor win rates
                             before_block = len(structure_signals)
@@ -1670,17 +1733,21 @@ class AIdan:
                                 if price <= 0:
                                     break
 
-                                # Use structure key_level for better entry when available
-                                key_level = sig.get('key_level', 0)
-                                if key_level and key_level > 0:
-                                    # For CALL: prefer lower price (closer to support)
-                                    # For PUT: prefer higher price (closer to resistance)
-                                    if direction == 'CALL' and key_level < price:
-                                        logger.info(f"Structure entry: using key_level {key_level:.5f} instead of market {price:.5f} (better CALL entry)")
-                                        price = key_level
-                                    elif direction == 'PUT' and key_level > price:
-                                        logger.info(f"Structure entry: using key_level {key_level:.5f} instead of market {price:.5f} (better PUT entry)")
-                                        price = key_level
+                                # Use MT5 live tick as entry price (most accurate, zero lag)
+                                if mt5_exec and mt5_exec.is_ready() and mt5_exec._mt5:
+                                    try:
+                                        _tick = mt5_exec._mt5.symbol_info_tick("EURUSD")
+                                        if _tick:
+                                            _mt5_price = _tick.ask if direction == 'CALL' else _tick.bid
+                                            if _mt5_price > 0:
+                                                logger.info(f"Structure entry: MT5 tick {_mt5_price:.5f} vs market_state {price:.5f} (delta {abs(_mt5_price-price)/0.0001:.1f}p)")
+                                                price = _mt5_price
+                                    except Exception:
+                                        pass  # fallback to market_state price
+
+                                # Note: key_level override removed — it was locking in worse entries.
+                                # The MT5 tick price fetched above is the real market price.
+                                # key_level still influences confidence via detect_structure_signals.
 
                                 # Adaptive SL/TP based on ATR + structure levels
                                 adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
@@ -1765,24 +1832,17 @@ class AIdan:
                                     logger.info(f"Min confidence gate: skipping structure {direction}, conf {conf} < profile min {min_conf}")
                                     continue
 
-                                # Gemma 4 audit
-                                _audit_ctx = build_signal_context(
-                                    direction, price, ms, adaptive, _struct_session_info,
-                                    conf, setup_type=sig.get('setup_type', 'structure'),
-                                    source='structure', htf_bias=htf_bias,
-                                    key_level=sig.get('key_level', 'none'))
-                                _audit = audit_signal(_audit_ctx)
-                                if _audit:
-                                    if _audit['agree']:
-                                        conf = min(95, conf + min(_audit['confidence_adjustment'], 10))
-                                        logger.info(f"Gemma audit STRUCTURE: AGREE | adj={_audit['confidence_adjustment']:+d} -> conf={conf} | {_audit['reasoning']}")
-                                    else:
-                                        conf = max(10, conf + _audit['confidence_adjustment'])
-                                        logger.info(f"Gemma audit STRUCTURE: DISAGREE | adj={_audit['confidence_adjustment']:+d} -> conf={conf} | {_audit['reasoning']}")
-                                        if conf < min_conf:
-                                            logger.info(f"Gemma vetoed structure signal: conf {conf} < {min_conf}")
-                                            continue
-
+                                # FAST PATH: create strategy + MT5 order FIRST, audit async
+                                _struct_entry_ctx = {
+                                    'rsi': ms.get('rsi', 0),
+                                    'rsi_zone': ms.get('rsi_zone', ''),
+                                    'avg_range_pips': ms.get('avg_range_pips', 0),
+                                    'volatility': ms.get('volatility', ''),
+                                    'trend': ms.get('trend', ''),
+                                    'trend_strength': ms.get('trend_strength', ''),
+                                    'momentum': ms.get('momentum', ''),
+                                    'htf_bias': htf_bias or '',
+                                }
                                 sid = add_auto_strategy(
                                     alert_id=None,
                                     news_title=f"[ESTRUCTURA] {sig['reason'][:80]}",
@@ -1792,12 +1852,39 @@ class AIdan:
                                     trigger_type='structure',
                                     candles_snapshot=candles_snap,
                                     profile_name=prof_name,
-                                    expiry_minutes=expiry_min)
+                                    expiry_minutes=expiry_min,
+                                    entry_context=_struct_entry_ctx)
                                 if sid:
                                     strategies_created += 1
                                     cycle_signals.append({'source': 'structure', 'direction': direction, 'confidence': conf})
-                                    logger.info(f"Structure strategy #{sid}: {direction} @ {price:.5f} | {sig['setup_type']} | {sig['reason'][:60]}")
+                                    logger.info(f"Structure strategy #{sid}: {direction} @ {price:.5f} | {sig['setup_type']} | {sig['reason'][:60]} (audit pending)")
                                     _try_mt5_execute(sid, direction, price, sl, tp, conf)
+
+                                    # Gemma 4 audit in background — adjust confidence post-hoc
+                                    def _async_struct_audit(_sid=sid, _dir=direction, _price=price, _conf=conf, _base=min_conf,
+                                                            _ms=ms, _adaptive=adaptive, _sess_info=_struct_session_info,
+                                                            _setup=sig.get('setup_type', 'structure'), _htf=htf_bias,
+                                                            _key=sig.get('key_level', 'none')):
+                                        try:
+                                            _actx = build_signal_context(_dir, _price, _ms, _adaptive, _sess_info, _conf,
+                                                                         setup_type=_setup, source='structure', htf_bias=_htf, key_level=_key)
+                                            _aud = audit_signal(_actx)
+                                            if _aud:
+                                                if _aud['agree']:
+                                                    _new_conf = min(95, _conf + min(_aud['confidence_adjustment'], 10))
+                                                    logger.info(f"Gemma audit STRUCTURE #{_sid}: AGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_new_conf} | {_aud['reasoning']}")
+                                                else:
+                                                    _new_conf = max(10, _conf + _aud['confidence_adjustment'])
+                                                    logger.info(f"Gemma audit STRUCTURE #{_sid}: DISAGREE | adj={_aud['confidence_adjustment']:+d} -> conf={_new_conf} | {_aud['reasoning']}")
+                                                import sqlite3 as _sq
+                                                _cn = _sq.connect(DB_PATH)
+                                                _cn.execute("UPDATE auto_strategies SET confidence = ? WHERE id = ? AND status = 'active' AND (mt5_status IS NULL OR mt5_status NOT IN ('closed', 'error'))", (_new_conf, _sid))
+                                                _cn.commit(); _cn.close()
+                                            else:
+                                                logger.info(f"Gemma audit STRUCTURE #{_sid}: no response — strategy stands")
+                                        except Exception as _e:
+                                            logger.warning(f"Gemma async audit error for #{_sid}: {_e}")
+                                    Thread(target=_async_struct_audit, daemon=True).start()
                     except Exception as e:
                         logger.error(f"Structure scanner error: {e}", exc_info=True)
 
@@ -1929,6 +2016,17 @@ class AIdan:
                                         logger.info(f"Gemma vetoed SMC signal: conf {conf} < {min_conf}")
                                         continue
 
+                            _smc_htf_for_ctx = setup.get('htf_bias') or (smc_status.get('htf_bias') if 'smc_status' in dir() and smc_status else None) or ''
+                            _smc_entry_ctx = {
+                                'rsi': ms.get('rsi', 0),
+                                'rsi_zone': ms.get('rsi_zone', ''),
+                                'avg_range_pips': ms.get('avg_range_pips', 0),
+                                'volatility': ms.get('volatility', ''),
+                                'trend': ms.get('trend', ''),
+                                'trend_strength': ms.get('trend_strength', ''),
+                                'momentum': ms.get('momentum', ''),
+                                'htf_bias': _smc_htf_for_ctx,
+                            }
                             sid = add_auto_strategy(
                                 alert_id=None,
                                 news_title=f"[SMC] {setup['reason'][:80]}",
@@ -1937,7 +2035,8 @@ class AIdan:
                                 confidence=conf, impact_score=smc_impact,
                                 trigger_type='smc',
                                 candles_snapshot=smc_snap,
-                                expiry_minutes=expiry_min)
+                                expiry_minutes=expiry_min,
+                                entry_context=_smc_entry_ctx)
                             if sid:
                                 strategies_created += 1
                                 cycle_signals.append({'source': 'smc', 'direction': direction, 'confidence': conf})
@@ -1955,6 +2054,32 @@ class AIdan:
                         try:
                             import sqlite3 as _sq3
                             _conn = _sq3.connect(DB_PATH)
+                            # First: find strategies about to expire that still have pending MT5 orders — cancel them
+                            try:
+                                _cur_exp = _conn.execute("""
+                                    SELECT id, mt5_ticket FROM auto_strategies
+                                    WHERE expires_at < ? AND status = 'active'
+                                      AND mt5_ticket IS NOT NULL AND mt5_status = 'pending'
+                                """, (now_ar(),))
+                                _expiring_pending = _cur_exp.fetchall()
+                            except Exception:
+                                _expiring_pending = []
+                            # Cancel each pending order on MT5 before marking expired
+                            if _expiring_pending and mt5_exec and mt5_exec.is_ready():
+                                for _exp_sid, _exp_ticket in _expiring_pending:
+                                    try:
+                                        _mt5 = mt5_exec._mt5
+                                        _req = {
+                                            "action": _mt5.TRADE_ACTION_REMOVE,
+                                            "order": int(_exp_ticket),
+                                        }
+                                        _r = _mt5.order_send(_req)
+                                        if _r and _r.retcode == _mt5.TRADE_RETCODE_DONE:
+                                            logger.info(f"Cancelled expired pending limit order #{_exp_ticket} (strategy #{_exp_sid})")
+                                        else:
+                                            logger.warning(f"Cancel expired pending #{_exp_ticket} retcode={getattr(_r, 'retcode', 'n/a')}")
+                                    except Exception as _ce:
+                                        logger.debug(f"Cancel expired pending #{_exp_ticket}: {_ce}")
                             _conn.execute("""
                                 UPDATE auto_strategies SET status = 'expired'
                                 WHERE expires_at < ? AND status = 'active'
@@ -2140,12 +2265,25 @@ class AIdan:
 
                                 auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
                                 try:
-                                    from src.common.db import archive_trade
+                                    from src.common.db import archive_trade, get_entry_context
                                     ms = tech.get_market_state()
-                                    ctx['volatility'] = ms.get('volatility', '')
-                                    ctx['trend_strength'] = ms.get('trend_strength', '')
-                                    ctx['avg_range_pips'] = ms.get('avg_range_pips', 0)
-                                    ctx['htf_bias'] = ctx.get('htf_bias', '')
+                                    entry_ctx = get_entry_context(sid)
+                                    if entry_ctx:
+                                        ctx['rsi_at_entry'] = entry_ctx.get('rsi', 0)
+                                        ctx['avg_range_pips'] = entry_ctx.get('avg_range_pips', 0)
+                                        ctx['volatility'] = entry_ctx.get('volatility', '')
+                                        ctx['market_trend'] = entry_ctx.get('trend') or ms.get('trend', '')
+                                        ctx['trend_strength'] = entry_ctx.get('trend_strength') or ms.get('trend_strength', '')
+                                        ctx['htf_bias'] = entry_ctx.get('htf_bias', '')
+                                    else:
+                                        ctx['volatility'] = ms.get('volatility', '')
+                                        ctx['trend_strength'] = ms.get('trend_strength', '')
+                                        ctx['avg_range_pips'] = ms.get('avg_range_pips', 0)
+                                        try:
+                                            if smc:
+                                                ctx['htf_bias'] = smc.get_status().get('htf_bias', '') or ''
+                                        except Exception:
+                                            ctx['htf_bias'] = ''
                                     archive_trade(sid, result, exit_px, round(pips_result, 1), ctx)
                                 except Exception as e:
                                     logger.warning(f"Archive trade eval #{sid}: {e}")
@@ -2266,6 +2404,7 @@ class AIdan:
                         try:
                             from src.broker.mt5_executor import MT5Executor
                             mt5_exec = MT5Executor(logger)
+                            mt5_exec.set_smc_ref(smc)  # Inject SMC for htf_bias lookup
                             if mt5_exec.connect():
                                 logger.info("MT5 late-connect succeeded")
                                 with self._mt5_lock:
@@ -2339,7 +2478,12 @@ class AIdan:
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")
 
-                time.sleep(Config.ANALYZER_INTERVAL)
+                # Cycle overlap guard: sleep remaining time, but at least 1s
+                _elapsed = time.time() - _cycle_start
+                _remaining = max(1, Config.ANALYZER_INTERVAL - _elapsed)
+                if _elapsed > Config.ANALYZER_INTERVAL:
+                    logger.warning(f"[{iteration}] Cycle overran: {_elapsed:.1f}s > {Config.ANALYZER_INTERVAL}s interval")
+                time.sleep(_remaining)
         except Exception as e:
             print(f"FATAL Analyzer: {e}")
     

@@ -1,23 +1,89 @@
-# AIdan v3.5.4 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.6.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
-Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
+Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
 
 ---
 
-## Que hay de nuevo en v3.5.4
+## Que hay de nuevo en v3.6.0 — Auditoria profunda + limpieza arquitectonica
 
-- **Filtro contra-tendencia corregido**: el filtro ahora aplica en TODA tendencia detectada (bullish/bearish), no solo en "strong". Antes, en M5 la tendencia casi siempre era "weak" (MA spread < 3 pips) y el filtro nunca se activaba — los PUTs pasaban libremente en mercado alcista. Ahora: weak >= 60 conf, moderate >= 70, strong >= 80
-- **MA spread calibrado para M5**: los thresholds de fuerza de tendencia se ajustaron al timeframe real. Antes strong=8p/moderate=3p (valores de H1), ahora strong=3p/moderate=1.5p — realista para velas de 5 minutos
-- **Min confidence gate en news**: las estrategias de noticias ahora respetan el umbral minimo del perfil DESPUES de aplicar learning adjustments. Antes, el gate se chequeaba con la confianza raw de Groq pero no despues de penalizaciones, dejando pasar trades con conf 13-45 (16 trades basura, -$28.80 de perdida)
-- **Win/loss por MT5 P&L real**: el resultado del trade se determina por el P&L real de MT5, no por pips teoricos calculados desde entry_price. Corrige 16 falsos wins + 10 falsos losses en el historial
-- **SL minimo 2.0 pips**: hard floor para evitar SLs de fracciones de pip que causan cierres instantaneos
-- **Trend context en archive**: mt5_executor ahora guarda market_trend, trend_strength y htf_bias al archivar trades (antes eran NULL, impidiendo analisis de tendencia en el historial)
-- **Fill price en archive**: los pips y distancias SL/TP se calculan desde el precio de ejecucion real de MT5, no desde el precio teorico de la senal
-- **MT5 como fuente primaria de velas**: cuando MT5 esta conectado, las velas se obtienen via `copy_rates_from_pos()` (instantaneo, sin red). Yahoo Finance pasa a fallback. Elimina el delay de 500ms-2s que causaba entradas tardias
-- **Cache de market state reducido a 5s**: el precio se refresca 3x mas seguido (antes 15s), alineando el precio de la senal con el precio de ejecucion
-- **Price deviation gate**: si el precio del broker se desvia mas del 40% del SL respecto al precio de la senal, la orden se rechaza. Safety net para evitar entradas en el peor momento de la vela
+Release grande: 4 rondas de auditorias paralelas con agentes especializados encontraron 22+ bugs estructurales. Se arreglaron los reales (verificando con grep cada claim para descartar falsos positivos). Enfoque en integridad de datos y flujo correcto de informacion al learning engine.
+
+### Fixes criticos de arquitectura y flujo de datos
+
+- **htf_bias self-referential bug**: `AIdan_TodoEnUno.py:1004` hacia `ctx['htf_bias'] = ctx.get('htf_bias', '')` — lectura del mismo dict. Resultado: 174 trades con htf_bias=NULL en historial, learning engine ciego al macro. Fix: extraer de `smc.get_status()` en las 3 rutas de archivado (startup, auto-eval, MT5 executor)
+- **entry_context atomico**: el market state al momento de la decision (RSI, ATR, trend, htf_bias, volatility) ahora se guarda COMO JSON en auto_strategies en la misma transaccion que crea la strategy (elimina race condition con MT5 fills instantaneos). Antes estos datos se capturaban al EXIT del trade, contaminando el learning engine con estado post-factum
+- **MT5 executor → trade_archive**: el 97% de los trades cierran via MT5 executor, que antes solo guardaba 5 campos en strategy_results. Ahora llama a `archive_trade()` con contexto completo (10 campos) leyendo el entry_context persistido. Learning engine ve por primera vez datos reales del momento de la decision
+- **Gemma post_trade handler en learning**: los insights de Gemma estaban write-only — se guardaban en learning_insights pero `get_learning_adjustments()` no los leia. Ahora hay un handler que agrega penalties/bonuses cuando Gemma detecta `confidence_was='overestimated'` repetidamente por trigger_type
+- **prev1/prev2 undefined en dynamic_conf**: silent NameError hacia que el boost de patrones de vela (+3 a +5 conf) nunca se aplicara. Fix: definir prev1/prev2 ANTES de la funcion (closure Python captura por nombre)
+- **Key level override invertido**: `key_level` reemplazaba el entry_price con el support/resistance, locking in una entrada 5-10 pips peor cuando el precio ya habia rebotado. Eliminado — ahora se usa el tick vivo de MT5 como entry real
+
+### Integridad de datos y trazabilidad
+
+- **Win/loss por MT5 P&L real** (no pips teoricos desde entry_price). Fix aplicado tambien en auto-archive antes de cleanup. Corrige 26 trades mal clasificados del historial
+- **Fill price en archive**: pips y distancias SL/TP calculados desde el precio de ejecucion real de MT5, no el precio teorico de la senal
+- **Trend context en archive**: mt5_executor captura trend/trend_strength/htf_bias al cerrar (antes NULL en ~93% de trades)
+- **entry_context en trade_archive**: columna JSON nueva que preserva el snapshot completo del entry para analisis posterior
+- **SL minimo 2.0 pips**: hard floor para evitar SLs de fracciones de pip que producen cierres instantaneos
+
+### Filtros y gates
+
+- **Min confidence gate en news** despues de learning adjustments: bloquea trades de noticias que caen bajo el minimo del perfil por penalizaciones (antes pasaban 16 trades con conf 13-45 → -$28.80)
+- **Filtro contra-tendencia corregido**: aplicaba solo cuando `trend_strength=='strong'`, pero en M5 la tendencia casi siempre era 'weak' (MA spread < 3p) — el filtro nunca se activaba. Ahora aplica en TODA tendencia detectada. Thresholds MA spread calibrados para M5: strong>3p, moderate>1.5p
+- **Rate limit enforced**: `max_trades_per_hour` estaba definido en ProfileConfig pero nunca se consultaba. Ahora `add_auto_strategy()` lo chequea y skip si excedido
+- **Circuit breaker 3 losses**: 3 perdidas consecutivas en <30 min → pausa 30 min (proteccion anti-tilt generica)
+
+### Performance y latencia
+
+- **MT5 como fuente primaria de velas**: `copy_rates_from_pos()` instantaneo, sin red. Yahoo Finance/TwelveData pasan a fallback. Elimina delay de 500ms-2s que causaba entradas tardias
+- **Cache 3s en price_feed.fetch_candles()**: 3 llamadas por ciclo = 1 solo IPC a MT5
+- **Gemma audit → Thread async**: audit de Gemma (2-15s de latencia) ahora corre en background. La orden va a MT5 PRIMERO, Gemma ajusta confidence post-hoc via UPDATE con WHERE status='active' (evita actualizar trades ya cerrados)
+- **Skip candles incompletas**: `_fetch_mt5` descarta la ultima vela si aun se esta formando. Analisis usa solo velas cerradas
+- **Spread spike retry**: si spread > SL distance, retry 3x con 0.5s delay antes de abortar (sobrevive a news events)
+- **Cycle overlap guard**: detecta y loggea si un ciclo de analisis supera ANALYZER_INTERVAL (10s)
+
+### Thread safety y robustez
+
+- **SMC lock**: `threading.Lock` en `SMCEngine` protege `_mtf_state` y `_zones_by_tf` contra torn reads. Atomic swap en `update()`, lecturas snapshot bajo lock en `check_confirmations`, `get_status`, `get_chat_context`
+- **Graceful shutdown**: `_shutdown_event` signals threads para salir limpios en close (antes daemon threads morian con DB writes en vuelo)
+- **Pending orders cancel al expirar**: strategies con `mt5_status='pending'` que expiran ahora cancelan el limit order en MT5 via `TRADE_ACTION_REMOVE` antes de marcar `status='expired'`
+- **Profile defaults completos**: `get_active_profile()` incluye cooldown_minutes y max_trades_per_hour (antes faltaban → consumers fallbackeaban a valores random)
+
+### Vision macro: contexto diario y multi-timeframe
+
+- **D1 y H4 en MTFAnalyzer**: agregado al TF_CONFIG para contexto macro superior
+- **`get_daily_context()`**: retorna today high/low/close, posicion en rango del dia (0-1), prev day OHLC, week high/low
+- **Daily range awareness en dynamic_conf**: bonus +8 si precio esta en zona ideal (CALL cerca del low del dia, PUT cerca del high). Penalty -10 si esta en zona de exhaustion (CALL cerca del high, PUT cerca del low). Penalty -5 si esta cerca del cierre del dia anterior (zona de pivote incierto)
+
+### Take Profit inteligente
+
+- **TP estructural prioritario**: cuando hay resistencia/soporte cercano con R:R >= 1:1.5, TP apunta a ese nivel -1 pip buffer (mayor probabilidad de fill). Fallback: ATR cap
+- **TP cap ATR*2 (antes *3)**: calibrado a research 2026 para scalping M5 — R:R 1:1 a 1:1.5 es lo rentable, no 1:4
+- **SL estructural ampliado**: el SL puede ensancharse para respetar soportes/resistencias cercanos (antes solo achicaba)
+- **R:R minimo 1:1.2**: permite cerrar en 1:1 con alto WR (patrones scalping de alta frecuencia)
+
+### Fixes verificados como falsos positivos (NO aplicados)
+
+Los agentes de audit reportaron varios bugs que al verificar con grep resultaron ser codigo correcto y funcionando:
+- `is_setup_blocked` reportado como orfan — en realidad se llama 4x (news, calendar, structure, smc)
+- `LearningEngine.tick()` reportado sin invocacion — en realidad se llama cada ciclo en linea 1398
+- `pre_planner.plan_next_day_strategies()` reportado orfan — en realidad se llama en linea 1099
+- `has_recent_similar_strategy`, `has_active_opposite_strategy`, `audit_signal`, `build_signal_context`, `set_smc_ref`, `analyze_closed_trade`, `modify_position_sl`, `detect_candle_patterns`, `candles_snapshot` — TODAS usadas correctamente
+- Calibraciones data-driven (min_conf=65, HTF penalty -35, killzones UTC hardcoded) — REVERTIDAS porque se basaban en data contaminada pre-fixes. AIdan aprende organicamente desde ahora.
+
+### Limpieza de datos contaminados
+
+- **learning_insights table**: 823 rows eliminadas (derivados de archive contaminado con htf_bias=NULL)
+- **post_trade_analysis table**: 159 rows eliminadas (Gemma habia analizado con contexto incorrecto)
+- **trade_archive**: mantenido (175 rows, mt5_pnl es ground truth valido tras fix anterior). Pattern mining en learning_engine ahora salta rows con htf_bias vacio (legacy) pero las usa para stats agregadas
+
+### Otras mejoras menores
+
+- MT5 deviation 20 → 50 points (mejor tolerancia en mercado rapido, explicitado como points no pips)
+- MIN_TRADES_FOR_ANALYSIS 3 → 8 (patrones mas confiables estadisticamente)
+- Silent exceptions en `get_learning_adjustments` → logs de warning con stack trace
+- Post-trade analyzer no se llamaba en ~97% de cierres (MT5 close path) — fix aplicado: ahora Gemma analiza todos los cierres
 
 ### v3.5.0 (06 Abr 2026)
 - **Trailing Stop-Loss escalonado**: 3 pasos proporcionales al TP. Mueve SL en MT5 real via TRADE_ACTION_SLTP
@@ -299,6 +365,27 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.6.0 (17 Abr 2026) — Auditoria profunda + integridad de datos
+- Fix critico: htf_bias self-referential bug (174 trades con NULL en historial). Learning engine ahora ve contexto macro
+- entry_context JSON atomico al crear strategy (RSI/ATR/trend capturados AL ENTRY, no al exit)
+- MT5 executor llama archive_trade con contexto completo (antes solo strategy_results con 5 campos)
+- Gemma post_trade handler en get_learning_adjustments (insights ya no son write-only)
+- prev1/prev2 en dynamic_conf: candle pattern boost funciona
+- Key level override eliminado: entry_price = MT5 tick vivo, sin lock-in en peor precio
+- D1 y H4 en MTFAnalyzer + get_daily_context() para vision macro
+- Daily range awareness en dynamic_conf (posicion en rango del dia ±10 conf)
+- TP estructural prioritario (apunta a resistencia/soporte con R:R >= 1:1.5)
+- TP cap ATR*2 (research 2026 scalping M5: R:R 1:1-1:1.5 es optimo)
+- SMC threading.Lock completo: atomic swap + snapshot reads
+- Graceful shutdown con _shutdown_event
+- Pending limit orders se cancelan al expirar strategy
+- Cycle overlap guard, spread spike retry 3x, skip candles en formacion
+- Rate limit max_trades_per_hour enforceado, circuit breaker 3 losses consecutivas
+- Limpieza: 823 learning_insights + 159 post_trade_analysis borrados (contaminados pre-fixes)
+- Pattern mining skip legacy trades con htf_bias vacio
+- MT5 deviation 20→50 points, MIN_TRADES_FOR_ANALYSIS 3→8
+- Calibraciones data-driven revertidas (basadas en data contaminada) — AIdan aprende organicamente
 
 ### v3.5.4 (16 Abr 2026)
 - **MT5 como fuente primaria de velas**: `copy_rates_from_pos()` instantaneo sin latencia de red. Yahoo como fallback

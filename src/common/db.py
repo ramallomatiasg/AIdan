@@ -389,6 +389,12 @@ def init_db():
     except:
         pass
 
+    # Migration: add entry_context JSON column to trade_archive (preserves full entry snapshot)
+    try:
+        cursor.execute("ALTER TABLE trade_archive ADD COLUMN entry_context TEXT DEFAULT NULL")
+    except:
+        pass
+
     # Migration: add last_fetched_remote_id to shared_learning_config
     try:
         cursor.execute("ALTER TABLE shared_learning_config ADD COLUMN last_fetched_remote_id INTEGER DEFAULT 0")
@@ -428,6 +434,7 @@ def init_db():
         ('planned_sl_pips', 'REAL DEFAULT NULL'),
         ('planned_tp_pips', 'REAL DEFAULT NULL'),
         ('mt5_high_water', 'REAL DEFAULT NULL'),
+        ('entry_context', 'TEXT DEFAULT NULL'),  # JSON: market_state at entry time (RSI, ATR, trend, htf_bias, volatility)
     ]:
         try:
             cursor.execute(f"ALTER TABLE auto_strategies ADD COLUMN {col} {coltype}")
@@ -732,10 +739,12 @@ def get_active_profile():
         logging.getLogger('db').debug(f"get_active_profile: {e}")
     finally:
         conn.close()
-    # Defaults (conservative)
+    # Defaults (conservative) — includes ALL keys consumed by the bot to avoid silent fallbacks
+    # AIdan aprende organicamente; no hardcodeamos threshold basado en data contaminada pre-fixes
     return {
-        'min_impact': 50, 'min_confidence': 55, 'direction': 'any',
-        'stop_loss_pips': 3.5, 'take_profit_pips': 15, 'expiry_minutes': 15
+        'min_impact': 50, 'min_confidence': 50, 'direction': 'any',
+        'stop_loss_pips': 3.5, 'take_profit_pips': 15, 'expiry_minutes': 15,
+        'cooldown_minutes': 2, 'max_trades_per_hour': 3,
     }
 
 def cleanup_old_data(hours=72):
@@ -755,18 +764,62 @@ def cleanup_old_data(hours=72):
 
 # ── Auto-Strategy functions ──
 
-def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, take_profit, confidence, impact_score, expiry_minutes=15, trigger_type='news', candles_snapshot=None, profile_name=None):
+def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, take_profit, confidence, impact_score, expiry_minutes=15, trigger_type='news', candles_snapshot=None, profile_name=None, entry_context=None):
     """Add auto-generated strategy, enforcing max 6 cap and dedup.
-    alert_id can be None for structure-triggered strategies."""
+    alert_id can be None for structure-triggered strategies.
+    entry_context: dict with RSI/ATR/trend/htf_bias captured at signal creation (atomic with row insert)."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
-        # Get cooldown from active profile (default 2 min)
+        # Get cooldown + rate limit from active profile
         try:
             profile = get_active_profile()
             cooldown_min = profile.get('cooldown_minutes', 2)
+            max_per_hour = profile.get('max_trades_per_hour', 3)
         except Exception:
             cooldown_min = 2
+            max_per_hour = 3
+
+        # Rate limit: max_trades_per_hour (configurable via profile)
+        hour_cutoff = now_ar() - timedelta(hours=1)
+        cursor.execute("SELECT COUNT(*) FROM auto_strategies WHERE created_at > ?", (hour_cutoff,))
+        trades_last_hour = cursor.fetchone()[0]
+        if trades_last_hour >= max_per_hour:
+            import logging
+            logging.getLogger('db').info(f"Rate limit: {trades_last_hour}/{max_per_hour} trades in last hour, skipping {direction} {trigger_type}")
+            conn.close()
+            return None
+
+        import logging
+        # Consecutive losses circuit: 3 losses in a row → pause 30 min (generic tilt protection)
+        try:
+            cursor.execute("""
+                SELECT result FROM trade_archive
+                WHERE mt5_pnl IS NOT NULL AND result IN ('win', 'loss')
+                ORDER BY archived_at DESC LIMIT 3
+            """)
+            last3 = [r[0] for r in cursor.fetchall()]
+            if len(last3) == 3 and all(r == 'loss' for r in last3):
+                # Check if last loss was within 30 min — if yes, pause
+                cursor.execute("""
+                    SELECT archived_at FROM trade_archive
+                    WHERE mt5_pnl IS NOT NULL AND result = 'loss'
+                    ORDER BY archived_at DESC LIMIT 1
+                """)
+                r = cursor.fetchone()
+                if r:
+                    from datetime import datetime as _dt
+                    try:
+                        last_loss_dt = _dt.strptime(str(r[0]).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                        mins_since = (now_ar() - last_loss_dt).total_seconds() / 60
+                        if mins_since < 30:
+                            logging.getLogger('db').warning(f"Circuit breaker: 3 consecutive losses, last {mins_since:.0f}min ago — pausing 30min")
+                            conn.close()
+                            return None
+                    except Exception:
+                        pass
+        except Exception as _cbe:
+            logging.getLogger('db').debug(f"Circuit breaker check: {_cbe}")
 
         # Dedup: skip if a strategy with same direction exists within cooldown and ~5 pips
         cutoff = now_ar() - timedelta(minutes=max(cooldown_min * 2, 3))
@@ -900,8 +953,18 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
             """, (alert_id, news_title, direction, entry_price, stop_loss, take_profit,
                   confidence, impact_score, expiry_minutes, now, expires_at))
+
+        new_id = cursor.lastrowid
+        # Atomic entry_context persist (avoids race with fast MT5 fills)
+        if entry_context and 'entry_context' in columns:
+            import json as _json
+            try:
+                cursor.execute("UPDATE auto_strategies SET entry_context = ? WHERE id = ?",
+                               (_json.dumps(entry_context), new_id))
+            except Exception:
+                pass
         conn.commit()
-        return cursor.lastrowid
+        return new_id
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1710,11 +1773,11 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
         if cursor.fetchone():
             conn.close()
             return  # already archived
-        # Get strategy data for enrichment
+        # Get strategy data for enrichment (includes entry_context JSON)
         cursor.execute("""
             SELECT direction, entry_price, stop_loss, take_profit, confidence,
                    impact_score, trigger_type, news_title, profile_name, created_at,
-                   mt5_pnl, mt5_fill_price
+                   mt5_pnl, mt5_fill_price, entry_context
             FROM auto_strategies WHERE id = ?
         """, (strategy_id,))
         row = cursor.fetchone()
@@ -1723,7 +1786,7 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             logging.getLogger('db').warning(f"archive_trade: strategy #{strategy_id} not found (deleted by cap?)")
             conn.close()
             return
-        direction, entry, sl, tp, conf, impact, trigger, title, profile, created, mt5_pnl, fill_price = row
+        direction, entry, sl, tp, conf, impact, trigger, title, profile, created, mt5_pnl, fill_price, entry_ctx_json = row
 
         # Use fill_price (actual MT5 execution price) for SL/TP distance calculation
         # entry_price is the signal price; fill_price is where the order actually filled
@@ -1768,8 +1831,8 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
                  confidence, impact_score, setup_type, trigger_type,
                  market_trend, trend_strength, rsi_at_entry, htf_bias,
                  volatility, avg_range_pips, session, hour_utc, day_of_week,
-                 profile_name, mt5_pnl, news_title, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 profile_name, mt5_pnl, news_title, created_at, entry_context)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strategy_id, direction, result, ref_price, exit_price, pips,
             sl, tp, sl_pips, tp_pips, sl_hit, tp_hit,
@@ -1778,7 +1841,7 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             ctx.get('rsi_at_entry', 0), ctx.get('htf_bias', ''),
             ctx.get('volatility', ''), ctx.get('avg_range_pips', 0),
             session, hour_utc, day_of_week,
-            profile, mt5_pnl, title, created
+            profile, mt5_pnl, title, created, entry_ctx_json
         ))
         conn.commit()
     finally:
@@ -1825,6 +1888,46 @@ def get_archive_stats():
         'avg_pips': round(row[3], 2), 'total_pips': round(row[4], 2),
         'first_trade': row[5], 'last_trade': row[6]
     }
+
+
+def save_entry_context(strategy_id, market_state, htf_bias=None):
+    """Persist market snapshot captured AT signal creation time (entry).
+    Stored as JSON in auto_strategies.entry_context column for later archival.
+    """
+    import json as _json
+    try:
+        ctx = {
+            'rsi': market_state.get('rsi', 0),
+            'rsi_zone': market_state.get('rsi_zone', ''),
+            'avg_range_pips': market_state.get('avg_range_pips', 0),
+            'volatility': market_state.get('volatility', ''),
+            'trend': market_state.get('trend', ''),
+            'trend_strength': market_state.get('trend_strength', ''),
+            'momentum': market_state.get('momentum', ''),
+            'htf_bias': htf_bias or '',
+        }
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE auto_strategies SET entry_context = ? WHERE id = ?",
+                     (_json.dumps(ctx), strategy_id))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def get_entry_context(strategy_id):
+    """Read the market snapshot saved at entry time. Returns dict or empty dict."""
+    import json as _json
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT entry_context FROM auto_strategies WHERE id = ?",
+                           (strategy_id,)).fetchone()
+        conn.close()
+        if row and row[0]:
+            return _json.loads(row[0])
+    except Exception:
+        pass
+    return {}
 
 
 def save_post_trade_analysis(strategy_id, analysis, result=None):
@@ -1986,7 +2089,7 @@ def get_learning_adjustments():
                             if session not in adjustments['session_penalties'] or not is_shared:
                                 adjustments['session_penalties'][session] = penalty
                         elif ev > 1.0:
-                            bonus = int(5 * weight)
+                            bonus = int(10 * weight)  # balanced with -15 penalty
                             if session not in adjustments['session_penalties'] or not is_shared:
                                 adjustments['session_penalties'][session] = bonus
                     else:
@@ -1995,7 +2098,7 @@ def get_learning_adjustments():
                             if session not in adjustments['session_penalties'] or not is_shared:
                                 adjustments['session_penalties'][session] = penalty
                         elif wr > 65:
-                            bonus = int(5 * weight)
+                            bonus = int(10 * weight)  # balanced with -15 penalty
                             if session not in adjustments['session_penalties'] or not is_shared:
                                 adjustments['session_penalties'][session] = bonus
 
@@ -2030,7 +2133,7 @@ def get_learning_adjustments():
                             if trigger not in adjustments['trigger_penalties'] or not is_shared:
                                 adjustments['trigger_penalties'][trigger] = penalty
                         elif ev > 1.0:
-                            bonus = int(5 * weight)
+                            bonus = int(10 * weight)  # balanced with -15 penalty
                             if trigger not in adjustments['trigger_penalties'] or not is_shared:
                                 adjustments['trigger_penalties'][trigger] = bonus
                     else:
@@ -2039,7 +2142,7 @@ def get_learning_adjustments():
                             if trigger not in adjustments['trigger_penalties'] or not is_shared:
                                 adjustments['trigger_penalties'][trigger] = penalty
                         elif wr > 65:
-                            bonus = int(5 * weight)
+                            bonus = int(10 * weight)  # balanced with -15 penalty
                             if trigger not in adjustments['trigger_penalties'] or not is_shared:
                                 adjustments['trigger_penalties'][trigger] = bonus
 
@@ -2063,8 +2166,29 @@ def get_learning_adjustments():
                             adjustments['news_category_penalties'][ncat] = int(-10 * weight)
                         elif wr > 65:
                             adjustments['news_category_penalties'][ncat] = int(8 * weight)
-    except Exception:
-        pass
+
+            elif base_cat == 'post_trade':
+                # Gemma's post-trade analysis: aggregate confidence calibration signals
+                # When Gemma consistently says "overestimated" for a trigger type, penalize it
+                # When Gemma consistently says "accurate" + good quality, reward it
+                _trigger = data.get('trigger_type', '')
+                _conf_was = data.get('confidence_was', '')
+                _entry_q = data.get('entry_quality', '')
+                _exit_q = data.get('exit_quality', '')
+                if _trigger:
+                    # Small per-trade adjustments; accumulate across trades in last 48h
+                    if _conf_was == 'overestimated':
+                        cur = adjustments['trigger_penalties'].get(_trigger, 0)
+                        adjustments['trigger_penalties'][_trigger] = cur - int(2 * weight)
+                    elif _conf_was == 'accurate' and _entry_q == 'good' and _exit_q == 'good':
+                        cur = adjustments['trigger_penalties'].get(_trigger, 0)
+                        adjustments['trigger_penalties'][_trigger] = cur + int(1 * weight)
+                    elif _conf_was == 'underestimated' and _entry_q in ('good', 'fair'):
+                        cur = adjustments['trigger_penalties'].get(_trigger, 0)
+                        adjustments['trigger_penalties'][_trigger] = cur + int(1 * weight)
+    except Exception as _le:
+        import logging as _log
+        _log.getLogger('db').warning(f"get_learning_adjustments failed: {_le}", exc_info=True)
 
     # Compute EV-based adjustments directly from trade_archive (most reliable source)
     try:
@@ -2090,7 +2214,7 @@ def get_learning_adjustments():
                     if ev < -1.0:
                         adjustments['trigger_penalties'][tt] = -15
                     elif ev > 1.0:
-                        adjustments['trigger_penalties'][tt] = 5
+                        adjustments['trigger_penalties'][tt] = 10  # balanced with -15 penalty
 
         # EV by news_category from signal_results
         if not adjustments['news_category_penalties']:

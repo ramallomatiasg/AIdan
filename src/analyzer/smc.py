@@ -450,29 +450,41 @@ class SMCEngine:
         self.confirmation = ConfirmationEngine(logger, self.rules)
         self._mtf_state = None
         self._zones_by_tf = {}
+        # Lock protects _mtf_state + _zones_by_tf against torn reads while update() writes
+        import threading
+        self._lock = threading.Lock()
 
     def update(self):
         """Fetch fresh data and update analysis."""
-        self._mtf_state = self.mtf.get_mtf_state()
-
-        # Detect zones per timeframe
-        self._zones_by_tf = {}
+        new_state = self.mtf.get_mtf_state()
+        # Compute zones BEFORE acquiring lock (network/compute heavy)
+        new_zones = {}
         for tf in ['H1', 'M15', 'M5']:
             candles = self.mtf.get_candles(tf)
             if candles:
-                self._zones_by_tf[tf] = self.zone_detector.detect_zones(candles, tf)
+                new_zones[tf] = self.zone_detector.detect_zones(candles, tf)
+        # Atomic swap under lock — readers see consistent snapshot
+        with self._lock:
+            self._mtf_state = new_state
+            self._zones_by_tf = new_zones
 
     def check_confirmations(self):
         """Check for confirmed SMC setups. Call after update()."""
-        if not self._mtf_state:
+        with self._lock:
+            state = self._mtf_state
+            zones = dict(self._zones_by_tf) if self._zones_by_tf else {}
+        if not state:
             return []
-        return self.confirmation.check(self._mtf_state, self._zones_by_tf)
+        return self.confirmation.check(state, zones)
 
     def get_status(self):
         """Get current SMC status for display. Call after update()."""
-        if not self._mtf_state:
+        with self._lock:
+            state = self._mtf_state
+            zones = dict(self._zones_by_tf) if self._zones_by_tf else {}
+        if not state:
             return {'status': 'no_data', 'message': 'Sin datos'}
-        return self.confirmation.get_status(self._mtf_state, self._zones_by_tf)
+        return self.confirmation.get_status(state, zones)
 
     def get_mtf_state(self):
         """Get raw MTF state."""
@@ -488,14 +500,16 @@ class SMCEngine:
         This is injected into every chat message so Groq/Ollama knows
         the multi-timeframe situation.
         """
-        if not self._mtf_state:
+        with self._lock:
+            mtf_snapshot = self._mtf_state
+        if not mtf_snapshot:
             return ""
 
         status = self.get_status()
         lines = ["\n📊 ANÁLISIS MULTI-TEMPORALIDAD (Smart Money Concepts):"]
 
         for tf in ['H1', 'M15', 'M5']:
-            s = self._mtf_state.get(tf, {})
+            s = mtf_snapshot.get(tf, {})
             trend = s.get('trend', '?')
             arrow = {'bullish': 'ALCISTA ↑', 'bearish': 'BAJISTA ↓', 'neutral': 'LATERAL →'}.get(trend, '?')
             lsh = s.get('last_swing_high')
@@ -517,11 +531,13 @@ class SMCEngine:
 
             lines.append(line)
 
-        # Zones
+        # Zones — snapshot under lock
+        with self._lock:
+            zones_snapshot = dict(self._zones_by_tf) if self._zones_by_tf else {}
         lines.append("  ZONAS ACTIVAS:")
         has_zones = False
         for tf in ['H1', 'M15']:
-            for z in self._zones_by_tf.get(tf, []):
+            for z in zones_snapshot.get(tf, []):
                 emoji = '🟢' if z['type'] == 'demand' else '🔴'
                 lines.append(
                     f"    {emoji} {z['type'].upper()} {tf}: {z['bottom']:.5f} - {z['top']:.5f} "

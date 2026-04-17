@@ -27,7 +27,7 @@ FOREX_HOLIDAYS = [
     (12, 25), # Christmas
 ]
 
-MIN_TRADES_FOR_ANALYSIS = 3
+MIN_TRADES_FOR_ANALYSIS = 8  # minimum trades before we trust a pattern (was 3, too noisy)
 
 
 def _wcount(trades):
@@ -425,13 +425,22 @@ class LearningEngine:
         from src.common.db import save_learning_insight
 
         # Build pattern keys: direction × htf_bias × session × trigger_type
+        # SKIP contaminated legacy trades where htf_bias was never captured (NULL/empty)
+        # Those trades still contribute to aggregate WR via _analyze_triggers/_analyze_sessions
+        # but cannot form reliable multi-dim patterns.
         patterns = {}
+        skipped_no_htf = 0
         for t in trades:
             if t['result'] not in ('win', 'loss'):
                 continue
+            raw_htf = t.get('htf_bias', '')
+            if not raw_htf or raw_htf == '' or raw_htf == 'unknown':
+                # Legacy contaminated row — skip pattern mining, keep for aggregate stats
+                skipped_no_htf += 1
+                continue
             w = t.get('_weight', 1.0)
             direction = t.get('direction', '?')
-            htf = t.get('htf_bias', 'unknown') or 'unknown'
+            htf = raw_htf
             session = t.get('session', 'unknown') or 'unknown'
             trigger = t.get('trigger_type', 'unknown') or 'unknown'
 
@@ -474,6 +483,8 @@ class LearningEngine:
 
         if best_patterns or worst_patterns:
             self.logger.info(f"Learning patterns: {len(best_patterns)} ganadores, {len(worst_patterns)} perdedores")
+        if skipped_no_htf > 0:
+            self.logger.info(f"Pattern mining: {skipped_no_htf} legacy trades skipped (htf_bias missing — pre-fix contamination)")
 
     def _generate_report(self, trades):
         """Generate a self-evaluation report."""

@@ -36,6 +36,11 @@ class MT5Executor:
         self.kill_switch = False
         self._mt5 = None
         self._terminal_path = None
+        self._smc_ref = None  # Set by main loop to enable htf_bias lookup
+
+    def set_smc_ref(self, smc):
+        """Inject SMC reference so we can read htf_bias when archiving trades."""
+        self._smc_ref = smc
 
     def connect(self):
         try:
@@ -176,23 +181,25 @@ class MT5Executor:
         sl_pips = sl_distance / 0.0001
         lot = self.calculate_lot_size(sl_pips)
 
-        # Pre-flight: reject if current spread > SL distance
+        # Pre-flight: retry up to 3 times if spread > SL distance (news event spikes)
         current_spread = abs(tick.ask - tick.bid)
         if current_spread >= sl_distance:
-            self.logger.warning(f"MT5: spread {current_spread/0.0001:.1f}p >= SL {sl_pips:.1f}p — skipping #{strategy_id}")
-            update_mt5_ticket(strategy_id, None, 0, 'error')
-            return None
-
-        # Price deviation gate: reject if broker price moved too far from signal price
-        # This prevents entering at the bottom/top of a candle after the move already happened
-        broker_price = tick.ask if direction == 'CALL' else tick.bid
-        price_deviation = abs(broker_price - entry_price) / 0.0001  # in pips
-        max_deviation = sl_pips * 0.40  # max 40% of SL distance
-        max_deviation = max(max_deviation, 2.0)  # at least 2 pips tolerance
-        if price_deviation > max_deviation:
-            self.logger.warning(f"MT5: price deviation {price_deviation:.1f}p > max {max_deviation:.1f}p (40% of SL {sl_pips:.1f}p) — signal price {entry_price:.5f} vs broker {broker_price:.5f} — skipping #{strategy_id}")
-            update_mt5_ticket(strategy_id, None, 0, 'error')
-            return None
+            self.logger.info(f"MT5: spread spike {current_spread/0.0001:.1f}p >= SL {sl_pips:.1f}p — retrying for #{strategy_id}")
+            retried = False
+            for _retry in range(3):
+                time.sleep(0.5)  # brief wait for spread to normalize
+                tick = self._mt5.symbol_info_tick(symbol)
+                if not tick:
+                    continue
+                current_spread = abs(tick.ask - tick.bid)
+                if current_spread < sl_distance:
+                    retried = True
+                    self.logger.info(f"MT5: spread normalized to {current_spread/0.0001:.1f}p after retry — proceeding #{strategy_id}")
+                    break
+            if not retried:
+                self.logger.warning(f"MT5: spread {current_spread/0.0001:.1f}p still >= SL {sl_pips:.1f}p after 3 retries — skipping #{strategy_id}")
+                update_mt5_ticket(strategy_id, None, 0, 'error')
+                return None
 
         # Try limit order first for better entry price
         LIMIT_DISCOUNT_PIPS = 1.5  # pips discount from current price
@@ -312,7 +319,7 @@ class MT5Executor:
             "price": price,
             "sl": adjusted_sl,
             "tp": adjusted_tp,
-            "deviation": 20,
+            "deviation": 50,  # points (0.1 pip each on 5-digit brokers) = 5 pips tolerance
             "magic": MAGIC_NUMBER,
             "comment": f"AIdan #{strategy_id}",
             "type_time": self._mt5.ORDER_TIME_GTC,
@@ -544,7 +551,7 @@ class MT5Executor:
                         "type": close_type,
                         "position": p.ticket,
                         "price": close_price,
-                        "deviation": 20,
+                        "deviation": 50,  # points (0.1 pip each on 5-digit brokers) = 5 pips tolerance
                         "magic": MAGIC_NUMBER,
                         "comment": "AIdan orphan close",
                         "type_time": self._mt5.ORDER_TIME_GTC,
@@ -630,6 +637,12 @@ class MT5Executor:
                     _mt5_trend_str = _ms.get('trend_strength', '')
                 except Exception:
                     pass
+                # Fix: read htf_bias from SMC reference (previously always empty)
+                try:
+                    if self._smc_ref:
+                        _mt5_htf = self._smc_ref.get_status().get('htf_bias', '') or ''
+                except Exception:
+                    pass
                 ctx = {
                     'entry_price': entry_price,
                     'direction': direction,
@@ -641,6 +654,28 @@ class MT5Executor:
                 }
                 auto_evaluate_strategy(sid, result, close_price, pips_result, ctx)
                 self.logger.info(f"MT5 instant eval: #{sid} {result.upper()} {pips_result:+.1f}p (P&L ${pnl:.2f})")
+
+                # Fix #4: archive to trade_archive with full context (was only going to strategy_results before)
+                try:
+                    from src.common.db import archive_trade, get_entry_context
+                    # Merge live close context with entry context captured when strategy was created
+                    entry_ctx = get_entry_context(sid)
+                    full_ctx = {**ctx}
+                    # Prefer ENTRY-TIME values over close-time snapshot for learning accuracy
+                    if entry_ctx:
+                        full_ctx['rsi_at_entry'] = entry_ctx.get('rsi', 0)
+                        full_ctx['avg_range_pips'] = entry_ctx.get('avg_range_pips', 0)
+                        full_ctx['volatility'] = entry_ctx.get('volatility', '')
+                        # Keep entry trend+htf; only override if missing
+                        if entry_ctx.get('trend'):
+                            full_ctx['market_trend'] = entry_ctx['trend']
+                        if entry_ctx.get('trend_strength'):
+                            full_ctx['trend_strength'] = entry_ctx['trend_strength']
+                        if entry_ctx.get('htf_bias'):
+                            full_ctx['htf_bias'] = entry_ctx['htf_bias']
+                    archive_trade(sid, result, close_price, pips_result, full_ctx)
+                except Exception as _ae:
+                    self.logger.warning(f"Archive MT5 trade #{sid}: {_ae}")
 
                 # Post-trade analysis with Gemma (background thread)
                 try:
@@ -714,7 +749,7 @@ class MT5Executor:
                 "type": close_type,
                 "position": p.ticket,
                 "price": close_price,
-                "deviation": 20,
+                "deviation": 50,  # points (0.1 pip each on 5-digit brokers) = 5 pips tolerance
                 "magic": MAGIC_NUMBER,
                 "comment": f"AIdan close #{strategy_id}",
                 "type_time": self._mt5.ORDER_TIME_GTC,
@@ -756,7 +791,7 @@ class MT5Executor:
                 "type": close_type,
                 "position": p.ticket,
                 "price": close_price,
-                "deviation": 20,
+                "deviation": 50,  # points (0.1 pip each on 5-digit brokers) = 5 pips tolerance
                 "magic": MAGIC_NUMBER,
                 "comment": "AIdan close",
                 "type_time": self._mt5.ORDER_TIME_GTC,

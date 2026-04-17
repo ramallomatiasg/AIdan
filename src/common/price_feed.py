@@ -15,6 +15,7 @@ import requests
 _TWELVE_DATA_KEY = None
 _SOURCE_PRIORITY = ['twelvedata', 'fxcm', 'yahoo']
 _last_source_used = None
+_candle_cache = {}  # {key: (timestamp, data)} — avoids redundant fetches in same cycle
 
 
 def _get_twelve_data_key():
@@ -48,7 +49,17 @@ def fetch_candles(interval='5min', count=100, logger=None):
         list of dicts with keys: open, high, low, close, datetime
         or None on failure
     """
-    global _last_source_used
+    global _last_source_used, _candle_cache
+
+    # Cache: avoid redundant fetches in same analysis cycle (3s TTL)
+    cache_key = f"{interval}_{count}"
+    now = time.time()
+    if cache_key in _candle_cache and (now - _candle_cache[cache_key][0]) < 3:
+        return _candle_cache[cache_key][1]
+
+    def _cache_and_return(c):
+        _candle_cache[cache_key] = (time.time(), c)
+        return c
 
     # 0. MT5 first — real-time broker data, zero latency, most accurate for execution
     candles = _fetch_mt5(interval, count, logger)
@@ -58,7 +69,7 @@ def fetch_candles(interval='5min', count=100, logger=None):
             candles = candles[-count:]
         if logger:
             logger.info(f"PriceFeed: last close={candles[-1]['close']:.5f} from mt5 ({interval})")
-        return candles
+        return _cache_and_return(candles)
 
     # 1. Yahoo Finance — good precision, real-time price, no API key
     yh_interval, yh_range = _map_interval_to_yahoo(interval, count)
@@ -69,7 +80,7 @@ def fetch_candles(interval='5min', count=100, logger=None):
             candles = candles[-count:]
         if logger:
             logger.info(f"PriceFeed: last close={candles[-1]['close']:.5f} from yahoo ({interval})")
-        return candles
+        return _cache_and_return(candles)
 
     # 2. Try Twelve Data as backup
     key = _get_twelve_data_key()
@@ -79,7 +90,7 @@ def fetch_candles(interval='5min', count=100, logger=None):
             _last_source_used = 'twelvedata'
             if logger:
                 logger.info(f"PriceFeed: last close={candles[-1]['close']:.5f} from twelvedata ({interval})")
-            return candles
+            return _cache_and_return(candles)
 
     # 3. Try FXCM as last resort
     candles = _fetch_fxcm(interval, count, logger)
@@ -87,7 +98,7 @@ def fetch_candles(interval='5min', count=100, logger=None):
         _last_source_used = 'fxcm'
         if logger:
             logger.info(f"PriceFeed: last close={candles[-1]['close']:.5f} from fxcm ({interval})")
-        return candles
+        return _cache_and_return(candles)
 
     return None
 
@@ -112,9 +123,25 @@ def _fetch_mt5(interval, count, logger=None):
         from src.common.config import Config
         symbol = getattr(Config, 'MT5_SYMBOL', 'EURUSD')
 
-        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count + 5)
-        if rates is None or len(rates) < 25:
+        # Fetch 1 extra so we can safely drop the last (possibly-forming) candle
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count + 6)
+        if rates is None or len(rates) < 26:
             return None
+
+        # Detect if last candle is still forming (its timestamp is the current bar,
+        # not yet closed). Compare time of last rate to current UTC time.
+        tf_seconds_map = {
+            '1min': 60, '5min': 300, '15min': 900,
+            '1h': 3600, '4h': 14400, '1d': 86400,
+        }
+        tf_seconds = tf_seconds_map.get(interval, 300)
+        import time as _t
+        now_ts = _t.time()
+        last_candle_ts = int(rates[-1]['time'])
+        last_candle_close = last_candle_ts + tf_seconds
+        if now_ts < last_candle_close:
+            # Last candle still forming — drop it so analysis uses only closed candles
+            rates = rates[:-1]
 
         candles = []
         for r in rates:

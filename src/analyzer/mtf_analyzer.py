@@ -13,6 +13,8 @@ class MTFAnalyzer:
 
     # Timeframe configs: interval, range for Yahoo, cache TTL, swing neighbor count
     TF_CONFIG = {
+        'D1':  {'interval': '1d',  'range': '30d', 'cache_ttl': 300, 'swing_n': 3},
+        'H4':  {'interval': '4h',  'range': '20d', 'cache_ttl': 240, 'swing_n': 3},
         'H1':  {'interval': '1h',  'range': '5d',  'cache_ttl': 120, 'swing_n': 3},
         'M15': {'interval': '15m', 'range': '5d',  'cache_ttl': 60,  'swing_n': 2},
         'M5':  {'interval': '5m',  'range': '1d',  'cache_ttl': 30,  'swing_n': 2},
@@ -58,6 +60,37 @@ class MTFAnalyzer:
 
         result['summary'] = self._build_summary(result)
         return result
+
+    def get_daily_context(self):
+        """Return macro daily context: today's high/low, previous day OHLC, 5-day range.
+        Used by signal generator to understand macro market positioning.
+        """
+        d1 = self.get_candles('D1')
+        if not d1 or len(d1) < 3:
+            return None
+        # Today's bar (last) and previous day
+        today = d1[-1]
+        prev = d1[-2]
+        # 5-day range (swing high/low over last 5 closed days)
+        recent = d1[-6:-1] if len(d1) >= 6 else d1[:-1]
+        week_high = max(c['high'] for c in recent) if recent else today['high']
+        week_low = min(c['low'] for c in recent) if recent else today['low']
+        # Current price position within today's range (0 = at low, 1 = at high)
+        today_range = today['high'] - today['low']
+        today_pos = None
+        if today_range > 0:
+            today_pos = (today['close'] - today['low']) / today_range
+        return {
+            'today_high': today['high'],
+            'today_low': today['low'],
+            'today_close': today['close'],
+            'today_pos': today_pos,  # 0-1, where in today's range
+            'prev_high': prev['high'],
+            'prev_low': prev['low'],
+            'prev_close': prev['close'],
+            'week_high': week_high,
+            'week_low': week_low,
+        }
 
     def _analyze_tf(self, tf, candles):
         """Analyze a single timeframe: trend, swings, structure."""

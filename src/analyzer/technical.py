@@ -312,7 +312,7 @@ class TechnicalAnalyzer:
             'source': 'live'
         }
 
-    def detect_structure_signals(self, min_confidence=50, htf_bias=None):
+    def detect_structure_signals(self, min_confidence=50, htf_bias=None, daily_context=None):
         """
         Scan market structure for actionable setups (no news needed).
         min_confidence comes from the user's active profile.
@@ -365,6 +365,11 @@ class TechnicalAnalyzer:
 
         signals = []
         pip = 0.0001
+
+        # Recent closed candles — defined early so dynamic_conf() closure can use them
+        # (Fix: previously defined AFTER dynamic_conf, causing silent NameError in candle pattern boost)
+        prev1 = candles[-2] if len(candles) >= 2 else None
+        prev2 = candles[-3] if len(candles) >= 3 else None
 
         # Load auto-tuner optimized params (fallback to defaults)
         tuner_params = {}
@@ -464,7 +469,7 @@ class TechnicalAnalyzer:
                 conf -= 12  # Near-dead market, signal unreliable
 
             # ── 5. Candle pattern context (±5) ──
-            if len(candles) >= 3:
+            if prev1 is not None and prev2 is not None and len(candles) >= 3:
                 body1 = abs(prev1['close'] - prev1['open']) * 10000
                 body2 = abs(prev2['close'] - prev2['open']) * 10000
                 if body1 > 3:  # Strong candle body
@@ -530,14 +535,32 @@ class TechnicalAnalyzer:
                 elif is_against_momentum:
                     conf -= 5
 
-            # ── 9. Random jitter to avoid identical values (±3) ──
+            # ── 9. Daily range positioning (±10) — macro context ──
+            # If price at top of today's range → CALLs risky (exhaustion), PUTs favored (mean reversion)
+            # If at bottom → CALLs favored, PUTs risky
+            if signal_direction and daily_context and daily_context.get('today_pos') is not None:
+                pos = daily_context['today_pos']  # 0 = at day low, 1 = at day high
+                if signal_direction == 'CALL':
+                    if pos > 0.85:  # near day high — fading
+                        conf -= 10
+                    elif pos < 0.25:  # near day low — ideal CALL
+                        conf += 8
+                else:  # PUT
+                    if pos < 0.15:  # near day low — fading
+                        conf -= 10
+                    elif pos > 0.75:  # near day high — ideal PUT
+                        conf += 8
+                # Proximity to previous day's close (common pivot)
+                prev_close = daily_context.get('prev_close', 0)
+                if prev_close > 0 and abs(price - prev_close) < 0.0005:  # within 5p of prev close
+                    conf -= 5  # price at reversion zone — uncertain direction
+
+            # ── 10. Random jitter to avoid identical values (±3) ──
             conf += random.randint(-3, 3)
 
             return max(20, min(95, conf))
 
-        # Recent closed candles (not current incomplete one)
-        prev1 = candles[-2]
-        prev2 = candles[-3]
+        # prev1/prev2 already defined at top of function for dynamic_conf closure
         recent_candles = candles[-6:-1]  # last 5 closed candles for wider detection
 
         # Helper: check if level was crossed in recent candles
@@ -1112,7 +1135,10 @@ class TechnicalAnalyzer:
 
     @staticmethod
     def get_session_info():
-        """Return current trading session info based on UTC hour."""
+        """Return current trading session info based on UTC hour.
+        Session adjustments reflect general forex liquidity patterns (not calibrated to contaminated data).
+        Learning engine will adjust per-session bias organically as clean data accumulates.
+        """
         utc_hour = datetime.now(timezone.utc).hour
         if 7 <= utc_hour < 12:
             return {'session': 'london', 'conf_adj': 8, 'spread_est': 0.6, 'label': 'London'}
@@ -1120,9 +1146,9 @@ class TechnicalAnalyzer:
             # London/NY overlap — best liquidity for EURUSD
             return {'session': 'overlap', 'conf_adj': 5, 'spread_est': 0.5, 'label': 'London/NY Overlap'}
         elif 16 <= utc_hour < 20:
-            return {'session': 'ny', 'conf_adj': -5, 'spread_est': 0.8, 'label': 'NY'}
+            return {'session': 'ny', 'conf_adj': 0, 'spread_est': 0.8, 'label': 'NY'}
         else:
-            return {'session': 'off_hours', 'conf_adj': -15, 'spread_est': 1.5, 'label': 'Off-hours'}
+            return {'session': 'off_hours', 'conf_adj': -10, 'spread_est': 1.5, 'label': 'Off-hours'}
 
     def compute_adaptive_sl_tp(self, direction, price, market_state, profile):
         """
@@ -1173,9 +1199,48 @@ class TechnicalAnalyzer:
                     final_sl = round(structural_sl, 1)
                     final_tp = round(final_sl * rr_ratio, 1)
 
+        # TP priority: next structural level if reachable with min R:R 1:1.5, else ATR cap
+        # Structural TP hits natural levels (resistance for CALL, support for PUT) where price naturally pauses
+        structural_tp_pips = None
+        if direction == 'CALL' and resistances:
+            above_res = [r for r in resistances if r > price]
+            if above_res:
+                nearest_res = min(above_res)
+                # Buffer: aim 1 pip BEFORE the resistance to maximize fill probability
+                candidate_tp = (nearest_res - price) * 10000 - 1.0
+                if candidate_tp >= final_sl * 1.5:  # at least 1:1.5 R:R
+                    structural_tp_pips = round(candidate_tp, 1)
+        elif direction == 'PUT' and supports:
+            below_sups = [s for s in supports if s < price]
+            if below_sups:
+                nearest_sup = max(below_sups)
+                candidate_tp = (price - nearest_sup) * 10000 - 1.0
+                if candidate_tp >= final_sl * 1.5:
+                    structural_tp_pips = round(candidate_tp, 1)
+
+        # ATR-based TP cap (fallback)
+        # Research consensus (2026): M5 scalping profitable R:R = 1:1 to 1:1.5 with 55-65% WR
+        # TP cap = ATR*2 is realistic for M5 (vs ATR*3 which was too ambitious)
+        if atr > 0:
+            atr_floor = max(atr, 2.0)
+            tp_cap = round(atr_floor * 2.0, 1)
+            min_rr = 1.2  # allow lower R:R if market is tight; research accepts 1:1 for high-WR scalping
+            tp_min = round(final_sl * min_rr, 1)
+            original_tp = final_tp
+            # Priority: use structural TP if available and within reasonable bound (<= 2x cap)
+            if structural_tp_pips is not None and structural_tp_pips <= tp_cap * 2:
+                final_tp = structural_tp_pips
+                method_tp = 'structural'
+            else:
+                final_tp = min(final_tp, tp_cap)
+                final_tp = max(final_tp, tp_min)
+                method_tp = 'atr_cap'
+            if original_tp != final_tp:
+                self.logger.info(f"TP [{method_tp}]: original={original_tp}p -> {final_tp}p (ATR={atr_floor:.1f}p, SL={final_sl}p, R:R=1:{final_tp/max(final_sl,0.1):.1f})")
+
         method = 'atr_adaptive' if atr > 0 else 'profile'
         if supports or resistances:
-            method += '+struct_sl'
+            method += '+struct'
 
         # Calculate actual prices
         if direction == 'CALL':
