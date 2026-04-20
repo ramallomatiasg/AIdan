@@ -861,30 +861,57 @@ class TechnicalAnalyzer:
                     sig['confidence'] = max(sig['confidence'] - pat['confidence_boost'] // 2, 20)
                     sig['reason'] += f" Precaución: patrón {pat['pattern']} contradice (bajista)."
 
-        # ── Counter-trend filter: require higher confidence when fighting ANY detected trend ──
-        # strong trend   → need conf >= 80
-        # moderate trend → need conf >= 70
-        # weak trend     → need conf >= 60 (still a real trend, just less pronounced on M5)
-        if trend in ('bullish', 'bearish') and signals:
+        # ── Counter-trend filter: require higher confidence when fighting trend/HTF ──
+        # Two levels of fighting:
+        #   Counter-M5-trend: price action on M5 is against signal. Escala por strength.
+        #   Counter-HTF: H1 macro bias is against signal. MAS PELIGROSO (H1 >> M5).
+        # If BOTH counter: block unless conf >= 85 (extreme confluence required)
+        # If only HTF counter (M5 aligned): block unless conf >= 75 (H1 is macro truth)
+        # If only M5 counter: current scale (60/70/80 by strength)
+        if signals:
             filtered = []
+            # Base thresholds for counter-M5-trend by strength
             if trend_strength == 'strong':
-                min_counter_conf = 80
+                m5_threshold = 80
             elif trend_strength == 'moderate':
-                min_counter_conf = 70
-            else:  # weak — still a trend, M5 MAs are always close
-                min_counter_conf = 60
+                m5_threshold = 70
+            else:
+                m5_threshold = 60
             for sig in signals:
-                is_counter = (
+                is_counter_m5 = trend in ('bullish', 'bearish') and (
                     (sig['direction'] == 'CALL' and trend == 'bearish') or
                     (sig['direction'] == 'PUT' and trend == 'bullish')
                 )
-                if is_counter:
-                    if sig['confidence'] >= min_counter_conf:
-                        sig['reason'] += f" [contra-tendencia {trend_strength}, conf {sig['confidence']} >= {min_counter_conf} OK]"
+                is_counter_htf = htf_bias in ('bullish', 'bearish') and (
+                    (sig['direction'] == 'CALL' and htf_bias == 'bearish') or
+                    (sig['direction'] == 'PUT' and htf_bias == 'bullish')
+                )
+
+                if is_counter_m5 and is_counter_htf:
+                    # Fighting BOTH M5 and H1 — suicide territory
+                    min_req = 85
+                    if sig['confidence'] >= min_req:
+                        sig['reason'] += f" [contra M5+HTF, conf {sig['confidence']} >= {min_req} OK]"
                         filtered.append(sig)
                     else:
-                        self.logger.info(f"Counter-trend filter: blocked {sig['direction']} {sig['setup_type']} conf={sig['confidence']} < {min_counter_conf} (trend={trend} {trend_strength})")
+                        self.logger.info(f"Counter-M5+HTF filter: blocked {sig['direction']} {sig['setup_type']} conf={sig['confidence']} < {min_req} (trend={trend} {trend_strength}, htf={htf_bias})")
+                elif is_counter_htf:
+                    # M5 aligned but H1 against — common trap (we lost $20 today from this)
+                    min_req = 75
+                    if sig['confidence'] >= min_req:
+                        sig['reason'] += f" [contra-HTF, conf {sig['confidence']} >= {min_req} OK]"
+                        filtered.append(sig)
+                    else:
+                        self.logger.info(f"Counter-HTF filter: blocked {sig['direction']} {sig['setup_type']} conf={sig['confidence']} < {min_req} (htf={htf_bias}, M5 trend={trend})")
+                elif is_counter_m5:
+                    # Against M5 but HTF aligned or neutral
+                    if sig['confidence'] >= m5_threshold:
+                        sig['reason'] += f" [contra M5 {trend_strength}, conf {sig['confidence']} >= {m5_threshold} OK]"
+                        filtered.append(sig)
+                    else:
+                        self.logger.info(f"Counter-M5 filter: blocked {sig['direction']} {sig['setup_type']} conf={sig['confidence']} < {m5_threshold} (trend={trend} {trend_strength})")
                 else:
+                    # Fully aligned or neutral — pass through
                     filtered.append(sig)
             signals = filtered
 

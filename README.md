@@ -1,4 +1,4 @@
-# AIdan v3.6.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.6.2 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
@@ -365,6 +365,16 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.6.2 (20 Abr 2026) — Fix counter-HTF filter (impacto alto)
+- **Filtro contra-tendencia ampliado a HTF bias** (antes solo miraba M5 trend)
+- El caso que perdia plata: H1=bearish + M5=bullish -> CALL pasaba como "aligned con M5" pero era suicida contra H1
+- Nuevos thresholds:
+  - Counter M5 + Counter HTF (contra ambos): conf >= 85 (extreme confluence required)
+  - Counter HTF solo (M5 aligned, H1 contra): conf >= 75 (H1 es macro, peligroso)
+  - Counter M5 solo (H1 aligned/neutral): escala existente (60/70/80 por strength)
+- Validado con los 8 counter-HTF del 20 Abr: 5 se habrian bloqueado, PnL -$20.10 -> +$1.00 (+$21.10 ahorro)
+- Fresh slate de trade_archive aplicado: borrados 185 trades pre-v3.6.0 contaminados
 
 ### v3.6.1 (20 Abr 2026) — Hotfix circuit breaker timezone bug
 - **Circuit breaker bloqueaba eternamente** despues de 3 losses consecutivas por mix de timezones
