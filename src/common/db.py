@@ -810,9 +810,12 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
                 if r:
                     from datetime import datetime as _dt
                     try:
+                        # archived_at stored as UTC (SQL CURRENT_TIMESTAMP), so compare with UTC now
                         last_loss_dt = _dt.strptime(str(r[0]).split('.')[0], '%Y-%m-%d %H:%M:%S')
-                        mins_since = (now_ar() - last_loss_dt).total_seconds() / 60
-                        if mins_since < 30:
+                        now_utc = _dt.utcnow()
+                        mins_since = (now_utc - last_loss_dt).total_seconds() / 60
+                        # Only block if loss was recent (0-30 min ago, not negative from timezone bugs)
+                        if 0 <= mins_since < 30:
                             logging.getLogger('db').warning(f"Circuit breaker: 3 consecutive losses, last {mins_since:.0f}min ago — pausing 30min")
                             conn.close()
                             return None

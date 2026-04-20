@@ -1,4 +1,4 @@
-# AIdan v3.6.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.6.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
@@ -365,6 +365,12 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.6.1 (20 Abr 2026) — Hotfix circuit breaker timezone bug
+- **Circuit breaker bloqueaba eternamente** despues de 3 losses consecutivas por mix de timezones
+- `archived_at` en trade_archive se guarda como UTC (SQL CURRENT_TIMESTAMP) pero se comparaba con `now_ar()` (Argentina, UTC-3)
+- Resta daba valores negativos (-91min) que pasaban el check `mins_since < 30` → bloqueo permanente
+- Fix: usar `datetime.utcnow()` para comparacion consistente + rango `0 <= mins_since < 30` (no solo `< 30`)
 
 ### v3.6.0 (17 Abr 2026) — Auditoria profunda + integridad de datos
 - Fix critico: htf_bias self-referential bug (174 trades con NULL en historial). Learning engine ahora ve contexto macro
