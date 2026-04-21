@@ -1670,6 +1670,16 @@ class AIdan:
                                 logger.info(f"[{iteration}] AutoTuner: outside active sessions (UTC {utc_hour}h), skipping structure scan")
 
                         if not skip_session:
+                            # Ensure SMC has fresh HTF data BEFORE structure scanner reads it.
+                            # Bug fix: SMC.update() was only called below in SMC scanner section,
+                            # so structure scanner saw empty htf_bias in the first cycle of the day
+                            # (and whenever SMC state was stale). This made counter-HTF filter inert.
+                            try:
+                                if smc:
+                                    smc.update()
+                            except Exception as _sue:
+                                logger.debug(f"SMC update pre-structure: {_sue}")
+
                             # Get HTF bias BEFORE signal generation so scanner can reason about it
                             htf_bias = None
                             try:
@@ -1889,8 +1899,9 @@ class AIdan:
                         logger.error(f"Structure scanner error: {e}", exc_info=True)
 
                     # ── SMC Scanner: multi-timeframe + demand/supply zones + confirmation ──
+                    # Note: smc.update() already called above before structure scanner.
+                    # Skip re-update here to avoid double MT5 fetch in same cycle.
                     try:
-                        smc.update()
                         smc_setups = smc.check_confirmations()
                         logger.info(f"[{iteration}] SMC setups: {len(smc_setups)}")
                         # AutoTuner: block SMC setup types with poor win rates

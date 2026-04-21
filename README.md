@@ -1,4 +1,4 @@
-# AIdan v3.6.2 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.6.3 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
@@ -365,6 +365,11 @@ El ejecutable queda en `dist/AIdan_TodoEnUno.exe`.
 ---
 
 ## Historial de versiones
+
+### v3.6.3 (21 Abr 2026) — Triple bugfix: SMC order, circuit breaker, pre-planner dedup
+- **SMC update order fix**: `smc.update()` se llamaba DESPUES que structure scanner leia `smc.get_status()`. Primer ciclo del dia (o cualquier con SMC stale) → htf_bias vacio → filtro counter-HTF inerte. Caso real: trade #264 CALL tomado contra H1 bearish sin info HTF.
+- **Circuit breaker usaba `archived_at` en vez de `created_at`**: trades viejos que se archivaban hoy por cap-cleanup aparecian como "losses recientes" y bloqueaban AIdan. Caso real: pre_planned del 20 Abr archivados hoy junto con trade #264 → 3 losses aparentes pero de dias distintos. Fix: ordenar por created_at + ventana de 2 horas maximo para considerarse tilt real.
+- **Pre-planner crea duplicados cuando corre 2+ veces al dia**: `planned_hours = set()` estaba dentro de la funcion, se reiniciaba cada llamada. Caso real: pre_planner corrio ayer 17:00 y 18:08, creo #260 (Core Retail Sales) y #263 (Retail Sales) ambos CALL para el mismo evento 13:30 UTC. Cuando publico, ambos perdieron simultaneamente (-$11.10 combinado). Fix: dedup persistente via query a auto_strategies buscando pre_planned con event_time en ventana de 48h.
 
 ### v3.6.2 (20 Abr 2026) — Fix counter-HTF filter (impacto alto)
 - **Filtro contra-tendencia ampliado a HTF bias** (antes solo miraba M5 trend)

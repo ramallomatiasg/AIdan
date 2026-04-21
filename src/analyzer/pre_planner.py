@@ -399,6 +399,34 @@ def plan_next_day_strategies(market_context=None):
     created_ids = []
     planned_hours = set()  # track hours to avoid conflicting plans at same time
 
+    # Persistent dedup: check DB for existing pre_planned strategies in next 48h window
+    # This prevents duplicates when plan_next_day_strategies runs twice in same day
+    try:
+        import sqlite3
+        from src.common.db import DB_PATH
+        from datetime import datetime, timedelta
+        _conn = sqlite3.connect(DB_PATH)
+        _c = _conn.cursor()
+        now = datetime.now()
+        window_end = now + timedelta(hours=48)
+        _c.execute("""
+            SELECT event_time FROM auto_strategies
+            WHERE trigger_type = 'pre_planned'
+              AND event_time IS NOT NULL
+              AND event_time >= ? AND event_time <= ?
+        """, (now.strftime('%Y-%m-%d %H:%M:%S'), window_end.strftime('%Y-%m-%d %H:%M:%S')))
+        for (et,) in _c.fetchall():
+            try:
+                et_dt = datetime.strptime(str(et).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                planned_hours.add(et_dt.hour)
+            except Exception:
+                pass
+        _conn.close()
+        if planned_hours:
+            logger.info(f"Pre-planner: existing plans for hours UTC {sorted(planned_hours)} — will skip these")
+    except Exception as _pde:
+        logger.debug(f"Pre-planner dedup check: {_pde}")
+
     for event in events:
         # Skip if we already planned a strategy for this hour
         event_hour = event.get('hour_utc', 0)

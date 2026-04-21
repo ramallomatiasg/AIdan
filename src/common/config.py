@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.6.2"
+APP_VERSION = "3.6.3"
 
 class Config:
     VERSION = APP_VERSION

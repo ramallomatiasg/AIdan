@@ -791,36 +791,35 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
             return None
 
         import logging
-        # Consecutive losses circuit: 3 losses in a row → pause 30 min (generic tilt protection)
+        # Consecutive losses circuit: 3 losses in tight window → pause 30 min (tilt protection)
+        # Uses created_at (decision time) not archived_at, and requires the 3 to be in same
+        # 2-hour window — prevents false triggers from old carry-over trades archived at cap.
         try:
+            # Get last 3 decided trades by creation time (actual trading order)
             cursor.execute("""
-                SELECT result FROM trade_archive
+                SELECT result, created_at FROM trade_archive
                 WHERE mt5_pnl IS NOT NULL AND result IN ('win', 'loss')
-                ORDER BY archived_at DESC LIMIT 3
+                ORDER BY created_at DESC LIMIT 3
             """)
-            last3 = [r[0] for r in cursor.fetchall()]
-            if len(last3) == 3 and all(r == 'loss' for r in last3):
-                # Check if last loss was within 30 min — if yes, pause
-                cursor.execute("""
-                    SELECT archived_at FROM trade_archive
-                    WHERE mt5_pnl IS NOT NULL AND result = 'loss'
-                    ORDER BY archived_at DESC LIMIT 1
-                """)
-                r = cursor.fetchone()
-                if r:
-                    from datetime import datetime as _dt
-                    try:
-                        # archived_at stored as UTC (SQL CURRENT_TIMESTAMP), so compare with UTC now
-                        last_loss_dt = _dt.strptime(str(r[0]).split('.')[0], '%Y-%m-%d %H:%M:%S')
-                        now_utc = _dt.utcnow()
-                        mins_since = (now_utc - last_loss_dt).total_seconds() / 60
-                        # Only block if loss was recent (0-30 min ago, not negative from timezone bugs)
-                        if 0 <= mins_since < 30:
-                            logging.getLogger('db').warning(f"Circuit breaker: 3 consecutive losses, last {mins_since:.0f}min ago — pausing 30min")
-                            conn.close()
-                            return None
-                    except Exception:
-                        pass
+            rows = cursor.fetchall()
+            if len(rows) == 3 and all(r[0] == 'loss' for r in rows):
+                from datetime import datetime as _dt
+                try:
+                    # All created_at are in AR time (now_ar()). Compare with now_ar().
+                    latest = _dt.strptime(str(rows[0][1]).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                    oldest = _dt.strptime(str(rows[2][1]).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                    now_local = now_ar()
+                    mins_since_latest = (now_local - latest).total_seconds() / 60
+                    window_minutes = (latest - oldest).total_seconds() / 60
+                    # Only block if:
+                    # 1. Last loss was recent (0-30 min ago)
+                    # 2. All 3 losses happened within a 2-hour window (real tilt pattern)
+                    if 0 <= mins_since_latest < 30 and window_minutes <= 120:
+                        logging.getLogger('db').warning(f"Circuit breaker: 3 losses in {window_minutes:.0f}min window, last {mins_since_latest:.0f}min ago — pausing 30min")
+                        conn.close()
+                        return None
+                except Exception as _cbp:
+                    logging.getLogger('db').debug(f"Circuit breaker parse: {_cbp}")
         except Exception as _cbe:
             logging.getLogger('db').debug(f"Circuit breaker check: {_cbe}")
 
