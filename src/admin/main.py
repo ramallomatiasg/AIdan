@@ -30,12 +30,18 @@ logger = setup_logging(__name__, Config.LOG_LEVEL)
 # Groq API helper (free, Llama 70B)
 _groq_status = {"ok": True, "last_error": "", "last_error_time": None}
 
-def _call_groq(messages, temperature=0.75, max_tokens=600):
-    """Call Groq API with automatic key rotation on rate limit."""
+def _call_groq(messages, temperature=0.75, max_tokens=600, model=None):
+    """Call Groq API with automatic key rotation on rate limit.
+
+    model: defaults to GROQ_MODEL_CHAT (faster llama-3.1-8b-instant for chat use cases).
+    Pass model=Config.GROQ_MODEL explicitly for analytical tasks needing the 70B.
+    """
     keys = Config.GROQ_API_KEYS if hasattr(Config, 'GROQ_API_KEYS') else [Config.GROQ_API_KEY]
     keys = [k for k in keys if k]
     if not keys:
         return None
+
+    chosen_model = model or getattr(Config, 'GROQ_MODEL_CHAT', Config.GROQ_MODEL)
 
     for i, api_key in enumerate(keys):
         try:
@@ -43,7 +49,7 @@ def _call_groq(messages, temperature=0.75, max_tokens=600):
                 'https://api.groq.com/openai/v1/chat/completions',
                 headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
                 json={
-                    'model': Config.GROQ_MODEL,
+                    'model': chosen_model,
                     'messages': messages,
                     'temperature': temperature,
                     'max_tokens': max_tokens,
@@ -1549,7 +1555,7 @@ AIdan:"""
             result = _call_groq(ds_messages, temperature=0.75, max_tokens=600)
             if result:
                 assistant_message = result
-                model_used = f"groq-{Config.GROQ_MODEL}"
+                model_used = f"groq-{getattr(Config, 'GROQ_MODEL_CHAT', Config.GROQ_MODEL)}"
 
         # Fallback to Ollama (using /api/chat with messages format)
         if not assistant_message:

@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.6.3"
+APP_VERSION = "3.7.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -40,7 +40,12 @@ class Config:
     ]
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", GROQ_API_KEYS[0])
     GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma4")
+    # Faster, smaller Groq model for dashboard chat — non-critical, latency-sensitive.
+    GROQ_MODEL_CHAT = os.getenv("GROQ_MODEL_CHAT", "llama-3.1-8b-instant")
+    # Local model for non-blocking tasks (audit, post-trade, news pre-filter).
+    # qwen2.5:7b chosen after benchmarking vs gemma4: ~3x faster (7s vs 20s),
+    # same filter quality (neither adds significant signal). See bench_audit_*.csv.
+    GEMMA_MODEL = os.getenv("GEMMA_MODEL", "qwen2.5:7b")
     OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
     GOOGLE_SHEETS_WEBHOOK = os.getenv("GOOGLE_SHEETS_WEBHOOK", "https://script.google.com/macros/s/AKfycbzZqRaz_37eSjky1I4F1-2bnQQtRPC15_wDGA5ohxUvzTPq38ez74mbc7oYoNb4NvfyFw/exec")
 

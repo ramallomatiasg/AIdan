@@ -491,9 +491,24 @@ class TechnicalAnalyzer:
             session_info = TechnicalAnalyzer.get_session_info()
             conf += session_info['conf_adj']
 
-            # ── 8. Trend + HTF alignment (±20) — core directional reasoning ──
+            # ── 8. Trend + HTF alignment — NEUTRALIZED in v3.7.0 ──
+            # Empirical finding (75 trades, v3.6.3 - v3.7.0):
+            #   - HTF aligned trades: 35% WR, -$50.70 PnL  (formula's "ideal" setup)
+            #   - HTF counter trades: 54% WR, -$4.00 PnL  (formula penalized these)
+            #   - Conf 85+ (formula's high-confidence): 22% WR, -$28.80 PnL
+            #   - Conf <55 (formula's low-confidence):  47% WR, +$12.10 PnL  (only positive bucket)
+            # Root cause: EUR/USD M5 is mean-reverting, not trending. The formula was
+            # rewarding exhaustion entries (price already moved with HTF) and penalizing
+            # mean-reversion entries (counter-HTF) which are actually the profitable setups.
+            # Decision: neutralize directional alignment scoring entirely — let setup
+            # quality (RSI, volatility, structure, daily range positioning in step 9) drive
+            # confidence. If a future regime shows trend-following pays, re-enable.
+            # See README changelog v3.7.0 for full analysis.
+            #
+            # NOTE: The variables below are still computed for logging/audit context
+            # (consumed by llm_auditor and entry_context persistence), but produce no
+            # confidence delta on this step.
             if signal_direction:
-                # Directional scoring: trend + HTF combined (avoid double-counting)
                 is_with_trend = (
                     (signal_direction == 'CALL' and trend == 'bullish') or
                     (signal_direction == 'PUT' and trend == 'bearish')
@@ -510,30 +525,8 @@ class TechnicalAnalyzer:
                     (signal_direction == 'CALL' and htf_bias == 'bearish') or
                     (signal_direction == 'PUT' and htf_bias == 'bullish')
                 )
-
-                # Apply SINGLE directional adjustment (strongest signal wins, no double-count)
-                if is_with_trend and is_with_htf:
-                    conf += 15  # strong alignment: trend + HTF agree
-                elif is_with_trend or is_with_htf:
-                    conf += 8   # partial alignment
-                elif is_against_trend and is_against_htf:
-                    conf -= 18  # strong counter-trend: both disagree
-                elif is_against_trend or is_against_htf:
-                    conf -= 10  # partial counter-trend
-
-                # Momentum alignment
-                is_with_momentum = (
-                    (signal_direction == 'CALL' and momentum == 'up') or
-                    (signal_direction == 'PUT' and momentum == 'down')
-                )
-                is_against_momentum = (
-                    (signal_direction == 'CALL' and momentum == 'down') or
-                    (signal_direction == 'PUT' and momentum == 'up')
-                )
-                if is_with_momentum:
-                    conf += 5
-                elif is_against_momentum:
-                    conf -= 5
+                # No conf delta — see comment above. Variables retained for downstream consumers.
+                _ = (is_with_trend, is_against_trend, is_with_htf, is_against_htf)
 
             # ── 9. Daily range positioning (±10) — macro context ──
             # If price at top of today's range → CALLs risky (exhaustion), PUTs favored (mean reversion)
@@ -1208,7 +1201,15 @@ class TechnicalAnalyzer:
         final_tp = round(final_sl * rr_ratio, 1)
 
         # Optionally place SL behind nearest structural level (can WIDEN, not narrow)
-        sl_max_struct = round(prof_sl * 2.5, 1) if atr > 0 else prof_sl
+        # v3.7.0: TIGHTER cap. Old cap was prof_sl * 2.5 (=8.75p for prof=3.5),
+        # which produced catastrophic losses on high-conf trades (e.g. #235 -$7.60 SL=7.2p,
+        # #229 -$6.70 SL=5.4p, #280 -$6.40 SL=3.7p+slippage). New cap is the SMALLER of
+        # ATR*1.2 and prof_sl*1.6, ensuring structural widening can't more than ~60% inflate
+        # the base SL, capping single-trade risk to ~5.6p on a 3.5p profile.
+        if atr > 0:
+            sl_max_struct = round(min(atr * 1.2, prof_sl * 1.6), 1)
+        else:
+            sl_max_struct = round(prof_sl * 1.6, 1)
         if direction == 'CALL' and supports:
             below_sups = [s for s in supports if s < price]
             if below_sups:

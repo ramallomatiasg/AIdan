@@ -1,8 +1,42 @@
-# AIdan v3.6.3 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.7.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.7.0 — Confidence formula data-driven + SL cap
+
+Ronda de analisis sobre 75 trades historicos (post v3.6.3) revelo 3 patrones que apuntan a un solo bug en `dynamic_conf()`. Cambios validados con backtesting inline antes de aplicar.
+
+### Hallazgos del analisis (75 trades, WR 41%, PnL -$54.70, PF 0.64)
+
+- **Confidence INVERTIDA**: trades con conf >=85 tenian WR 22% y PnL -$28.80, mientras trades con conf <55 tenian WR 47% y PnL +$12.10 (la unica categoria positiva)
+- **HTF aligned PEOR que counter**: aligned (CALL+bullish o PUT+bearish): 35% WR -$50.70 vs counter: 54% WR -$4.00. La hipotesis original del filtro counter-HTF estaba al reves
+- **CALLs sangraban mas que PUTs**: CALL 30% WR -$53.40 vs PUT 49% WR -$1.30. Causa raiz: htf=bullish dominante, formula premiaba CALLs aligned con +15 conf, esos CALLs eran exhaustion entries
+
+### Root cause unico
+
+`dynamic_conf()` paso 8 daba +15 conf cuando trend+HTF aliman, -18 cuando ambos counter. EUR/USD M5 es un timeframe **mean-reverting**, no trending — el formula estaba premiando exhaustion entries (precio ya movio con la tendencia, listo para reversar) y penalizando los counter-trend que son los setups rentables.
+
+### Cambios
+
+- **Paso 8 de `dynamic_conf` neutralizado**: alignment delta = 0. Variables (is_with_trend, is_with_htf) se mantienen para logging/audit downstream pero no impactan confidence. RSI, volatility, structure, daily range positioning siguen siendo los drivers principales
+- **Cap de SL estructural reducido**: de `prof_sl * 2.5` (=8.75p) a `min(ATR*1.2, prof_sl*1.6)` (=5.6p para profile 3.5p). Causaba perdidas catastroficas en high-conf trades (#235 -$7.60, #229 -$6.70) cuando structural override extendia SL hasta 8p
+- **min_confidence subido 50 → 60** en perfil activo. Backtest inline mostro que con neutralizacion + threshold 60: -$36.50 en 31 trades vs -$66.90 en 54 trades (mismo WR 39%, la mitad de la perdida)
+- **Default en `get_active_profile()` actualizado** a min_confidence=60 (antes 50) por consistencia
+
+### Lo que esto NO arregla
+
+La inversion sigue parcialmente: aun con el fix, el bucket conf >=70 sigue teniendo WR menor que <55. El fix detiene el sangrado pero no convierte AIdan en rentable — el problema residual es regime-driven (mercado mean-revierte) y RR asimetrico. Proximos pasos potenciales: gating posicional (premiar alignment solo si precio esta al inicio del trend, no al final).
+
+### Bonus: optimizacion de modelos LLM
+
+- Benchmark de modelos sobre 30 trades historicos: `llama-3.3-70b-versatile` mantiene mejor filter signal (+24pp WR gap entre agree/disagree). Modelos razonadores (gpt-oss, qwen3) tenian filter signal **invertido** (-9 a -14pp) — confiados pero equivocados
+- **Local: gemma4 → qwen2.5:7b** — 3x mas rapido (7s vs 20s), libera 4GB VRAM, calidad de filter equivalente
+- **Chat: dashboard ahora usa `llama-3.1-8b-instant`** — mismo nivel para el caso de uso, latencia menor
+- Harness de benchmark guardado en `tools/llm_benchmark.py` para futuras evaluaciones
 
 ---
 

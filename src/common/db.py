@@ -739,10 +739,11 @@ def get_active_profile():
         logging.getLogger('db').debug(f"get_active_profile: {e}")
     finally:
         conn.close()
-    # Defaults (conservative) — includes ALL keys consumed by the bot to avoid silent fallbacks
-    # AIdan aprende organicamente; no hardcodeamos threshold basado en data contaminada pre-fixes
+    # Defaults (v3.7.0) — min_confidence raised from 50 to 60 after analysis of 75 trades
+    # showed conf=50-59 bucket had ~same WR as conf=60-69 but contributed half the losses.
+    # See README v3.7.0 changelog for the data.
     return {
-        'min_impact': 50, 'min_confidence': 50, 'direction': 'any',
+        'min_impact': 50, 'min_confidence': 60, 'direction': 'any',
         'stop_loss_pips': 3.5, 'take_profit_pips': 15, 'expiry_minutes': 15,
         'cooldown_minutes': 2, 'max_trades_per_hour': 3,
     }
