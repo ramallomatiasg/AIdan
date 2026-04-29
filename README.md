@@ -1,8 +1,31 @@
-# AIdan v3.7.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.7.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.7.1 — Hotfix: restaurar momentum scoring (overshoot de v3.7.0)
+
+Dos trades consecutivos perdedores el dia post-deploy de v3.7.0 (#350 PUT -$3.80 exhaustion entry, #351 PUT -$4.30 SL hit en 30s) revelaron un overshoot en el cambio anterior.
+
+Cuando neutralice el paso 8 de `dynamic_conf` para quitar el `±15` de trend+HTF alignment (correcto), tambien borre el `±5` de momentum directional que estaba en el mismo bloque (incorrecto). Eran cosas distintas:
+
+- **Trend+HTF alignment**: signal de regimen (mean-reverting EUR/USD M5). Quitarlo fue correcto.
+- **Momentum (±5)**: signal de TIMING corto plazo. Si momentum va contra la direccion del trade, los proximos 1-2 candles empujan hacia SL antes que el edge actue. No es regime, es timing.
+
+### El bug en accion
+
+Trade #351 PUT entry 1.16996 con `entry_context: momentum=up`. Las 3 candles previas: 1.16951 -> 1.16990 -> 1.16998 -> 1.16996 (subida limpia). SL en 1.17033 (apenas 4p arriba). **Cerro en 30 segundos.**
+
+Con momentum -5 restaurado: conf 60 - 5 = 55 < min_conf 60 -> bloqueado. SL evitado.
+
+### Cambio
+
+- `technical.py:528-549` — restaurar bloque de momentum directional (±5)
+- Trend/HTF stays neutralizado del v3.7.0
+- 9 lineas nuevas, sin riesgo (era logica vigente por meses)
 
 ---
 

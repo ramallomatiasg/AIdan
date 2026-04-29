@@ -525,8 +525,29 @@ class TechnicalAnalyzer:
                     (signal_direction == 'CALL' and htf_bias == 'bearish') or
                     (signal_direction == 'PUT' and htf_bias == 'bullish')
                 )
-                # No conf delta — see comment above. Variables retained for downstream consumers.
+                # No trend/HTF conf delta — see comment above. Variables retained for downstream consumers.
                 _ = (is_with_trend, is_against_trend, is_with_htf, is_against_htf)
+
+                # ── Momentum directional (±5) — RESTORED in v3.7.1 ──
+                # Removing this in v3.7.0 was an overshoot of the alignment fix.
+                # Trend/HTF are REGIME signals (mean-reverting market makes them
+                # contraproducente). Momentum is a TIMING signal — short-term inertia.
+                # If momentum runs against trade direction, the next 1-2 candles
+                # likely push toward SL before any edge plays out.
+                # Evidence: trade #351 PUT 2026-04-29 with momentum=up entered
+                # against rising candles, SL hit in 30 seconds.
+                is_with_momentum = (
+                    (signal_direction == 'CALL' and momentum == 'up') or
+                    (signal_direction == 'PUT' and momentum == 'down')
+                )
+                is_against_momentum = (
+                    (signal_direction == 'CALL' and momentum == 'down') or
+                    (signal_direction == 'PUT' and momentum == 'up')
+                )
+                if is_with_momentum:
+                    conf += 5
+                elif is_against_momentum:
+                    conf -= 5
 
             # ── 9. Daily range positioning (±10) — macro context ──
             # If price at top of today's range → CALLs risky (exhaustion), PUTs favored (mean reversion)
