@@ -703,16 +703,32 @@ def record_signal_result(alert_id, result, market_context=None):
     finally:
         conn.close()
 
-def get_performance_stats():
-    """Get win/loss/skip statistics"""
+def get_performance_stats(since=None):
+    """Get win/loss/skip statistics from signal_results (news alerts).
+
+    Args:
+        since: optional ISO datetime to filter from. Defaults to STATS_SINCE env var.
+    """
+    if since is None:
+        import os
+        since = os.getenv('STATS_SINCE', '').strip() or None
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'win'")
-    wins = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'loss'")
-    losses = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'skip'")
-    skips = cursor.fetchone()[0]
+    if since:
+        cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'win' AND recorded_at >= ?", (since,))
+        wins = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'loss' AND recorded_at >= ?", (since,))
+        losses = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'skip' AND recorded_at >= ?", (since,))
+        skips = cursor.fetchone()[0]
+    else:
+        cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'win'")
+        wins = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'loss'")
+        losses = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'skip'")
+        skips = cursor.fetchone()[0]
     conn.close()
     total_decided = wins + losses
     win_rate = (wins / total_decided * 100) if total_decided > 0 else 0
@@ -721,7 +737,8 @@ def get_performance_stats():
         'losses': losses,
         'skips': skips,
         'total': total_decided,
-        'win_rate': round(win_rate, 1)
+        'win_rate': round(win_rate, 1),
+        'since': since,
     }
 
 def get_active_profile():
@@ -1054,33 +1071,60 @@ def record_strategy_result(strategy_id, result, market_context=None):
     finally:
         conn.close()
 
-def get_strategy_performance():
+def get_strategy_performance(since=None):
     """Get win/loss/skip stats for auto-strategies from trade_archive (persistent).
-    Falls back to strategy_results for break_even/skip which aren't archived."""
+    Falls back to strategy_results for break_even/skip which aren't archived.
+
+    Args:
+        since: optional ISO datetime string to filter trades from a specific date.
+               Defaults to STATS_SINCE env var (set per release to show post-deploy only).
+               If neither set, returns all-time stats.
+    """
+    if since is None:
+        import os
+        since = os.getenv('STATS_SINCE', '').strip() or None
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     # Primary: trade_archive (persistent, survives 6-cap deletes)
-    cursor.execute("""
-        SELECT result, COUNT(*) FROM trade_archive
-        WHERE strftime('%w', created_at) NOT IN ('0', '6')
-        GROUP BY result
-    """)
+    if since:
+        cursor.execute("""
+            SELECT result, COUNT(*) FROM trade_archive
+            WHERE strftime('%w', created_at) NOT IN ('0', '6')
+              AND archived_at >= ?
+            GROUP BY result
+        """, (since,))
+    else:
+        cursor.execute("""
+            SELECT result, COUNT(*) FROM trade_archive
+            WHERE strftime('%w', created_at) NOT IN ('0', '6')
+            GROUP BY result
+        """)
     rows = cursor.fetchall()
     stats = {'wins': 0, 'losses': 0, 'skips': 0, 'break_evens': 0}
     for result, count in rows:
         if result == 'win': stats['wins'] = count
         elif result == 'loss': stats['losses'] = count
     # Break-evens from strategy_results (not archived)
-    cursor.execute("""
-        SELECT COUNT(*) FROM strategy_results
-        WHERE result = 'break_even' AND strftime('%w', recorded_at) NOT IN ('0', '6')
-    """)
+    if since:
+        cursor.execute("""
+            SELECT COUNT(*) FROM strategy_results
+            WHERE result = 'break_even'
+              AND strftime('%w', recorded_at) NOT IN ('0', '6')
+              AND recorded_at >= ?
+        """, (since,))
+    else:
+        cursor.execute("""
+            SELECT COUNT(*) FROM strategy_results
+            WHERE result = 'break_even' AND strftime('%w', recorded_at) NOT IN ('0', '6')
+        """)
     stats['break_evens'] = cursor.fetchone()[0]
     conn.close()
     total = stats['wins'] + stats['losses']
     stats['total'] = total
     stats['total_resolved'] = total + stats['break_evens']
     stats['win_rate'] = round((stats['wins'] / total * 100) if total > 0 else 0, 1)
+    stats['since'] = since
     return stats
 
 def get_strategies_pending_evaluation():
