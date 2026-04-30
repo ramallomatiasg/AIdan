@@ -1,8 +1,47 @@
-# AIdan v3.7.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.8.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.8.0 — Análisis profundo + correcciones validadas con simulación
+
+Después de 100 trades en demo desde v3.6.3 con WR 40% y PnL -$93, semana de pruebas reveló que los ajustes finos al confidence scoring no resuelven el problema estructural. Análisis profundo de la data identifica las causas reales y propuestas validadas vía simulación sobre el histórico.
+
+### Hallazgos del análisis
+
+1. **Comisiones son 87% de la pérdida neta**: pips netos gross -10.5p (esencialmente break-even), pero comisión $67.31 ($0.69/trade ≈ 0.7p) inflige el daño real. Para break-even al WR 41% actual necesitamos avg win 6p (vs 4p actual) o WR 53%.
+
+2. **Wins capturan solo 43% del TP nominal**: TP promedio 9.4p, pips reales 4.1p. 212p sobre la mesa. Mecanismo desconocido (trailing está OFF en código) — investigación pendiente.
+
+3. **SL/ATR sweet spot empírico**: trades con SL/ATR 1.0-1.5x (n=20) tuvieron 55% WR +$14. Trades con SL/ATR 0.6-1.0 (n=59, mayoría) tuvieron 42% WR -$70. **El cap del v3.7.0 estaba metiendo trades en la zona tight.**
+
+4. **Caso 30 Abr (3 SL hits consecutivos)**: ATR 6.9-7.8p, SL cap 5.6p. Direccional correcto (precio bajó 11p en 38min) pero los 3 PUTs SL-hit en rebotes intermedios. SL adentro del ruido normal.
+
+### Cambios
+
+- **SL cap revertido (P1)**: `min(ATR*1.2, prof_sl*1.6)` → `max(ATR*1.0, prof_sl*1.5)`. En ATR baja usa floor del profile (5.25p), en ATR alta adapta a volatilidad real.
+  - Simulación: ~19 trades hubieran sobrevivido SL hit con SL más amplio.
+  - Delta optimista: +$77 / realista (descuento MAE 50%): +$40.
+  
+- **ATR ceiling 6p (P3)**: skip estrategias cuando `avg_range_pips > 6` en news + structure scanners.
+  - Simulación: 13 trades excluidos (-$29 colectivos), Delta: +$29.
+  
+- **Combinado (P5)**: Trades 81 (filtrados 19), WR 42%, PnL simulado -$3 (casi break-even).
+
+- **Wipe `learning_insights`** (568 rows): lessons aprendidas con bugs activos (v3.6.x counter-HTF mal calibrado, v3.7.0 SL cap tight) podían ser auto-confirmables. Backup en `state/learning_insights_backup_v3.7.1_*.csv`. 47 reports preservados (sin runtime impact).
+
+### Lo que NO se hizo (descartado por evidencia)
+
+- **TP cap a 5p**: simulación dió **-$27** (peor). Los wins grandes (>5p) sostienen el sistema.
+- **min_confidence cambios**: ya investigado, no mueve la aguja.
+- **Más cambios al confidence scoring**: 4 cambios en 2 semanas; el problema no estaba ahí.
+
+### Próximo paso (Fase 2 sin cambios)
+
+Investigar el misterio del 43% TP capture. Trailing está OFF en código pero los wins cierran tempranos. Si resolviéramos esto: capturar 70%+ del TP en lugar de 43% sería el cambio más impactante (+$100+ over 100 trades). Read-only audit pendiente de `mt5_executor.py` y los flujos de cierre.
 
 ---
 

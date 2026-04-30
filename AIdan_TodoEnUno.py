@@ -1221,6 +1221,13 @@ class AIdan:
                                         market = tech.get_market_state()
                                         price = market.get('price', 0)
                                         if price > 0:
+                                            # v3.8.0 ATR ceiling: skip news strategy in extreme volatility
+                                            # SL becomes too tight relative to candle noise, hits SL on rebotes.
+                                            _news_atr = market.get('avg_range_pips', 0)
+                                            if _news_atr > 6.0:
+                                                logger.info(f"ATR ceiling: skipping news {direction}, ATR {_news_atr:.1f}p > 6.0p")
+                                                price = 0
+                                        if price > 0:
                                             # AutoTuner block: skip if news setup type has poor win rate
                                             if tuner.is_setup_blocked('news'):
                                                 logger.info(f"AutoTuner: blocking news {direction}, setup type blocked")
@@ -1669,7 +1676,21 @@ class AIdan:
                                 skip_session = True
                                 logger.info(f"[{iteration}] AutoTuner: outside active sessions (UTC {utc_hour}h), skipping structure scan")
 
-                        if not skip_session:
+                        # v3.8.0 ATR ceiling: skip structure scan when volatility too high
+                        # Empirical: 13 trades with ATR>6p had 0% net WR (-$29 collective).
+                        # Extreme example: 30 Apr — 3 trades with ATR 6.9-7.8p all SL-hit
+                        # despite correct directional analysis (SL inside normal candle noise).
+                        skip_atr = False
+                        try:
+                            _ms_for_atr = tech.get_market_state()
+                            _atr_now = _ms_for_atr.get('avg_range_pips', 0)
+                            if _atr_now > 6.0:
+                                skip_atr = True
+                                logger.info(f"[{iteration}] ATR ceiling: ATR {_atr_now:.1f}p > 6.0p, skipping structure scan (volatility too high for tight SLs)")
+                        except Exception as _atr_e:
+                            logger.debug(f"ATR ceiling check: {_atr_e}")
+
+                        if not skip_session and not skip_atr:
                             # Ensure SMC has fresh HTF data BEFORE structure scanner reads it.
                             # Bug fix: SMC.update() was only called below in SMC scanner section,
                             # so structure scanner saw empty htf_bias in the first cycle of the day

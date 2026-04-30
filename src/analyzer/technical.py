@@ -1222,15 +1222,19 @@ class TechnicalAnalyzer:
         final_tp = round(final_sl * rr_ratio, 1)
 
         # Optionally place SL behind nearest structural level (can WIDEN, not narrow)
-        # v3.7.0: TIGHTER cap. Old cap was prof_sl * 2.5 (=8.75p for prof=3.5),
-        # which produced catastrophic losses on high-conf trades (e.g. #235 -$7.60 SL=7.2p,
-        # #229 -$6.70 SL=5.4p, #280 -$6.40 SL=3.7p+slippage). New cap is the SMALLER of
-        # ATR*1.2 and prof_sl*1.6, ensuring structural widening can't more than ~60% inflate
-        # the base SL, capping single-trade risk to ~5.6p on a 3.5p profile.
+        # v3.8.0: ADAPTIVE cap. Both v3.6.x (prof_sl*2.5=8.75p) and v3.7.0 (min cap 5.6p)
+        # had problems:
+        # - v3.6.x: too loose in low-vol → catastrophic high-conf losses
+        # - v3.7.0: too tight in high-vol → SL inside normal candle noise (30 Apr disaster)
+        # New formula uses MAX of (ATR*1.0, prof_sl*1.5):
+        # - In ATR=3p (calm): max(3, 5.25) = 5.25p — protects from inflation
+        # - In ATR=7p (volatile): max(7, 5.25) = 7p — adapts to actual volatility
+        # Empirical: data shows SL/ATR sweet spot is 1.0-1.5x (55% WR, +$14 PnL).
+        # Current bucket SL/ATR 0.6-1.0 had -$70 PnL — proof that tight cap loses.
         if atr > 0:
-            sl_max_struct = round(min(atr * 1.2, prof_sl * 1.6), 1)
+            sl_max_struct = round(max(atr * 1.0, prof_sl * 1.5), 1)
         else:
-            sl_max_struct = round(prof_sl * 1.6, 1)
+            sl_max_struct = round(prof_sl * 1.5, 1)
         if direction == 'CALL' and supports:
             below_sups = [s for s in supports if s < price]
             if below_sups:
