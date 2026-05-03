@@ -1858,6 +1858,24 @@ class AIdan:
                                 _struct_session = _struct_session_info.get('session', '')
                                 conf = _apply_learning_adjustments(conf, 'structure', _struct_session, direction=direction, htf_bias=htf_bias)
 
+                                # v3.9.0 FULLY-ALIGNED FILTER (SIM A):
+                                # Block structure trades where direction + HTF + M5 trend ALL align.
+                                # Empirical evidence (50 historical aligned trades):
+                                #   28% WR, -$82.30 PnL, avg pips -1.6
+                                # vs counter-trend structure (HTF or M5 mismatch with direction):
+                                #   57% WR, +$5.60 PnL
+                                # The "perfect alignment" setup is exhaustion entry on EUR/USD M5
+                                # (mean-reverting timeframe). News trades are exempt from this filter
+                                # because news catalysts can drive aligned moves successfully.
+                                _ms_trend = ms.get('trend', 'unknown')
+                                _is_fully_aligned = (
+                                    (direction == 'CALL' and htf_bias == 'bullish' and _ms_trend == 'bullish') or
+                                    (direction == 'PUT' and htf_bias == 'bearish' and _ms_trend == 'bearish')
+                                )
+                                if _is_fully_aligned:
+                                    logger.info(f"SIM A filter: skipping structure {direction} fully-aligned (HTF+M5+dir all match — exhaustion zone). htf={htf_bias} m5={_ms_trend}")
+                                    continue
+
                                 # Min confidence gate: skip if below profile threshold after all adjustments
                                 if conf < min_conf:
                                     logger.info(f"Min confidence gate: skipping structure {direction}, conf {conf} < profile min {min_conf}")
@@ -2253,13 +2271,36 @@ class AIdan:
                                     'market_trend': tech.get_market_state().get('trend', ''),
                                     'rsi_at_entry': tech.get_market_state().get('rsi', 0),
                                 }
-                                # Close MT5 position FIRST, then evaluate
+                                # v3.9.0 EXPIRY FIX (CRITICAL):
+                                # Old behavior: force-close ALL filled positions on expiry, even if not at TP/SL.
+                                # This was the WIN AMPUTATION BUG — wins captured only 43% of TP nominal because
+                                # the 15-minute expiry timer killed trades before they could reach TP.
+                                # New behavior: only force-close if SL/TP was actually hit (per candle analysis).
+                                # If neither hit, let MT5 keep the position open with its fixed SL/TP.
+                                # The strategy is marked 'expired' for tracking but the position stays alive.
+                                # SL is still protecting against runaway losses; TP can finally trigger.
                                 mt5_closed_price = None
-                                if mt5_exec and mt5_exec.is_ready():
+                                should_force_close = hit_tp or hit_sl or hit_be
+                                if should_force_close and mt5_exec and mt5_exec.is_ready():
                                     try:
                                         mt5_closed_price = mt5_exec.close_strategy_position(sid)
                                     except Exception as e:
                                         logger.error(f"MT5 close on eval error: {e}")
+                                elif mt5_exec and mt5_exec.is_ready():
+                                    # Check if MT5 already closed the position naturally (TP/SL hit by ticks)
+                                    try:
+                                        from src.common.db import get_mt5_pnl_for_strategy
+                                        _mt5_check = get_mt5_pnl_for_strategy(sid)
+                                        if _mt5_check and _mt5_check['pnl'] is not None:
+                                            # MT5 already closed — use that data, don't force anything
+                                            logger.info(f"Strategy #{sid} expired — MT5 already closed naturally @ ${_mt5_check['pnl']:.2f}")
+                                        else:
+                                            # Position still open — let it run with MT5's SL/TP
+                                            logger.info(f"Strategy #{sid} expired but MT5 position still OPEN — letting SL/TP do their job (no force-close)")
+                                            # Skip evaluation this cycle; will be re-evaluated when MT5 closes naturally
+                                            continue
+                                    except Exception as e:
+                                        logger.debug(f"MT5 status check on expiry: {e}")
 
                                 # Check if MT5 already has real P&L (closed by TP/SL via sync)
                                 try:
