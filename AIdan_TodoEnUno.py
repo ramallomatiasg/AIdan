@@ -1065,6 +1065,16 @@ class AIdan:
             _weekend_logged = False
             _planned_today = False
             _planned_date = None
+            # v3.9.1 WARMUP GATE: skip strategy generation for the first N seconds after startup.
+            # When AIdan starts mid-session, the indicators are populated from historical candles
+            # but the bot has no memory of recent cycles. It can detect "BULLISH STRONG + bounce
+            # off support" 5-15 minutes AFTER the actual bounce already occurred — a stale signal.
+            # Empirical: trade #371 (2026-05-04) created 30s after startup, lost -$3.80 in 90s.
+            # 10-min warmup ensures at least 2 fresh M5 candles close while AIdan watches in real-time
+            # before generating strategies. News/structure/SMC affected; pre_planned exempt.
+            _analyzer_warmup_start = time.time()
+            WARMUP_SECONDS = 600  # 10 minutes
+            logger.info(f"Analyzer warmup active: no strategies generated for first {WARMUP_SECONDS}s ({WARMUP_SECONDS//60}min)")
             while not self._shutdown_event.is_set():
                 _cycle_start = time.time()
                 try:
@@ -1313,8 +1323,12 @@ class AIdan:
                                                             _news_conf = max(10, _news_conf - _htf_penalty)
                                                         _news_base_conf = prof_min_conf  # min confidence from active profile
 
+                                                        # v3.9.1 Warmup gate: skip first 10 min after analyzer startup
+                                                        _warmup_elapsed = time.time() - _analyzer_warmup_start
+                                                        if _warmup_elapsed < WARMUP_SECONDS:
+                                                            logger.info(f"Warmup gate: skipping news {direction}, analyzer running {_warmup_elapsed:.0f}s < {WARMUP_SECONDS}s warmup")
                                                         # Min confidence gate: skip if below profile threshold after learning adjustments
-                                                        if _news_conf < prof_min_conf:
+                                                        elif _news_conf < prof_min_conf:
                                                             logger.info(f"Min confidence gate: skipping news {direction}, conf {_news_conf} < profile min {prof_min_conf}")
                                                         else:
                                                             # FAST PATH: create strategy + MT5 order FIRST, audit async
@@ -1876,6 +1890,12 @@ class AIdan:
                                     logger.info(f"SIM A filter: skipping structure {direction} fully-aligned (HTF+M5+dir all match — exhaustion zone). htf={htf_bias} m5={_ms_trend}")
                                     continue
 
+                                # v3.9.1 Warmup gate: skip first 10 min after analyzer startup
+                                _warmup_elapsed = time.time() - _analyzer_warmup_start
+                                if _warmup_elapsed < WARMUP_SECONDS:
+                                    logger.info(f"Warmup gate: skipping structure {direction}, analyzer running {_warmup_elapsed:.0f}s < {WARMUP_SECONDS}s warmup")
+                                    continue
+
                                 # Min confidence gate: skip if below profile threshold after all adjustments
                                 if conf < min_conf:
                                     logger.info(f"Min confidence gate: skipping structure {direction}, conf {conf} < profile min {min_conf}")
@@ -2040,6 +2060,12 @@ class AIdan:
                             opposite = has_active_opposite_strategy(direction)
                             if opposite:
                                 logger.info(f"Anti-contradiction: skipping {direction} SMC, active #{opposite[0]} {opposite[1]}")
+                                continue
+
+                            # v3.9.1 Warmup gate: skip first 10 min after analyzer startup
+                            _warmup_elapsed = time.time() - _analyzer_warmup_start
+                            if _warmup_elapsed < WARMUP_SECONDS:
+                                logger.info(f"Warmup gate: skipping SMC {direction}, analyzer running {_warmup_elapsed:.0f}s < {WARMUP_SECONDS}s warmup")
                                 continue
 
                             smc_snap = _fetch_candles_snapshot(30)

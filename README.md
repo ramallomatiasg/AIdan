@@ -1,8 +1,40 @@
-# AIdan v3.9.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.9.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.9.1 — Warmup gate (stale signal fix)
+
+Patrón confirmado en producción: cuando AIdan se abre en mitad de horario de mercado, la primera estrategia que genera tiende a perder porque entra en señales "stale" — consumidas hace 5-15 minutos antes de que el bot estuviera observando.
+
+### El caso confirmado: trade #371 (4 May 2026)
+
+- **09:57:53** — Primera news fetched después del weekend (AIdan recién arrancado)
+- **09:58:24** — Estrategia CALL creada **30 segundos después**: "Continuación alcista, precio rebotando en soporte 1.17055 (+3.7p)"
+- **09:59:53** — SL hit en 90 segundos. Pérdida -$3.80
+- Setup era válido a las 09:55 (cuando ocurrió el bounce). A las 09:58 ya estaba consumido — el precio había subido +5p y AIdan entró al final del movimiento.
+
+### El mecanismo
+
+Los indicadores (ATR, RSI, MA) se calculan correctamente desde velas históricas al startup. Pero el bot **no tiene memoria de cycles previos**: no distingue entre "señal recién aparecida" y "señal que estaba ahí hace 15 minutos". Si arranca en medio de un movimiento, ve la "evidencia" del movimiento (trend strong, momentum up) pero no detecta que ya está consumido.
+
+### El fix
+
+Warmup gate: durante los primeros **10 minutos** (`WARMUP_SECONDS = 600`) tras el startup del analyzer, no se generan estrategias. Esto da tiempo a que **al menos 2 velas M5 cierren mientras AIdan observa en vivo**, asegurando que las señales detectadas sean recién aparecidas y no stale.
+
+Aplicado a:
+- News flow (`AIdan_TodoEnUno.py:1326`)
+- Structure scanner (`AIdan_TodoEnUno.py:1893`)
+- SMC scanner (`AIdan_TodoEnUno.py:2065`)
+
+Pre-planned strategies exentas (son scheduled, no reactivas).
+
+### Trade-off aceptado
+
+Si abrís AIdan a las 09:55 antes del NY open (10:00 AR), te perdés la primera media hora del NY open. Es un costo aceptable: las señales perdidas en los primeros 10 minutos eran disproporcionadamente perdedoras.
 
 ---
 
