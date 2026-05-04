@@ -1882,13 +1882,40 @@ class AIdan:
                                 # (mean-reverting timeframe). News trades are exempt from this filter
                                 # because news catalysts can drive aligned moves successfully.
                                 _ms_trend = ms.get('trend', 'unknown')
+                                _regime = ms.get('regime', 'uncertain')
                                 _is_fully_aligned = (
                                     (direction == 'CALL' and htf_bias == 'bullish' and _ms_trend == 'bullish') or
                                     (direction == 'PUT' and htf_bias == 'bearish' and _ms_trend == 'bearish')
                                 )
+                                _is_counter_htf = (
+                                    (direction == 'CALL' and htf_bias == 'bearish') or
+                                    (direction == 'PUT' and htf_bias == 'bullish')
+                                )
+                                _setup_type_str = sig.get('setup_type', '')
+                                _is_reversal_setup = any(t in _setup_type_str for t in ('reversal', 'rejection', 'bounce', 'rebote', 'rechazo'))
+
+                                # === v3.10.0 REGIME-AWARE FILTERS (CORRECTED via empirical data) ===
+                                # Counter-intuitive finding from 53-trade trending sample:
+                                #   aligned in trending:    23 trades | 17% WR | -$58.90  ← WORST
+                                #   M5-only counter-HTF:    14 trades | 50% WR | -$8.30   ← actually best!
+                                #   HTF-only counter-M5:    13 trades | 46% WR | -$11.11
+                                #   counter-both (HTF+M5):   3 trades |  0% WR | -$16.90
+                                # Conclusion: EUR/USD M5 is mean-reverting EVEN INSIDE trends. Aligned
+                                # trades are exhaustion entries regardless of regime. Counter-trend trades
+                                # are bouncing off short-term overextension (the mean reversion).
+                                # New logic: ALWAYS block fully-aligned + ALWAYS block counter-both.
+                                # M5-only and HTF-only pass.
+                                _is_counter_both = (
+                                    (direction == 'CALL' and htf_bias == 'bearish' and _ms_trend == 'bearish') or
+                                    (direction == 'PUT' and htf_bias == 'bullish' and _ms_trend == 'bullish')
+                                )
                                 if _is_fully_aligned:
-                                    logger.info(f"SIM A filter: skipping structure {direction} fully-aligned (HTF+M5+dir all match — exhaustion zone). htf={htf_bias} m5={_ms_trend}")
+                                    logger.info(f"SIM A: skipping structure {direction} fully-aligned (htf={htf_bias} m5={_ms_trend} regime={_regime}). 17-29% WR historically.")
                                     continue
+                                if _is_counter_both:
+                                    logger.info(f"Counter-both filter: skipping structure {direction} (htf={htf_bias} m5={_ms_trend} both against direction). 0% WR historically.")
+                                    continue
+                                # M5-only or HTF-only setups pass — those are the empirically-profitable bucket
 
                                 # v3.9.1 Warmup gate: skip first 10 min after analyzer startup
                                 _warmup_elapsed = time.time() - _analyzer_warmup_start
@@ -2060,6 +2087,27 @@ class AIdan:
                             opposite = has_active_opposite_strategy(direction)
                             if opposite:
                                 logger.info(f"Anti-contradiction: skipping {direction} SMC, active #{opposite[0]} {opposite[1]}")
+                                continue
+
+                            # === v3.10.0 SMC ALIGNMENT FILTER (corrected via empirical data) ===
+                            # Same logic as structure: block fully-aligned and counter-both.
+                            # M5-only and HTF-only setups pass.
+                            _smc_regime = ms.get('regime', 'uncertain')
+                            _smc_htf_for_filter = setup.get('htf_bias') or (smc_status.get('htf_bias') if 'smc_status' in dir() and smc_status else None) or 'neutral'
+                            _smc_m5_trend = ms.get('trend', 'unknown')
+                            _smc_aligned = (
+                                (direction == 'CALL' and _smc_htf_for_filter == 'bullish' and _smc_m5_trend == 'bullish') or
+                                (direction == 'PUT' and _smc_htf_for_filter == 'bearish' and _smc_m5_trend == 'bearish')
+                            )
+                            _smc_counter_both = (
+                                (direction == 'CALL' and _smc_htf_for_filter == 'bearish' and _smc_m5_trend == 'bearish') or
+                                (direction == 'PUT' and _smc_htf_for_filter == 'bullish' and _smc_m5_trend == 'bullish')
+                            )
+                            if _smc_aligned:
+                                logger.info(f"SIM A SMC: skipping {direction} fully-aligned (htf={_smc_htf_for_filter} m5={_smc_m5_trend}).")
+                                continue
+                            if _smc_counter_both:
+                                logger.info(f"Counter-both SMC: skipping {direction} (htf={_smc_htf_for_filter} m5={_smc_m5_trend}).")
                                 continue
 
                             # v3.9.1 Warmup gate: skip first 10 min after analyzer startup

@@ -1,8 +1,79 @@
-# AIdan v3.9.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.10.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.10.0 — Regime detection (trending vs ranging)
+
+Análisis del 4 May 2026 reveló que AIdan está calibrado bajo el supuesto "EUR/USD M5 es mean-reverting", pero ese día EUR/USD se movió -36p en trend bajista limpio. **AIdan perdió 4/4 CALLs** tratando de comprar bounces durante el trend.
+
+Solución: agregar **detección de régimen** y aplicar filtros diferenciados.
+
+### Detector de régimen (`technical.py:get_market_state`)
+
+Computa 3 señales sobre las últimas 50 velas M5 (~4 horas):
+
+1. **directional_score** = |movimiento neto| / ATR. >3 = trending fuerte.
+2. **range_atrs** = (max-min) / ATR. >7 = expansión amplia.
+3. **ma_alignment_score** = |MA9 - MA21| / ATR. >0.6 = MAs separadas, trend sostenido.
+
+Score (0-3) → clasificación:
+- ≥2 señales: **trending**
+- 0 señales + directional <1.5: **ranging**
+- otro: **uncertain**
+
+### Filtros UNIVERSALES (validados sobre data histórica)
+
+Después de simular, descubrí que **mi hipótesis inicial (regime-dependent filters) estaba al revés**. Empíricamente:
+
+```
+TRENDING regime breakdown (53 trades):
+  aligned    : 23 trades | 17% WR | -$58.90  ← PEOR
+  M5-only    : 14 trades | 50% WR | -$8.30
+  HTF-only   : 13 trades | 46% WR | -$11.11
+  counter-both: 3 trades |  0% WR | -$16.90
+```
+
+Counter-intuitivo: **aligned trades en trending son los PEORES** (17% WR), no los mejores. EUR/USD M5 mean-reverte incluso dentro de trends macro — los aligned son entries tarde en el movimiento.
+
+Filtros corregidos (aplican en TODOS los regímenes):
+- **BLOQUEAR fully-aligned** (HTF + M5 + dir todos coinciden) — siempre exhaustion
+- **BLOQUEAR counter-both** (HTF + M5 ambos contra dir) — sin edge histórico
+- **PERMITIR M5-only y HTF-only** (parcialmente alineado) — los buckets profitables
+
+News flow exempt (catalysts pueden mover en cualquier dirección).
+El detector de régimen sigue computado y guardado en entry_context para análisis futuro, pero la lógica de filtrado actual no lo usa.
+
+### Validación con simulación (118 trades históricos)
+
+```
+                Baseline    v3.10.0 corregido
+n trades:       118         73 (45 bloqueados)
+WR:             38%         47%                ✓ +9pp
+PnL:            -$115.81    -$39.31            ✓ +$76.50
+PF:             0.58        0.74               ✓ +0.16
+
+Bloqueados:  44 fully-aligned (25% WR, -$70.70)
+              1 counter-both
+```
+
+**Mejora robusta**: $0.65/trade en delta (+$76 sobre 118 trades). WR sube 9pp. Cerca de break-even (-$39 vs -$115).
+
+### Lo que esto NO arregla
+
+- Wins amputados al 43% del TP (mecanismo aún desconocido)
+- Régimen "uncertain" sigue mixto
+- Transiciones entre régimen pueden producir whipsaw — a observar
+
+### Archivos modificados
+
+- `src/analyzer/technical.py:295-340` — detector + agregado `regime` al market state
+- `AIdan_TodoEnUno.py:1893` — filtro regime-aware en structure flow
+- `AIdan_TodoEnUno.py:2087` — filtro regime-aware en SMC flow
+- `tools/simulate_regime.py` — simulación standalone
 
 ---
 

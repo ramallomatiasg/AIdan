@@ -291,8 +291,54 @@ class TechnicalAnalyzer:
             'price_position': price_position,
         }
 
+        # === v3.10.0 REGIME DETECTION ===
+        # Determines if market is currently in TRENDING or RANGING regime.
+        # Different regimes need different strategy logic:
+        #   TRENDING: aligned trades work, counter-trend = bounce-buying = LOSES
+        #   RANGING: counter-trend mean-reversion works, aligned = exhaustion = LOSES
+        # Empirical evidence (4 May 2026): EUR/USD was decisively bearish (-36p net).
+        # AIdan lost 4/4 CALL trades trying to buy bounces during a clear bearish trend.
+        # Regime detector computes 3 signals from last 50 M5 candles (~4 hours):
+        #   1. directional_score: |net_move| / avg_atr — how far price has moved net
+        #   2. range_atrs: (max_high - min_low) / avg_atr — total swing
+        #   3. ma_alignment: ma_fast vs ma_slow distance vs ATR — sustained direction
+        regime = 'uncertain'
+        regime_score = 0
+        try:
+            if len(candles) >= 50:
+                recent = candles[-50:]
+                recent_closes = [c['close'] for c in recent]
+                recent_highs = [c['high'] for c in recent]
+                recent_lows = [c['low'] for c in recent]
+
+                # Signal 1: Net directional move in ATRs
+                net_move_pips = abs(recent_closes[-1] - recent_closes[0]) * 10000
+                directional_score = net_move_pips / max(avg_range, 1.0)
+
+                # Signal 2: Range expansion in ATRs
+                range_pips = (max(recent_highs) - min(recent_lows)) * 10000
+                range_atrs = range_pips / max(avg_range, 1.0)
+
+                # Signal 3: MA alignment strength (how far apart ma_fast and ma_slow)
+                ma_gap_pips = abs(ma_fast - ma_slow) * 10000
+                ma_alignment_score = ma_gap_pips / max(avg_range, 1.0)
+
+                # Score combination (0-3 trending signals)
+                if directional_score > 3.0: regime_score += 1
+                if range_atrs > 7.0: regime_score += 1
+                if ma_alignment_score > 0.6: regime_score += 1
+
+                if regime_score >= 2:
+                    regime = 'trending'
+                elif regime_score == 0 and directional_score < 1.5:
+                    regime = 'ranging'
+                else:
+                    regime = 'uncertain'
+        except Exception:
+            regime = 'uncertain'
+
         # Summary
-        summary = f"EUR/USD {current_price:.5f} | Tendencia {trend} {trend_strength} | RSI {rsi:.0f} ({rsi_zone}) | MA9 {ma_fast:.5f} MA21 {ma_slow:.5f} | Mom: {momentum}"
+        summary = f"EUR/USD {current_price:.5f} | Tendencia {trend} {trend_strength} | RSI {rsi:.0f} ({rsi_zone}) | MA9 {ma_fast:.5f} MA21 {ma_slow:.5f} | Mom: {momentum} | Regime: {regime}"
 
         return {
             'price': current_price,
@@ -306,6 +352,8 @@ class TechnicalAnalyzer:
             'momentum': momentum,
             'volatility': volatility,
             'avg_range_pips': round(avg_range, 1),
+            'regime': regime,
+            'regime_score': regime_score,
             'summary': summary,
             'chart_structures': chart_structures,
             'timestamp': datetime.now().isoformat(),
