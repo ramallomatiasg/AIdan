@@ -1,8 +1,27 @@
-# AIdan v3.12.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.12.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.12.1 — Hotfix: el bypass de v3.12.0 no se ejecutaba
+
+Bug detectado en producción: la lógica de bypass low-conf news estaba dentro de un bloque que requería `conf_ok=True` en un gate ANTERIOR usando `prof_min_conf=60`. Resultado: alertas con conf<60 nunca entraban al bloque donde estaba el bypass.
+
+**Caso real (5 May 2026, 08:38 AR)**:
+- Alert #1843 PUT conf 58.5 impact 55 — bypass debería haberlo capturado
+- Pero `conf_ok = 58.5 >= 60 = False` en gate inicial → never reached bypass
+- Strategy NO se generó
+
+**Fix**: el gate inicial `conf_ok` ahora usa threshold dinámico:
+```python
+_initial_min_conf = 30 if impact_score >= 55 else prof_min_conf
+conf_ok = confidence >= _initial_min_conf
+```
+
+Sin esto v3.12.0 era equivalente a v3.11.0 en producción (los trades extra del simulado no se hubieran generado).
 
 ---
 

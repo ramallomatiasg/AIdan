@@ -1209,7 +1209,11 @@ class AIdan:
                             prof_tp = profile.get('take_profit_pips', 10)
 
                             score_ok = result['impact_score'] >= prof_min_impact
-                            conf_ok = result.get('confidence', 0) >= prof_min_conf
+                            # v3.12.1 BUGFIX: el conf_ok inicial debe usar el threshold DINÁMICO.
+                            # Sin esto, news con conf<60 nunca entran al block donde estaba el bypass.
+                            # Threshold efectivo: 30 si impact_score >= 55 (high-impact news), sino prof_min_conf.
+                            _initial_min_conf = 30 if result.get('impact_score', 0) >= 55 else prof_min_conf
+                            conf_ok = result.get('confidence', 0) >= _initial_min_conf
                             dir_ok = prof_direction == 'any' or result.get('direction') == prof_direction
                             direction = result.get('direction', 'NEUTRAL')
 
