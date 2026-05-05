@@ -15,6 +15,17 @@ import winreg
 import urllib.request
 import tempfile
 
+# v3.16.0 — force UTF-8 on Windows console to prevent UnicodeEncodeError on emojis (🚀 📰 etc).
+# When AIdan launches without a console attached (Task Scheduler / start ""),
+# stdout falls back to cp1252 which can't encode emoji and crashes start_services.
+try:
+    if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 # Ensure working directory and data paths are correct
 if getattr(sys, 'frozen', False):
     _EXE_DIR = os.path.dirname(sys.executable)
@@ -383,7 +394,15 @@ class AIdan:
             'blue': self.ACCENT, 'orange': self.ORANGE, 'white': self.TEXT
         }
         fg = fg_map.get(color, self.TEXT)
-        print(message)
+        # v3.16.0 — encode-safe print: never crash on emoji even if stdout is cp1252
+        try:
+            print(message)
+        except (UnicodeEncodeError, OSError):
+            try:
+                _enc = (getattr(sys.stdout, 'encoding', None) or 'ascii')
+                print(message.encode(_enc, 'replace').decode(_enc, 'replace'))
+            except Exception:
+                pass
         if self.status_label and self.root:
             def _update_gui():
                 try:

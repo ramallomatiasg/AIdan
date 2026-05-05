@@ -1,8 +1,21 @@
-# AIdan v3.16.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.16.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.16.1 — Hotfix UnicodeEncodeError al arrancar
+
+Al arrancar AIdan sin consola attached (Task Scheduler / `start ""`), stdout caía a cp1252 que no encodea emojis (🚀 📰 etc) y crasheaba `start_services` con `UnicodeEncodeError`. Visible en el log de stderr pero invisible en uso normal porque el thread del init reventaba silenciosamente.
+
+### Fix
+
+Doble protección al inicio de `AIdan_TodoEnUno.py`:
+
+1. **Forzar UTF-8 en stdout/stderr** via `sys.stdout.reconfigure(encoding='utf-8', errors='replace')` apenas arranca. Si la consola no lo soporta, cae al paso 2.
+2. **Try/except en `log()`**: si el `print(message)` falla por encoding, hace fallback a ASCII con `replace`. Nunca mata el thread.
 
 ---
 
