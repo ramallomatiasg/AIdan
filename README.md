@@ -1,8 +1,61 @@
-# AIdan v3.10.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.11.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.11.0 — 3 fixes data-driven (#3 descartado por simulación)
+
+Análisis profundo de 118 trades históricos (`tools/deep_analysis.py`) reveló 4 patrones explotables. Simulación pre-deploy validó 3 de los 4 — el cuarto resultó contraproducente:
+
+### Cambios aplicados (3 de 4)
+
+**1. ATR floor 2.5p** — bloquear trades en deadzone (ATR<2.5)
+- Empírico: 15 trades históricos | 13% WR | -$22.81
+- Comm 0.7p come la mayoría del win esperado en deadzone
+- Aplicado en news/structure/SMC flows
+
+**2. Hour gate 12, 14, 20 UTC** (= 09h, 11h, 17h AR)
+- Empírico: 26 trades en esas horas | -$45.31 collective
+- 11h AR específicamente: 16 trades, -$33.60
+- Aplicado en news/structure/SMC flows
+
+**4. Conf ceiling 80** — bloquear trades con conf >= 80 (anti-predictiva)
+- Empírico: bucket 80-89 (-$20) y 90+ (-$21) son net losers
+- AIdan asigna conf alta a trades que pierden (formula reverse-correlated)
+- Aplicado en news/structure/SMC flows
+
+### Cambio descartado (#3 lower min_conf)
+
+**No aplicado**: bajar min_conf 60→50.
+
+**Razón**: la simulación reveló que mi premisa estaba mal. El bucket conf<50 (62% WR, +$12.10) **ya está bloqueado por min=50** (50 floor sigue bloqueando <50). Lo que se desbloquea con min=50 es bucket [50,60) que es **NET LOSER** (-$10.61, 38% WR).
+
+El cambio hubiera HURTING: simulación con #3 dió delta +$8 vs v3.10. Sin #3 dió delta +$17.
+
+### Validación con simulación
+
+```
+                                  n     WR    PnL          PF      Delta
+BASELINE                          118   38%   -$115.81     0.58     —
+v3.10.0 (universal SIM A)         73    47%   -$39.31      0.74     —
+v3.11.0 con 4 fixes (incl #3)     43    47%   -$30.90      0.66     +$8 vs v3.10
+v3.11.0 final (sin #3)            31    48%   -$22.40      0.68     +$17 vs v3.10  ✓
+```
+
+**v3.11.0 final**: WR 48%, PnL casi break-even (-$22), PF 0.68. **+$93 vs baseline original (-$115).**
+
+Trade-off aceptado: 31 trades vs 73 (filtra 58% más). Volumen baja considerablemente pero calidad sube.
+
+### Archivos modificados
+
+- `AIdan_TodoEnUno.py:1326-1351` — gates en news flow (ATR + hour + conf ceil)
+- `AIdan_TodoEnUno.py:1924-1944` — gates en structure flow
+- `AIdan_TodoEnUno.py:2138-2151` — gates en SMC flow + conf ceil post-audit
+- `tools/simulate_v311.py` — simulation framework
+- `README.md` — changelog completo con razonamiento
 
 ---
 

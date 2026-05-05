@@ -756,9 +756,10 @@ def get_active_profile():
         logging.getLogger('db').debug(f"get_active_profile: {e}")
     finally:
         conn.close()
-    # Defaults (v3.7.0) — min_confidence raised from 50 to 60 after analysis of 75 trades
-    # showed conf=50-59 bucket had ~same WR as conf=60-69 but contributed half the losses.
-    # See README v3.7.0 changelog for the data.
+    # Defaults (v3.11.0) — min_confidence stays at 60. Initial v3.11 plan was to lower
+    # to 50 to capture the conf<50 profitable bucket, but simulation revealed the change
+    # captures bucket [50,60) (a NET LOSER, -$10.61) instead of unlocking conf<50 (still
+    # blocked by 50 floor). Keeping 60 + adding conf >=80 ceiling is the correct combo.
     return {
         'min_impact': 50, 'min_confidence': 60, 'direction': 'any',
         'stop_loss_pips': 3.5, 'take_profit_pips': 15, 'expiry_minutes': 15,

@@ -1325,8 +1325,18 @@ class AIdan:
 
                                                         # v3.9.1 Warmup gate: skip first 10 min after analyzer startup
                                                         _warmup_elapsed = time.time() - _analyzer_warmup_start
+                                                        # v3.11.0 ATR floor + hour gate + conf ceiling
+                                                        from datetime import datetime as _ndt2, timezone as _ntz2
+                                                        _news_atr_now = market.get('avg_range_pips', 0)
+                                                        _news_utc_h = _ndt2.now(_ntz2.utc).hour
                                                         if _warmup_elapsed < WARMUP_SECONDS:
                                                             logger.info(f"Warmup gate: skipping news {direction}, analyzer running {_warmup_elapsed:.0f}s < {WARMUP_SECONDS}s warmup")
+                                                        elif _news_atr_now < 2.5:
+                                                            logger.info(f"ATR floor: skipping news {direction}, ATR {_news_atr_now:.1f}p < 2.5p (deadzone)")
+                                                        elif _news_utc_h in (12, 14, 20):
+                                                            logger.info(f"Hour gate: skipping news {direction}, UTC {_news_utc_h}h ({_news_utc_h-3}h AR) historically -PnL")
+                                                        elif _news_conf >= 80:
+                                                            logger.info(f"Conf ceiling: blocking news {direction}, conf {_news_conf} >= 80 (anti-predictive)")
                                                         # Min confidence gate: skip if below profile threshold after learning adjustments
                                                         elif _news_conf < prof_min_conf:
                                                             logger.info(f"Min confidence gate: skipping news {direction}, conf {_news_conf} < profile min {prof_min_conf}")
@@ -1923,6 +1933,26 @@ class AIdan:
                                     logger.info(f"Warmup gate: skipping structure {direction}, analyzer running {_warmup_elapsed:.0f}s < {WARMUP_SECONDS}s warmup")
                                     continue
 
+                                # === v3.11.0 DATA-DRIVEN FILTERS ===
+                                # ATR floor: skip when volatility too low (deadzone — comm eats wins).
+                                # Empirical: 15 trades with ATR<2.5 had 13% WR, -$22.81.
+                                _atr_now = ms.get('avg_range_pips', 0)
+                                if _atr_now < 2.5:
+                                    logger.info(f"ATR floor: skipping structure {direction}, ATR {_atr_now:.1f}p < 2.5p (deadzone)")
+                                    continue
+                                # Hour gate: 09h, 11h, 17h AR (= 12, 14, 20 UTC) historically lose.
+                                # Empirical: 26 trades in those hours had collective -$45.31.
+                                from datetime import datetime as _hdt, timezone as _htz
+                                _utc_h = _hdt.now(_htz.utc).hour
+                                if _utc_h in (12, 14, 20):
+                                    logger.info(f"Hour gate: skipping structure {direction}, UTC {_utc_h}h ({_utc_h-3}h AR) historically -PnL")
+                                    continue
+                                # Conf ceiling: block conf >= 80 (anti-predictive zone).
+                                # Empirical: bucket 80-89 (-$20) and 90+ (-$21) are net losers.
+                                if conf >= 80:
+                                    logger.info(f"Conf ceiling: blocking structure {direction}, conf {conf} >= 80 (anti-predictive zone, historically losers)")
+                                    continue
+
                                 # Min confidence gate: skip if below profile threshold after all adjustments
                                 if conf < min_conf:
                                     logger.info(f"Min confidence gate: skipping structure {direction}, conf {conf} < profile min {min_conf}")
@@ -2116,6 +2146,18 @@ class AIdan:
                                 logger.info(f"Warmup gate: skipping SMC {direction}, analyzer running {_warmup_elapsed:.0f}s < {WARMUP_SECONDS}s warmup")
                                 continue
 
+                            # === v3.11.0 DATA-DRIVEN FILTERS (SMC) ===
+                            _smc_atr = ms.get('avg_range_pips', 0)
+                            if _smc_atr < 2.5:
+                                logger.info(f"ATR floor: skipping SMC {direction}, ATR {_smc_atr:.1f}p < 2.5p (deadzone)")
+                                continue
+                            from datetime import datetime as _smc_dt, timezone as _smc_tz
+                            _smc_utc_h = _smc_dt.now(_smc_tz.utc).hour
+                            if _smc_utc_h in (12, 14, 20):
+                                logger.info(f"Hour gate: skipping SMC {direction}, UTC {_smc_utc_h}h historically -PnL")
+                                continue
+                            # Conf ceiling check happens later, after audit may inflate conf
+
                             smc_snap = _fetch_candles_snapshot(30)
                             _smc_session_info = tech.get_session_info()
                             _smc_session = _smc_session_info.get('session', '')
@@ -2139,6 +2181,11 @@ class AIdan:
                                     if conf < min_conf:
                                         logger.info(f"Gemma vetoed SMC signal: conf {conf} < {min_conf}")
                                         continue
+
+                            # v3.11.0 Conf ceiling for SMC (post-audit)
+                            if conf >= 80:
+                                logger.info(f"Conf ceiling: blocking SMC {direction}, conf {conf} >= 80 (anti-predictive)")
+                                continue
 
                             _smc_htf_for_ctx = setup.get('htf_bias') or (smc_status.get('htf_bias') if 'smc_status' in dir() and smc_status else None) or ''
                             _smc_entry_ctx = {
