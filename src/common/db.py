@@ -2271,6 +2271,20 @@ def get_learning_adjustments():
                     elif _conf_was == 'underestimated' and _entry_q in ('good', 'fair'):
                         cur = adjustments['trigger_penalties'].get(_trigger, 0)
                         adjustments['trigger_penalties'][_trigger] = cur + int(1 * weight)
+
+                    # v3.15.0 — Aggregate SL/TP recommendations from Gemma
+                    # Each post_trade insight may include sl_action and recommended_sl_pips
+                    # We accumulate these in sl_tp_advice for compute_adaptive_sl_tp to use
+                    _sl_action = data.get('sl_action', 'keep')
+                    _rec_sl = float(data.get('recommended_sl_pips', 0) or 0)
+                    _rec_tp = float(data.get('recommended_tp_pips', 0) or 0)
+                    if _sl_action in ('widen', 'tighten') and _rec_sl > 0:
+                        # Accumulate per-trigger rolling list of recommendations
+                        bucket = adjustments['sl_tp_advice'].setdefault(_trigger, {'sl_recs': [], 'tp_recs': [], 'actions': []})
+                        bucket['sl_recs'].append(_rec_sl * weight)
+                        if _rec_tp > 0:
+                            bucket['tp_recs'].append(_rec_tp * weight)
+                        bucket['actions'].append(_sl_action)
     except Exception as _le:
         import logging as _log
         _log.getLogger('db').warning(f"get_learning_adjustments failed: {_le}", exc_info=True)
@@ -2325,6 +2339,39 @@ def get_learning_adjustments():
                         adjustments['news_category_penalties'][nc] = -10
                     elif ev_pips > 2.0:
                         adjustments['news_category_penalties'][nc] = 8
+    except Exception:
+        pass
+
+    # v3.15.0 — finalize sl_tp_advice: convert per-trigger lists into actionable medians
+    # If trigger has 3+ recommendations and consensus action, output: {'action': 'widen', 'sl_pips': 5.5, 'tp_pips': 12.0}
+    try:
+        finalized = {}
+        for trigger, bucket in list(adjustments['sl_tp_advice'].items()):
+            if isinstance(bucket, dict) and 'sl_recs' in bucket:
+                actions = bucket.get('actions', [])
+                sl_recs = bucket.get('sl_recs', [])
+                tp_recs = bucket.get('tp_recs', [])
+                if len(actions) < 3:
+                    continue  # need at least 3 trades for stable signal
+                # Consensus action: most common
+                from collections import Counter
+                action_count = Counter(actions)
+                top_action, top_n = action_count.most_common(1)[0]
+                if top_n / len(actions) < 0.6:
+                    continue  # no clear consensus (60% majority)
+                # Median of recommendations
+                sl_med = sorted(sl_recs)[len(sl_recs)//2] if sl_recs else 0
+                tp_med = sorted(tp_recs)[len(tp_recs)//2] if tp_recs else 0
+                finalized[trigger] = {
+                    'action': top_action,
+                    'sl_pips': round(sl_med, 1),
+                    'tp_pips': round(tp_med, 1),
+                    'sample_size': len(actions),
+                }
+            elif isinstance(bucket, str):
+                # Backward compat: existing 'sl_tp' category recommendation as plain string
+                finalized[trigger] = {'action': 'unknown', 'recommendation': bucket}
+        adjustments['sl_tp_advice'] = finalized
     except Exception:
         pass
 

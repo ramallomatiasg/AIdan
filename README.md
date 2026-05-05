@@ -1,8 +1,74 @@
-# AIdan v3.14.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.15.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.15.0 — Gemma SL/TP feedback loop (write→read→apply)
+
+Hasta v3.14.0, Gemma post-trade analizaba cada trade cerrado y guardaba advice como "Ajustar SL a 5.7 pips para alinear con el resultado real". Pero ese texto era WRITE-ONLY: nadie lo parseaba ni aplicaba. `sl_tp_advice` quedaba siempre vacío.
+
+143 análisis acumulados de Gemma estaban siendo desperdiciados.
+
+### El fix
+
+**Step 1 — Gemma prompt structured output** (`post_trade_analyzer.py:24`):
+
+Nuevo prompt pide datos numéricos además del texto:
+```json
+{
+  "entry_quality": "good",
+  "exit_quality": "fair",
+  "key_lesson": "...",
+  "suggested_adjustment": "...",
+  "sl_action": "widen",       ← NUEVO categórico
+  "recommended_sl_pips": 5.7,  ← NUEVO numérico
+  "recommended_tp_pips": 12.0  ← NUEVO numérico
+}
+```
+
+**Step 2 — Aggregation con consensus** (`db.py:get_learning_adjustments`):
+
+Por cada trigger_type, acumula advice de últimos 48h:
+- Necesita ≥3 trades para signal estable
+- Consensus 60%+ en `sl_action`
+- Median de `recommended_sl_pips` y `recommended_tp_pips`
+- Output: `{trigger: {action, sl_pips, tp_pips, sample_size}}`
+
+**Step 3 — Apply override** (`technical.py:compute_adaptive_sl_tp`):
+
+Si advice difiere >15% del profile, override:
+```python
+if rec_sl > 0 and abs(rec_sl - prof_sl) / prof_sl > 0.15:
+    learning_sl_override = rec_sl
+    # Use rec_sl as base instead of profile.stop_loss_pips
+```
+
+ATR clamping y structural override siguen aplicando — la advice de Gemma reemplaza el `prof_sl` base.
+
+### Comportamiento esperado
+
+Después de 3+ post_trade analyses con sl_action='widen' para `news`:
+```
+Learning SL override for news: widen → 5.5p (profile was 3.5p, n=4)
+```
+La próxima news strategy va a usar SL=5.5p en lugar de 3.5p.
+
+Si Gemma cambia de opinión y ahora dice 'tighten' o 'keep', se actualiza al siguiente ciclo.
+
+### Trade-off
+
+- **Pro**: 143 análisis de Gemma ahora son ACCIONABLES, no solo decorativos. Sistema aprende SL/TP por trigger.
+- **Riesgo**: Gemma puede dar advice inconsistente. El consensus 60% + median + sample 3+ mitiga.
+- **Limitación**: existing 143 insights no tienen los nuevos campos (text-only). Solo NUEVOS análisis (post-deploy) feed el sistema.
+
+### Validation pendiente
+
+- Próximos 5+ trades cerrados van a generar análisis con structured SL data
+- A los 3+ análisis del mismo trigger con consensus, el override se activa
+- Ver logs "Learning SL override for X: Y → Zp"
 
 ---
 

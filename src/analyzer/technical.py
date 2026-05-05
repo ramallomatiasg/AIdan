@@ -1246,12 +1246,16 @@ class TechnicalAnalyzer:
         else:
             return {'session': 'off_hours', 'conf_adj': -10, 'spread_est': 1.5, 'label': 'Off-hours'}
 
-    def compute_adaptive_sl_tp(self, direction, price, market_state, profile):
+    def compute_adaptive_sl_tp(self, direction, price, market_state, profile, trigger_type=None, sl_tp_advice=None):
         """
         Compute SL/TP adapted to current volatility via ATR-14.
         - SL: ATR * 0.8, clamped between profile min and profile * 2.5
         - TP: maintains profile R:R ratio relative to SL
         - Falls back to profile values if ATR unavailable
+
+        v3.15.0: Si sl_tp_advice tiene recomendación para este trigger_type
+        (de Gemma post_trade aggregada en últimos 48h con N>=3 y consenso>60%),
+        usar como SL/TP base (ajustado a profile bounds).
         """
         pip = 0.0001
         prof_sl = profile.get('stop_loss_pips', 5)
@@ -1260,21 +1264,43 @@ class TechnicalAnalyzer:
         supports = structures.get('supports', [])
         resistances = structures.get('resistances', [])
 
+        # v3.15.0 — Apply Gemma SL/TP recommendation if trigger has consensus advice
+        learning_sl_override = None
+        learning_tp_override = None
+        if sl_tp_advice and trigger_type and trigger_type in sl_tp_advice:
+            advice = sl_tp_advice[trigger_type]
+            if isinstance(advice, dict) and advice.get('action') in ('widen', 'tighten'):
+                rec_sl = advice.get('sl_pips', 0)
+                rec_tp = advice.get('tp_pips', 0)
+                # Validate: only apply if recommendation differs significantly from profile
+                if rec_sl > 0 and abs(rec_sl - prof_sl) / prof_sl > 0.15:
+                    learning_sl_override = rec_sl
+                    self.logger.info(f"Learning SL override for {trigger_type}: {advice['action']} → {rec_sl}p (profile was {prof_sl}p, n={advice.get('sample_size')})")
+                if rec_tp > 0 and abs(rec_tp - prof_tp) / prof_tp > 0.15:
+                    learning_tp_override = rec_tp
+
         # ATR-based SL: use 80% of ATR-14, clamped to profile bounds
         # Hard minimum: never below 2.0 pips regardless of ATR or profile
         SL_HARD_MIN = 2.0
         atr = market_state.get('avg_range_pips', 0)
+
+        # If learning override exists, use it as the base (still respect ATR bounds)
+        effective_prof_sl = learning_sl_override if learning_sl_override else prof_sl
+
         if atr > 0:
             atr_sl = round(atr * 0.8, 1)
-            sl_min = max(prof_sl, SL_HARD_MIN)    # profile SL as floor (min 2.0p)
-            sl_max = round(prof_sl * 2.5, 1)      # 2.5x profile as ceiling
+            sl_min = max(effective_prof_sl, SL_HARD_MIN)
+            sl_max = round(effective_prof_sl * 2.5, 1)
             final_sl = max(sl_min, min(sl_max, atr_sl))
         else:
-            final_sl = max(prof_sl, SL_HARD_MIN)
+            final_sl = max(effective_prof_sl, SL_HARD_MIN)
 
-        # TP: maintain R:R ratio from profile (e.g. 3.5:15 = 1:4.3)
-        rr_ratio = prof_tp / prof_sl if prof_sl > 0 else 4.0
-        final_tp = round(final_sl * rr_ratio, 1)
+        # TP: maintain R:R ratio from profile or use learning override
+        if learning_tp_override:
+            final_tp = round(learning_tp_override, 1)
+        else:
+            rr_ratio = prof_tp / prof_sl if prof_sl > 0 else 4.0
+            final_tp = round(final_sl * rr_ratio, 1)
 
         # Optionally place SL behind nearest structural level (can WIDEN, not narrow)
         # v3.8.0: ADAPTIVE cap. Both v3.6.x (prof_sl*2.5=8.75p) and v3.7.0 (min cap 5.6p)

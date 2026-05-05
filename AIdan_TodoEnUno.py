@@ -1301,7 +1301,7 @@ class AIdan:
 
                                         if price > 0:
                                             # Adaptive SL/TP based on ATR + structure levels
-                                            adaptive = tech.compute_adaptive_sl_tp(direction, price, market, profile)
+                                            adaptive = tech.compute_adaptive_sl_tp(direction, price, market, profile, trigger_type='news', sl_tp_advice=_learn_adj.get('sl_tp_advice') if _learn_adj else None)
                                             sl = adaptive['sl']
                                             tp = adaptive['tp']
 
@@ -1574,7 +1574,8 @@ class AIdan:
                                                 logger.info(f"HTF penalty: calendar {direction} against {_cal_htf} bias, conf -15 → {conf}")
 
                                         # Adaptive SL/TP
-                                        adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
+                                        _trigger_for_sltp = 'calendar'
+                                        adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile, trigger_type=_trigger_for_sltp, sl_tp_advice=_learn_adj.get('sl_tp_advice') if _learn_adj else None)
                                         sl = adaptive['sl']
                                         tp = adaptive['tp']
 
@@ -1833,7 +1834,8 @@ class AIdan:
                                 # key_level still influences confidence via detect_structure_signals.
 
                                 # Adaptive SL/TP based on ATR + structure levels
-                                adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
+                                _trigger_for_sltp = 'structure'
+                                adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile, trigger_type=_trigger_for_sltp, sl_tp_advice=_learn_adj.get('sl_tp_advice') if _learn_adj else None)
                                 sl = adaptive['sl']
                                 tp = adaptive['tp']
 
@@ -2084,7 +2086,8 @@ class AIdan:
                                 continue
 
                             # Adaptive SL/TP
-                            adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile)
+                            _trigger_for_sltp = 'smc'
+                            adaptive = tech.compute_adaptive_sl_tp(direction, price, ms, profile, trigger_type=_trigger_for_sltp, sl_tp_advice=_learn_adj.get('sl_tp_advice') if _learn_adj else None)
                             sl = adaptive['sl']
                             tp = adaptive['tp']
 

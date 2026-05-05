@@ -42,7 +42,7 @@ Trade completado:
 - MT5 P&L: ${mt5_pnl}
 
 Responde SOLO en JSON valido, sin texto adicional:
-{{"entry_quality": "good", "exit_quality": "good", "news_accuracy": "neutral", "timing_assessment": "acceptable", "key_lesson": "1 linea accionable", "confidence_was": "accurate", "suggested_adjustment": "descripcion corta"}}
+{{"entry_quality": "good", "exit_quality": "good", "news_accuracy": "neutral", "timing_assessment": "acceptable", "key_lesson": "1 linea accionable", "confidence_was": "accurate", "suggested_adjustment": "descripcion corta", "sl_action": "keep", "recommended_sl_pips": 0, "recommended_tp_pips": 0}}
 
 Reglas:
 - entry_quality: "good" | "fair" | "poor"
@@ -52,6 +52,11 @@ Reglas:
 - key_lesson: maximo 1 oracion con leccion accionable para mejorar
 - confidence_was: "overestimated" | "accurate" | "underestimated"
 - suggested_adjustment: que cambiar en parametros o logica (max 1 oracion)
+- sl_action: "widen" | "tighten" | "keep" — direccion sugerida para el SL (estructural)
+- recommended_sl_pips: numero (0-15) — SL ideal en pips para este tipo de setup. 0 = "keep current"
+- recommended_tp_pips: numero (0-30) — TP ideal en pips para este tipo de setup. 0 = "keep current"
+
+Para sl_action y recommended_sl_pips piensa: si el trade perdio por SL muy ajustado (price hizo whipsaw), sugiere "widen" con un valor mayor. Si gano poco porque el TP estaba muy lejos, sugiere "tighten" con valor menor. Si SL/TP estuvieron OK, "keep" y 0.
 """
 
 
@@ -123,6 +128,22 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
         valid_accuracy = ('accurate', 'neutral', 'inaccurate')
         valid_timing = ('optimal', 'acceptable', 'poor')
         valid_confidence = ('overestimated', 'accurate', 'underestimated')
+        valid_sl_action = ('widen', 'tighten', 'keep')
+
+        # v3.15.0 — campos estructurados de SL/TP recommendation
+        try:
+            rec_sl = float(result.get('recommended_sl_pips', 0) or 0)
+            rec_sl = max(0, min(15, rec_sl))  # clamp 0-15
+        except (TypeError, ValueError):
+            rec_sl = 0.0
+        try:
+            rec_tp = float(result.get('recommended_tp_pips', 0) or 0)
+            rec_tp = max(0, min(30, rec_tp))  # clamp 0-30
+        except (TypeError, ValueError):
+            rec_tp = 0.0
+        sl_action = result.get('sl_action', 'keep')
+        if sl_action not in valid_sl_action:
+            sl_action = 'keep'
 
         analysis = {
             'entry_quality': result.get('entry_quality', 'fair') if result.get('entry_quality') in valid_qualities else 'fair',
@@ -132,10 +153,16 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
             'key_lesson': str(result.get('key_lesson', ''))[:300],
             'confidence_was': result.get('confidence_was', 'accurate') if result.get('confidence_was') in valid_confidence else 'accurate',
             'suggested_adjustment': str(result.get('suggested_adjustment', ''))[:300],
+            # v3.15.0 — structured SL/TP feedback for actionable learning
+            'sl_action': sl_action,
+            'recommended_sl_pips': rec_sl,
+            'recommended_tp_pips': rec_tp,
+            # Pass trade context for downstream aggregation
+            'trigger_type': trade_data.get('trigger_type', ''),
         }
 
         logger.info(f"Post-trade analysis: entry={analysis['entry_quality']} exit={analysis['exit_quality']} "
-                     f"timing={analysis['timing_assessment']} | {analysis['key_lesson']}")
+                     f"timing={analysis['timing_assessment']} sl_action={sl_action} rec_sl={rec_sl}p rec_tp={rec_tp}p | {analysis['key_lesson']}")
         return analysis
 
     except requests.exceptions.Timeout:
