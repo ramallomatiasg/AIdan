@@ -1663,6 +1663,15 @@ def add_planned_strategy(news_title, direction, confidence, sl_pips, tp_pips,
 def activate_due_planned_strategies(minutes_before=5):
     """Activate planned strategies whose event is within minutes_before.
     Returns list of strategy IDs that were activated.
+
+    v3.12.2 — anti-contradiction at activation time. Empirical: 4/4 historical
+    pre_planned losses (#211 CALL, #212 CALL, #381 PUT, #383 CALL all losers).
+    The #381/#383 case (5 May 2026): two events at same time, one PUT one CALL,
+    both activated, opened opposite positions, both lost (-$13.90 combined).
+    Fix: when activating a planned, check if there's already an active opposite.
+    If yes, mark this one as 'skipped_opposite' instead of activating.
+    Also: track direction by event_time slot to ensure only ONE direction
+    activates per time window (first-come wins).
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -1671,13 +1680,25 @@ def activate_due_planned_strategies(minutes_before=5):
         window_start = now
         window_end = now + timedelta(minutes=minutes_before)
 
+        # Check what's currently active to avoid contradictions
         cursor.execute("""
-            SELECT id, event_time FROM auto_strategies
+            SELECT direction FROM auto_strategies
+            WHERE status = 'active'
+        """)
+        active_dirs = set(r[0] for r in cursor.fetchall())
+
+        # Get planned strategies in due window, sorted by confidence DESC (best first)
+        cursor.execute("""
+            SELECT id, event_time, direction, confidence FROM auto_strategies
             WHERE status = 'planned' AND event_time IS NOT NULL
+            ORDER BY confidence DESC, id ASC
         """)
         activated = []
+        skipped = []
+        # Track newly-activated directions in THIS batch to prevent within-batch contradictions
+        batch_activated_dirs = set()
         for row in cursor.fetchall():
-            sid, evt_str = row
+            sid, evt_str, direction, conf = row
             try:
                 if 'T' in str(evt_str):
                     evt = datetime.fromisoformat(str(evt_str).replace('Z', '+00:00'))
@@ -1688,13 +1709,29 @@ def activate_due_planned_strategies(minutes_before=5):
                     evt = evt.replace(tzinfo=timezone.utc)
 
                 if window_start <= evt <= window_end:
+                    opposite = 'PUT' if direction == 'CALL' else 'CALL'
+                    # Block if opposite already active (in DB) or just activated in this batch
+                    if opposite in active_dirs or opposite in batch_activated_dirs:
+                        cursor.execute(
+                            "UPDATE auto_strategies SET status = 'skipped_opposite' WHERE id = ?",
+                            (sid,)
+                        )
+                        skipped.append((sid, direction, opposite))
+                        continue
+                    # Activate
                     cursor.execute("UPDATE auto_strategies SET status = 'active' WHERE id = ?", (sid,))
                     activated.append(sid)
+                    batch_activated_dirs.add(direction)
             except Exception:
                 continue
 
-        if activated:
+        if activated or skipped:
             conn.commit()
+            if skipped:
+                import logging
+                _l = logging.getLogger('db')
+                for sid, d, opp in skipped:
+                    _l.info(f"Pre-planned activation: skipping #{sid} {d} (opposite {opp} already active/activating)")
         return activated
     finally:
         conn.close()

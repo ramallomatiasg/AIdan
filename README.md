@@ -1,8 +1,49 @@
-# AIdan v3.12.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.12.2 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.12.2 — Hotfix: anti-contradiction en pre_planned activator
+
+Bug crítico observado en producción (5 May 2026, ~11:00 broker time):
+- **#381 PUT pre_planned** (ISM Services PMI) y **#383 CALL pre_planned** (JOLTS) activaron al mismo tiempo
+- MT5 abrió ambas posiciones simultáneamente al mismo entry price (1.16984), direcciones opuestas
+- Ambas perdieron: -$6.40 + -$7.50 = **-$13.90 combinados**
+
+Histórico de pre_planned: **4 trades ejecutados, 4 losses. WR = 0%** (#211 #212 #381 #383).
+
+### Por qué falló anti-contradiction
+
+`has_active_opposite_strategy` solo chequea `status='active'`. Cuando dos planned activan en el mismo ciclo:
+1. Ninguna es `active` antes del activator
+2. El activator marca AMBAS como `active` en una sola pasada
+3. La gate de anti-contradiction (en news/structure/SMC flows) NUNCA evalúa pre_planned
+
+### Fix (`src/common/db.py:1663` `activate_due_planned_strategies`)
+
+Anti-contradiction añadido en el activator:
+1. Antes de activar, query DB para directions activas
+2. Para cada planned a activar, sortear por `confidence DESC` (best first)
+3. Si la dirección opuesta ya está active o se activó en este batch → marcar `status='skipped_opposite'` en lugar de activar
+4. Solo una dirección por ventana de tiempo
+
+### Comportamiento esperado
+
+- 2 events near-simultaneous con direcciones opuestas: solo el de MAYOR conf activa, el otro se skip
+- Si llega evento solo: activa normalmente
+- `skipped_opposite` queda en DB para análisis posterior
+
+### Consideración: deshabilitar pre_planner?
+
+Con 0% WR sobre 4 trades, podríamos directamente apagar el pre_planner. **No lo hacemos aún** porque:
+- Sample chico (4 trades)
+- El bug del anti-contradiction era el factor dominante (4 de 4 fueron pares contradictorios)
+- Con el fix, single-direction pre_planned podrían tener edge
+
+Si los próximos 5-10 pre_planned siguen perdiendo: apagamos.
 
 ---
 
