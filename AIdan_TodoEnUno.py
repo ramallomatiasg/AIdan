@@ -1337,9 +1337,14 @@ class AIdan:
                                                             logger.info(f"Hour gate: skipping news {direction}, UTC {_news_utc_h}h ({_news_utc_h-3}h AR) historically -PnL")
                                                         elif _news_conf >= 80:
                                                             logger.info(f"Conf ceiling: blocking news {direction}, conf {_news_conf} >= 80 (anti-predictive)")
-                                                        # Min confidence gate: skip if below profile threshold after learning adjustments
-                                                        elif _news_conf < prof_min_conf:
-                                                            logger.info(f"Min confidence gate: skipping news {direction}, conf {_news_conf} < profile min {prof_min_conf}")
+                                                        # v3.12.0 Effective min_conf for news: lower threshold to 30 when impact_score >= 55
+                                                        # Empirical: 5 of 8 conf<50 trades won (62% WR, +$12.10), and 4 of those 5
+                                                        # were news with impact_score 55-91. High-impact news moves price even when
+                                                        # Groq's directional confidence is low — uncertainty about direction != lack of move.
+                                                        # Min confidence gate: skip if below EFFECTIVE threshold
+                                                        elif _news_conf < (30 if result.get('impact_score', 0) >= 55 else prof_min_conf):
+                                                            _eff_min = 30 if result.get('impact_score', 0) >= 55 else prof_min_conf
+                                                            logger.info(f"Min confidence gate: skipping news {direction}, conf {_news_conf} < effective min {_eff_min} (impact={result.get('impact_score')})")
                                                         else:
                                                             # FAST PATH: create strategy + MT5 order FIRST, audit async
                                                             # Build entry context for atomic persist (avoids race with fast MT5 fills)

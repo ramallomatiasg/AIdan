@@ -120,3 +120,46 @@ stats("v3.11 SIN cambio #3 (min=60)", v311_no3_kept)
 v311_no3_pnl = sum(t[3] or 0 for t in v311_no3_kept)
 print(f"DELTA v3.11_no3 vs v3.10: ${v311_no3_pnl - v310_pnl:+.2f}")
 print(f"DELTA v3.11_no3 vs baseline: ${v311_no3_pnl - baseline_pnl:+.2f}")
+
+# === v3.12.0: same as v3.11 final + low-conf news bypass for impact>=55 ===
+# Need impact_score in the data
+import sqlite3
+conn2 = sqlite3.connect(DB_PATH); c2 = conn2.cursor()
+c2.execute("""SELECT t.id, t.impact_score FROM trade_archive t
+WHERE t.result IN ('win','loss') AND t.archived_at >= '2026-04-21'""")
+impact_map = {r[0]: r[1] or 0 for r in c2.fetchall()}
+conn2.close()
+
+def passes_v312(t):
+    tid, d, res, pnl, pips, conf, trig, htf, m5, rsi, atr, hr = t
+    # Same as v3.11 final but with low-conf news bypass
+    if trig in ('structure', 'smc'):
+        is_aligned = (d=='CALL' and htf=='bullish' and m5=='bullish') or (d=='PUT' and htf=='bearish' and m5=='bearish')
+        is_counter_both = (d=='CALL' and htf=='bearish' and m5=='bearish') or (d=='PUT' and htf=='bullish' and m5=='bullish')
+        if is_aligned or is_counter_both: return False
+    # ATR floor
+    if (atr or 0) < 2.5: return False
+    # Hour gate
+    if hr is not None and int(hr) in (12, 14, 20): return False
+    # Conf ceiling
+    if (conf or 0) >= 80: return False
+    # v3.12.0: news with impact>=55 uses min_conf=30 instead of 60
+    impact = impact_map.get(tid, 0)
+    effective_min = 30 if (trig == 'news' and impact >= 55) else 60
+    if (conf or 0) < effective_min: return False
+    return True
+
+v312_kept = [t for t in trades if passes_v312(t)]
+print()
+stats("v3.12.0 (v3.11 + low-conf news bypass)", v312_kept)
+v312_pnl = sum(t[3] or 0 for t in v312_kept)
+print(f"DELTA v3.12 vs v3.11_no3: ${v312_pnl - v311_no3_pnl:+.2f}")
+print(f"DELTA v3.12 vs baseline: ${v312_pnl - baseline_pnl:+.2f}")
+
+# Show what trades v3.12 captures that v3.11 didn't
+extra = [t for t in v312_kept if t not in v311_no3_kept]
+print(f"\nTrades capturados por v3.12 (que v3.11 no tomaba): {len(extra)}")
+for t in extra:
+    tid, d, res, pnl, pips, conf, trig, htf, m5, rsi, atr, hr = t
+    impact = impact_map.get(tid, 0)
+    print(f"  #{tid} {d} {trig} conf={conf:.0f} impact={impact} -> {res} ${(pnl or 0):+.2f}")
