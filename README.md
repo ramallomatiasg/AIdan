@@ -1,8 +1,51 @@
-# AIdan v3.13.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.14.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.14.0 — News bypass: bloquear counter-HTF
+
+Tercera falla del 5 May 2026 identificada: news low-conf bypass (v3.12.0) tomó un trade donde Groq dió dirección **counter-HTF**, y perdió.
+
+**Caso real**:
+- #331 news "Inflationary Signals Are Popping Up Everywhere"
+- Groq direction: **CALL** (conf 32, impact 85)
+- HTF bias: **bearish**
+- → CALL counter-HTF
+- Perdió -$2.10
+
+### El problema
+
+News low-conf bypass acepta direcciones inciertas porque "el mercado se mueve con news high-impact". Pero cuando la dirección VA EN CONTRA del trend macro (HTF), tenemos doble incertidumbre:
+- Groq no está seguro de la dirección (conf <60)
+- Y AIdan está peleando contra el HTF establecido
+
+**Empírico (9 historical bypass trades)**:
+```
+News aligned with HTF (PUTs en bearish):  7/7 wins ★
+News counter-HTF (CALLs en bearish):      0/2 wins ✗
+```
+
+100% vs 0% según alignment con HTF. Patrón cristalino.
+
+### Fix
+
+En el news flow, `_bypass_eligible` ahora requiere:
+1. `impact_score >= 55` (igual que antes)
+2. **AND `direction NOT counter-HTF`** (nuevo)
+
+Si la noticia low-conf apunta contra HTF, **no se activa el bypass**. Cae al min_conf=60 normal y probablemente se filtra.
+
+### Aplicado al 5 May
+
+- #331 CALL en HTF bearish, impact 85, conf 32 → **bloqueado** ($2.10 saved)
+
+### Trade-off
+
+Con #331 bloqueado, perdemos potencial wins de "news catalyst que SÍ revierte HTF". Pero la data dice 0/2 ese caso. Si en el futuro aparecen news bullish que correctamente revierten un HTF bearish, podemos perder esos. Aceptamos el riesgo basado en evidencia.
 
 ---
 

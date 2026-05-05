@@ -1209,13 +1209,32 @@ class AIdan:
                             prof_tp = profile.get('take_profit_pips', 10)
 
                             score_ok = result['impact_score'] >= prof_min_impact
-                            # v3.12.1 BUGFIX: el conf_ok inicial debe usar el threshold DINÁMICO.
-                            # Sin esto, news con conf<60 nunca entran al block donde estaba el bypass.
-                            # Threshold efectivo: 30 si impact_score >= 55 (high-impact news), sino prof_min_conf.
-                            _initial_min_conf = 30 if result.get('impact_score', 0) >= 55 else prof_min_conf
+                            direction = result.get('direction', 'NEUTRAL')
+
+                            # v3.14.0: news bypass solo aplica si dirección NO es counter-HTF.
+                            # Empirical (9 historical bypass trades):
+                            #   News aligned with HTF: 7/7 wins (PUTs in HTF bearish)
+                            #   News counter-HTF: 0/2 wins (CALLs in HTF bearish)
+                            # Razón: news low-conf direction is uncertain. Counter-HTF + uncertain
+                            # direction + fighting macro trend = stacked against us. Better to skip.
+                            _bypass_htf = None
+                            try:
+                                if smc:
+                                    _bypass_htf = smc.get_status().get('htf_bias')
+                            except Exception:
+                                pass
+                            _is_counter_htf_bypass = _bypass_htf and _bypass_htf != 'neutral' and (
+                                (direction == 'CALL' and _bypass_htf == 'bearish') or
+                                (direction == 'PUT' and _bypass_htf == 'bullish')
+                            )
+
+                            # v3.12.1 BUGFIX + v3.14.0: bypass solo si impact alto Y NO counter-HTF
+                            _bypass_eligible = result.get('impact_score', 0) >= 55 and not _is_counter_htf_bypass
+                            _initial_min_conf = 30 if _bypass_eligible else prof_min_conf
                             conf_ok = result.get('confidence', 0) >= _initial_min_conf
                             dir_ok = prof_direction == 'any' or result.get('direction') == prof_direction
-                            direction = result.get('direction', 'NEUTRAL')
+                            if _is_counter_htf_bypass and result.get('confidence', 0) < prof_min_conf and result.get('impact_score', 0) >= 55:
+                                logger.info(f"v3.14.0 bypass blocked: news {direction} counter-HTF (htf={_bypass_htf}), conf {result.get('confidence',0):.0f} would have bypassed but counter-HTF kills it")
 
                             if score_ok and conf_ok and dir_ok:
                                 try:
