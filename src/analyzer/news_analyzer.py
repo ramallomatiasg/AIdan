@@ -591,6 +591,13 @@ DIRECCIÓN - REGLAS CLAVE (EUR/USD = EUR arriba / USD abajo):
 - Risk-on (optimismo, paz): USD baja → CALL
 - Si el dato es mixto o sin sorpresa clara → NEUTRAL
 
+NEGACIONES (CUIDADO - frecuentemente mal interpretadas):
+La regla clave es: TASAS MÁS ALTAS = MONEDA MÁS FUERTE (rate differential).
+Si un funcionario habla de NO subir tasas / aún no hay evidencia para hike / paciencia:
+- ECB: "doesn't see enough yet to hike" / "no es momento de subir" / "más paciencia con tasas" / "rate cut still on the table" → ECB DOVISH → EUR débil → PUT
+- Fed: "doesn't see need to hike" / "patience on rates" / "rate cut still on the table" → Fed DOVISH → USD débil → CALL
+ATENCIÓN: la presencia de "rate hike" en el título NO es bullish per se. Si el contexto es "NO se va a subir todavía" eso es DOVISH (negativo para esa moneda).
+
 GUÍA DE CONFIDENCE:
 - 80-100: Dato con sorpresa clara vs consenso + mecanismo directo (ej: NFP +300K vs +180K esperado → PUT claro)
 - 60-79: Dato relevante con dirección probable pero sin sorpresa extrema

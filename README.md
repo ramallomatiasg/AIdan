@@ -1,8 +1,34 @@
-# AIdan v3.15.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.16.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.16.0 — Counter-HTF news gate + Groq prompt fix
+
+### Hallazgo (post-mortem trade #387, 5 May 2026)
+
+Trade CALL contra-HTF (htf bearish) con conf 60.5 (apenas pasó threshold 60) cerró por expiry-loss en 15 min. El precio recuperó a +TP 85min después del cierre — direccionalmente correcto pero al timeframe equivocado. El SL nunca se tocó.
+
+**Doble causa raíz**:
+
+1. **Groq mis-interpretó la news**: "ECB Doesn't See Enough Yet to Warrant Rate Hike, Villeroy Says" (dovish ECB → EUR débil → PUT) fue clasificado como CALL con razonamiento invertido ("BCE no sube tasas → USD débil → EUR fuerte"). El prompt YA tenía la regla "ECB dovish → PUT" pero Groq se confundió con la negación + presencia de "rate hike" en el título.
+
+2. **Path regular no protegía counter-HTF**: v3.14.0 agregó counter-HTF gate solo al BYPASS (cuando conf < 60). Si la news pasaba el threshold regular, el counter-HTF no se filtraba.
+
+### Fix #1 — Counter-HTF news gate path regular (`AIdan_TodoEnUno.py`)
+
+News counter-HTF requiere conf >= 65 (no 60) en el path regular. Hubiera bloqueado #387 (60.5 < 65 con HTF bearish + CALL).
+
+### Fix #2 — Groq prompt reforzado con negaciones (`news_analyzer.py`)
+
+Sección nueva "NEGACIONES (CUIDADO - frecuentemente mal interpretadas)" con ejemplos explícitos de cómo mapear "doesn't see enough to hike", "patience on rates", "rate cut still on the table" → DOVISH → moneda débil. Mensaje crítico: "la presencia de 'rate hike' en el título NO es bullish per se".
+
+### Caveat
+
+El fix #1 reduce frecuencia de news trades counter-HTF (deseado). El fix #2 depende de que Groq aplique correctamente la nueva sección — observable en próximas news con negaciones.
 
 ---
 
