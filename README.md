@@ -1,8 +1,70 @@
-# AIdan v3.12.2 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.13.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.13.0 — Late breakout filter (fresh-only)
+
+Análisis de los 5 losses del 5 May 2026 reveló:
+- 2 losses fueron pre_planned bug (ya fixed v3.12.2)
+- 1 loss fue news low-conf direction error (riesgo conocido)
+- **2 losses fueron breakouts STALE**: AIdan detectó "breakout sobre resistencia" cuando el precio ya se había movido 5-6 pips PAST el nivel
+  - #328: +6.2p past resistance → loss
+  - #332: +5.6p past resistance → loss
+
+### El bug
+
+`technical.py:666` permitía breakouts hasta 15 pips past el nivel:
+```python
+if 0.3 < dist < tuner_params.get('breakout_dist_max', 15) and crossed_above(res) and candle_confirmed:
+```
+
+Eso significa: si el precio cruzó la resistencia hace 3-4 velas y se movió +10p, AIdan todavía lo consideraba "breakout válido". En realidad, ese breakout YA ocurrió y el precio está cerca del exhaustion.
+
+### Análisis empírico (29 breakouts/breakdowns históricos)
+
+```
+dist past level     n     WR     PnL
+1-2p (fresh)        5    80%   +$10.40   ★ 
+2-3p                8    25%    -$5.60
+3-5p (late)         8    38%   -$11.20  ✗
+5-7p (late)         4    25%    -$6.20  ✗
+7-15p               3    67%    +$1.30  (sample chico)
+```
+
+**Breakouts FRESCOS (≤2p past) ganan 80%. Late breakouts (3-7p) pierden consistentemente.**
+
+### Fix
+
+Cambiar `breakout_dist_max` y `breakdown_dist_max` de 15 → **3** pips:
+- Default in code: `tuner_params.get('breakout_dist_max', 3)`
+- Optimizer params row 7 actualizada con valor 3
+- Solo entradas donde el precio está cerca del nivel cruzado (entrada fresca)
+
+### Simulación con max_dist=3
+
+```
+Threshold      kept     WR     PnL          excluded
+max 2p (best)   6      67%    +$7.50        -$21.70 (23 excluidos)
+max 3p (chosen) 14     43%    +$1.90        -$16.10 (15 excluidos)
+max 4p          20     45%    -$0.70        -$13.50 (9 excluidos)
+max 15p (old)   29     41%    -$14.20       —
+```
+
+Net delta: **+$16.10 sobre 29 breakouts históricos**. Block = sólo trades stale (que históricamente perdieron).
+
+### Aplicado a hoy (5 May 2026)
+
+- #328 dist +6.2p → **bloqueado**
+- #332 dist +5.6p → **bloqueado**
+- $11.20 saved que se perdieron hoy
+
+### Trade-off
+
+Filtramos más trades (53% menos breakouts) pero mantenemos los profitables. Volume baja, calidad sube.
 
 ---
 
