@@ -1,8 +1,35 @@
-# AIdan v3.16.1 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.17.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.17.0 — REMOVIDO hour gate (data contaminada)
+
+### Hallazgo (6 May 2026)
+
+Con AIdan corriendo v3.16.1 desde la mañana, solo 1 trade en 2.5h. Investigación: el hour gate (UTC 12/14/20 = 9h/11h/17h AR) bloqueaba 2 de cada 3 horas. Pero la data original que justificó ese filtro (26 trades, -$45.31 colectivo) era **cross-version** (v3.7-v3.11) durante un período donde tocamos múltiples filtros (SL cap, conf formula, alignment scoring, ATR floor) simultáneamente.
+
+**No podemos atribuir esa pérdida a la "hora del día"** — podía ser efecto de cualquier otro cambio activo en esos trades.
+
+### Cambio
+
+Removidos los 3 hour gates en `AIdan_TodoEnUno.py`:
+- Flujo news (línea ~1388)
+- Flujo structure (línea ~2004)
+- Flujo SMC (línea ~2213)
+
+### Esperado
+
+- AIdan opera ahora 24/7 sin restricciones de hora (salvo otros filtros).
+- Frecuencia de trades sube ~3x en las 3 horas restauradas.
+- Re-evaluar con data fresca de v3.17.x si hay correlación real entre hora y outcome.
+
+### Riesgo
+
+Bajo. Si en data fresca sale que efectivamente esas horas son malas, lo re-introducimos basado en evidencia limpia.
 
 ---
 

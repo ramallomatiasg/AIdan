@@ -1385,8 +1385,10 @@ class AIdan:
                                                             logger.info(f"Warmup gate: skipping news {direction}, analyzer running {_warmup_elapsed:.0f}s < {WARMUP_SECONDS}s warmup")
                                                         elif _news_atr_now < 2.5:
                                                             logger.info(f"ATR floor: skipping news {direction}, ATR {_news_atr_now:.1f}p < 2.5p (deadzone)")
-                                                        elif _news_utc_h in (12, 14, 20):
-                                                            logger.info(f"Hour gate: skipping news {direction}, UTC {_news_utc_h}h ({_news_utc_h-3}h AR) historically -PnL")
+                                                        # v3.17.0 — REMOVED hour gate (UTC 12/14/20).
+                                                        # Original data (26 trades) era cross-version (v3.7-v3.11)
+                                                        # con multiples cambios de filtros simultaneos -> data contaminada.
+                                                        # No representa comportamiento de v3.16.x. Re-evaluar con data fresca.
                                                         elif _news_conf >= 80:
                                                             logger.info(f"Conf ceiling: blocking news {direction}, conf {_news_conf} >= 80 (anti-predictive)")
                                                         # v3.12.0 Effective min_conf for news: lower threshold to 30 when impact_score >= 55
@@ -1999,13 +2001,9 @@ class AIdan:
                                 if _atr_now < 2.5:
                                     logger.info(f"ATR floor: skipping structure {direction}, ATR {_atr_now:.1f}p < 2.5p (deadzone)")
                                     continue
-                                # Hour gate: 09h, 11h, 17h AR (= 12, 14, 20 UTC) historically lose.
-                                # Empirical: 26 trades in those hours had collective -$45.31.
-                                from datetime import datetime as _hdt, timezone as _htz
-                                _utc_h = _hdt.now(_htz.utc).hour
-                                if _utc_h in (12, 14, 20):
-                                    logger.info(f"Hour gate: skipping structure {direction}, UTC {_utc_h}h ({_utc_h-3}h AR) historically -PnL")
-                                    continue
+                                # v3.17.0 — REMOVED hour gate (UTC 12/14/20).
+                                # Data original era cross-version (v3.7-v3.11) con cambios
+                                # simultaneos. Contaminada, no representa v3.16.x.
                                 # Conf ceiling: block conf >= 80 (anti-predictive zone).
                                 # Empirical: bucket 80-89 (-$20) and 90+ (-$21) are net losers.
                                 if conf >= 80:
@@ -2211,11 +2209,7 @@ class AIdan:
                             if _smc_atr < 2.5:
                                 logger.info(f"ATR floor: skipping SMC {direction}, ATR {_smc_atr:.1f}p < 2.5p (deadzone)")
                                 continue
-                            from datetime import datetime as _smc_dt, timezone as _smc_tz
-                            _smc_utc_h = _smc_dt.now(_smc_tz.utc).hour
-                            if _smc_utc_h in (12, 14, 20):
-                                logger.info(f"Hour gate: skipping SMC {direction}, UTC {_smc_utc_h}h historically -PnL")
-                                continue
+                            # v3.17.0 — REMOVED hour gate (UTC 12/14/20). Data contaminada cross-version.
                             # Conf ceiling check happens later, after audit may inflate conf
 
                             smc_snap = _fetch_candles_snapshot(30)
