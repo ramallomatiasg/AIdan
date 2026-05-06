@@ -669,7 +669,7 @@ class TechnicalAnalyzer:
             dist = (price - res) * 10000  # in pips
             # Require CLOSED candle above resistance (not just current price)
             candle_confirmed = prev1['close'] > res
-            if 0.3 < dist < tuner_params.get('breakout_dist_max', 3) and crossed_above(res) and candle_confirmed:
+            if 0.3 < dist < tuner_params.get('breakout_dist_max', 7) and crossed_above(res) and candle_confirmed:
                 if not already_triggered(res, 'CALL'):
                     conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakout_resistance', 'CALL')
                     if trend == 'bullish':
@@ -696,7 +696,7 @@ class TechnicalAnalyzer:
         for sup in supports:
             dist = (sup - price) * 10000  # in pips
             candle_confirmed = prev1['close'] < sup
-            if 0.3 < dist < tuner_params.get('breakdown_dist_max', 3) and crossed_below(sup) and candle_confirmed:
+            if 0.3 < dist < tuner_params.get('breakdown_dist_max', 7) and crossed_below(sup) and candle_confirmed:
                 if not already_triggered(sup, 'PUT'):
                     conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakdown_support', 'PUT')
                     if trend == 'bearish':

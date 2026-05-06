@@ -1,8 +1,35 @@
-# AIdan v3.17.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.18.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.18.0 — Late breakout 3p → 7p (recuperar frecuencia)
+
+### Hallazgo (6 May 2026)
+
+Frecuencia histórica de AIdan: 10.5 trades/día (media de últimos 14 días). Los últimos 2 días: 4 trades (5 May) y 3 trades (6 May) = ~30% del ritmo histórico.
+
+Investigación señaló a v3.13.0 (5 May) como el cambio más restrictivo: bajamos `breakout_dist_max` de 15 → 3 pips. Justificación original: 2 trades (#328 +6.2p y #332 +5.6p past) perdieron por entradas tardías. **Pero 2 trades de muestra no es estadísticamente válido** — mismo problema que el hour gate de v3.17.
+
+### Cambio
+
+- `breakout_dist_max`: 3 → **7** pips
+- `breakdown_dist_max`: 3 → **7** pips
+- Defaults en `technical.py:672, 699` actualizados
+- Optimizer DB row 7 actualizada en runtime
+
+### Esperado
+
+- Recuperar 30-40% de frecuencia perdida
+- Bloquear solo entries muy tardías (>7p past = fully exhausted breakout)
+- Los #328 y #332 (que justificaron el v3.13) seguirían bloqueados (>7p past)
+
+### Riesgo
+
+Bajo. Si data fresca muestra que entries 4-7p past pierden, podemos volver a 3p. Es exactamente la misma decisión que el hour gate: data contaminada, sin evidencia robusta.
 
 ---
 
