@@ -1011,11 +1011,13 @@
             <button class="strat-filter-btn trigger-filter" data-trigger="calendar" onclick="setTriggerFilter('calendar')">&#x1F4C5; Calendario</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="pattern" onclick="setTriggerFilter('pattern')">&#x1F56F; Patron</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="pre_planned" onclick="setTriggerFilter('pre_planned')">&#x1F4CB; Planificadas</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="m15" onclick="setTriggerFilter('m15')" title="Track B experimental (M15 timeframe)">&#x23F0; M15</button>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center;" id="stratPerfBar">
             <button onclick="generateReport()" id="reportBtn" style="background:var(--accent-purple,#9b59b6);color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;" title="Subir reporte diario a Google Sheets">Reporte</button>
             <span class="stat-chip">Win Rate <span id="stratWR">0%</span></span>
             <span class="stat-chip">W/L/BE <span id="stratWL">0/0/0</span></span>
+            <span class="stat-chip" id="m15StatChip" style="display:none;background:linear-gradient(135deg,#fbbf24,#d97706);color:#000;font-weight:700;" title="Track B M15 (paralelo experimental)">&#x23F0; M15 <span id="m15Stats">0W/0L</span></span>
         </div>
     </div>
 
@@ -2137,6 +2139,25 @@
 
             // Apply filter
             const allData = data.data;
+
+            // Track B M15 stats (calculadas siempre aunque el filtro esté en 'all')
+            try {
+                const m15All = allData.filter(s => (s.trigger_type||'').startsWith('m15_'));
+                const m15Chip = document.getElementById('m15StatChip');
+                const m15Stats = document.getElementById('m15Stats');
+                if (m15Chip && m15Stats) {
+                    if (m15All.length > 0) {
+                        const m15Wins = m15All.filter(s => s.result === 'win' || s.status === 'auto_win').length;
+                        const m15Losses = m15All.filter(s => s.result === 'loss' || s.status === 'auto_loss').length;
+                        const m15Active = m15All.filter(s => (s.status==='active' || s.status==='paused') && !s.result).length;
+                        m15Stats.textContent = m15Wins + 'W/' + m15Losses + 'L' + (m15Active ? ' · ' + m15Active + ' act' : '');
+                        m15Chip.style.display = '';
+                    } else {
+                        m15Chip.style.display = 'none';
+                    }
+                }
+            } catch(e){}
+
             const filtered = allData.filter(s => {
                 // Status filter
                 if (currentStratFilter !== 'all') {
@@ -2145,7 +2166,11 @@
                     if (currentStratFilter === 'closed' && isActive) return false;
                 }
                 // Trigger type filter
-                if (currentTriggerFilter !== 'all') {
+                if (currentTriggerFilter === 'm15') {
+                    // M15 filter: matchea cualquier trigger m15_* (Track B)
+                    if (!(s.trigger_type || '').startsWith('m15_')) return false;
+                } else if (currentTriggerFilter !== 'all') {
+                    // Otros filtros: exact match. Excluye m15_* del filtro 'structure' por ej.
                     if ((s.trigger_type || 'news') !== currentTriggerFilter) return false;
                 }
                 return true;
@@ -2264,14 +2289,22 @@
                     <div style="padding:4px 12px;font-size:16px;color:var(--text-secondary);border-top:1px solid var(--border-color);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         <span style="white-space:nowrap;color:var(--accent-yellow);font-weight:700;">&#x23F0; ${timeStr}</span>
                         ${s.profile_name ? '<span style="background:var(--accent-cyan,#00bcd4);color:#000;padding:1px 8px;border-radius:8px;font-size:13px;font-weight:700;">&#x2699; ' + escapeHtml(s.profile_name) + '</span>' : ''}
-                        ${({
-                            smc: '<span style="background:#e040fb;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F9E0; SMC</span>',
-                            structure: '<span style="background:var(--accent-green,#22c55e);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CA; ESTRUCTURA</span>',
-                            calendar: '<span style="background:#f97316;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4C5; CALENDARIO</span>',
-                            pattern: '<span style="background:var(--accent-yellow,#eab308);color:#000;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F56F; PATRON</span>',
-                            pre_planned: '<span style="background:#a78bfa;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CB; PRE-PLAN</span>'
-                        }[s.trigger_type] || '<span style="background:var(--accent-blue);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4F0; NEWS</span>')}
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">${({smc:'&#x1F9E0;',structure:'&#x1F4CA;',calendar:'&#x1F4C5;',pattern:'&#x1F56F;'}[s.trigger_type] || '&#x1F4F0;')} ${escapeHtml(s.news_title)}</span>
+                        ${(() => {
+                            const tt = s.trigger_type || 'news';
+                            // M15 Track B - badge dorado distintivo
+                            if (tt.startsWith('m15_')) {
+                                const sub = tt === 'm15_structure' ? 'STRUCT' : (tt === 'm15_smc' ? 'SMC' : tt.replace('m15_','').toUpperCase());
+                                return '<span style="background:linear-gradient(135deg,#fbbf24,#d97706);color:#000;padding:1px 8px;border-radius:8px;font-size:16px;font-weight:700;" title="Track B experimental">&#x23F0; M15 ' + sub + '</span>';
+                            }
+                            return ({
+                                smc: '<span style="background:#e040fb;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F9E0; SMC</span>',
+                                structure: '<span style="background:var(--accent-green,#22c55e);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CA; ESTRUCTURA</span>',
+                                calendar: '<span style="background:#f97316;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4C5; CALENDARIO</span>',
+                                pattern: '<span style="background:var(--accent-yellow,#eab308);color:#000;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F56F; PATRON</span>',
+                                pre_planned: '<span style="background:#a78bfa;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CB; PRE-PLAN</span>'
+                            }[tt] || '<span style="background:var(--accent-blue);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4F0; NEWS</span>');
+                        })()}
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">${((s.trigger_type||'').startsWith('m15_') ? '&#x23F0;' : ({smc:'&#x1F9E0;',structure:'&#x1F4CA;',calendar:'&#x1F4C5;',pattern:'&#x1F56F;'}[s.trigger_type] || '&#x1F4F0;'))} ${escapeHtml(s.news_title)}</span>
                     </div>
                     <div style="padding:8px 12px;display:flex;gap:6px;align-items:center;">
                         ${isPlanned && !s.result ? '<span style="font-size:13px;color:#a78bfa;">Se activa automáticamente antes del evento</span>' : `
