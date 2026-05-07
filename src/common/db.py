@@ -1128,6 +1128,80 @@ def get_strategy_performance(since=None):
     stats['since'] = since
     return stats
 
+def get_strategy_performance_by_track(since=None):
+    """v3.19.0 — Stats segmentadas Track A (M5) vs Track B (M15).
+    Para cada track: wins, losses, total, WR%, avg_pnl_per_trade, sum_pnl, avg_win_pips, avg_loss_pips.
+    Usa trade_archive para histórico persistente.
+    """
+    if since is None:
+        import os
+        since = os.getenv('STATS_SINCE', '').strip() or None
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    def _stats_for_track(is_m15):
+        # Track B M15: trigger_type LIKE 'm15_%'
+        # Track A M5: trigger_type NOT LIKE 'm15_%' (todo lo demás)
+        if is_m15:
+            where_track = "trigger_type LIKE 'm15_%'"
+        else:
+            where_track = "(trigger_type NOT LIKE 'm15_%' OR trigger_type IS NULL)"
+        params = []
+        where_since = ""
+        if since:
+            where_since = " AND archived_at >= ?"
+            params = [since]
+        cursor.execute(f"""
+            SELECT result, COUNT(*), AVG(mt5_pnl), SUM(mt5_pnl), AVG(pips)
+            FROM trade_archive
+            WHERE {where_track}
+              AND strftime('%w', created_at) NOT IN ('0', '6')
+              {where_since}
+            GROUP BY result
+        """, params)
+        rows = cursor.fetchall()
+        s = {'wins': 0, 'losses': 0, 'sum_pnl': 0.0, 'avg_win_pips': 0, 'avg_loss_pips': 0,
+             'avg_pnl': 0, 'avg_win_pnl': 0, 'avg_loss_pnl': 0}
+        for result, count, avg_pnl, sum_pnl, avg_pips in rows:
+            count = count or 0
+            avg_pnl = avg_pnl or 0
+            sum_pnl = sum_pnl or 0
+            avg_pips = avg_pips or 0
+            if result == 'win':
+                s['wins'] = count
+                s['avg_win_pnl'] = round(avg_pnl, 2)
+                s['avg_win_pips'] = round(avg_pips, 1)
+            elif result == 'loss':
+                s['losses'] = count
+                s['avg_loss_pnl'] = round(avg_pnl, 2)
+                s['avg_loss_pips'] = round(avg_pips, 1)
+            s['sum_pnl'] += sum_pnl
+        s['total'] = s['wins'] + s['losses']
+        s['win_rate'] = round((s['wins'] / s['total'] * 100) if s['total'] > 0 else 0, 1)
+        s['sum_pnl'] = round(s['sum_pnl'], 2)
+        if s['total'] > 0:
+            s['avg_pnl'] = round(s['sum_pnl'] / s['total'], 2)
+        # Profit factor: |sum_wins / sum_losses|
+        if s['losses'] > 0 and s['avg_loss_pnl'] != 0:
+            sum_wins = s['avg_win_pnl'] * s['wins']
+            sum_losses = abs(s['avg_loss_pnl'] * s['losses'])
+            s['profit_factor'] = round(sum_wins / sum_losses, 2) if sum_losses > 0 else 0
+        else:
+            s['profit_factor'] = 0
+        return s
+
+    track_a = _stats_for_track(is_m15=False)
+    track_b = _stats_for_track(is_m15=True)
+
+    conn.close()
+    return {
+        'track_a_m5': track_a,
+        'track_b_m15': track_b,
+        'since': since,
+    }
+
+
 def get_strategies_pending_evaluation():
     """Get expired strategies that haven't been evaluated yet.
     Returns strategies where:

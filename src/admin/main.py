@@ -18,7 +18,7 @@ from src.common.db import (init_db, get_stats, get_recent_alerts, record_signal_
                            get_strategy_performance, get_detailed_trade_history,
                            get_setup_win_rates, get_learned_lessons, toggle_strategy_pause,
                            get_post_trade_analyses, get_post_trade_stats,
-                           get_planned_strategies)
+                           get_planned_strategies, get_strategy_performance_by_track)
 from src.analyzer.technical import TechnicalAnalyzer
 from src.analyzer.mtf_analyzer import MTFAnalyzer
 from src.analyzer.smc import SMCEngine
@@ -936,6 +936,12 @@ async def generate_report():
 async def strategy_perf():
     """Get win/loss stats for auto-strategies"""
     return JSONResponse({"status": "success", "data": get_strategy_performance()})
+
+
+@app.get("/strategy-performance-by-track")
+async def strategy_perf_by_track():
+    """v3.19.0 - Stats segmentadas Track A (M5) vs Track B (M15) para comparativa dual-track."""
+    return JSONResponse({"status": "success", "data": get_strategy_performance_by_track()})
 
 _candles_cache = {"data": [], "last_fetch": 0}
 

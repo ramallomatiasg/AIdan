@@ -1021,6 +1021,41 @@
         </div>
     </div>
 
+    <!-- v3.19.0 Track Comparison Panel (M5 vs M15) - hidden until M15 has data -->
+    <div id="trackComparePanel" style="display:none;background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <span style="font-weight:700;font-size:16px;color:var(--text-primary);">&#x1F50D; COMPARATIVA DUAL-TRACK</span>
+            <span style="font-size:13px;color:var(--text-muted);">Decision viernes / +30 trades</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div id="trackACard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #22c55e;">
+                <div style="font-weight:700;font-size:14px;color:#22c55e;margin-bottom:6px;">TRACK A &mdash; M5 (produccion)</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:13px;" id="trackAStats">
+                    <div>Trades: <span id="taTotal">-</span></div>
+                    <div>WR: <span id="taWR">-</span></div>
+                    <div>PnL: <span id="taPnL">-</span></div>
+                    <div>Avg win: <span id="taWin">-</span></div>
+                    <div>Avg loss: <span id="taLoss">-</span></div>
+                    <div>PF: <span id="taPF">-</span></div>
+                </div>
+            </div>
+            <div id="trackBCard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #d97706;">
+                <div style="font-weight:700;font-size:14px;color:#d97706;margin-bottom:6px;">&#x23F0; TRACK B &mdash; M15 (experimental)</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:13px;" id="trackBStats">
+                    <div>Trades: <span id="tbTotal">-</span></div>
+                    <div>WR: <span id="tbWR">-</span></div>
+                    <div>PnL: <span id="tbPnL">-</span></div>
+                    <div>Avg win: <span id="tbWin">-</span></div>
+                    <div>Avg loss: <span id="tbLoss">-</span></div>
+                    <div>PF: <span id="tbPF">-</span></div>
+                </div>
+            </div>
+        </div>
+        <div id="trackVerdict" style="margin-top:8px;padding:6px 10px;background:var(--bg-primary);border-radius:6px;font-size:13px;color:var(--text-muted);">
+            Esperando data de Track B (M15)...
+        </div>
+    </div>
+
     <!-- SMC Multi-Timeframe Panel -->
     <div id="smcPanel" style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
@@ -2197,6 +2232,7 @@
             if (fingerprint === lastStratFingerprint) {
                 // Data unchanged, skip re-render
                 loadStrategyPerformance();
+                loadTrackComparison();
                 return;
             }
             lastStratFingerprint = fingerprint;
@@ -2368,6 +2404,7 @@
 
             // Update perf stats
             loadStrategyPerformance();
+            loadTrackComparison();
         } catch(e) { console.error('Auto-strategies error:', e); }
     }
 
@@ -2424,6 +2461,61 @@
             btn.style.background = 'var(--accent-purple,#9b59b6)';
             btn.disabled = false;
         }, 3000);
+    }
+
+    async function loadTrackComparison() {
+        try {
+            const res = await fetch(`${API_BASE}/strategy-performance-by-track`);
+            const data = await res.json();
+            if (data.status !== 'success') return;
+            const ta = data.data.track_a_m5 || {};
+            const tb = data.data.track_b_m15 || {};
+            const panel = document.getElementById('trackComparePanel');
+            // Mostrar panel solo si Track B tiene >=1 trade
+            if (!panel) return;
+            const showPanel = (tb.total || 0) >= 1;
+            panel.style.display = showPanel ? '' : 'none';
+            if (!showPanel) return;
+
+            const fmtPnL = v => (v >= 0 ? '+' : '') + '$' + v.toFixed(2);
+            const fmtPips = v => (v >= 0 ? '+' : '') + v.toFixed(1) + 'p';
+
+            document.getElementById('taTotal').textContent = ta.total || 0;
+            document.getElementById('taWR').textContent = (ta.win_rate || 0) + '%';
+            document.getElementById('taPnL').textContent = fmtPnL(ta.sum_pnl || 0);
+            document.getElementById('taWin').textContent = ta.avg_win_pips ? fmtPips(ta.avg_win_pips) : '-';
+            document.getElementById('taLoss').textContent = ta.avg_loss_pips ? fmtPips(ta.avg_loss_pips) : '-';
+            document.getElementById('taPF').textContent = ta.profit_factor || '-';
+
+            document.getElementById('tbTotal').textContent = tb.total || 0;
+            document.getElementById('tbWR').textContent = (tb.win_rate || 0) + '%';
+            document.getElementById('tbPnL').textContent = fmtPnL(tb.sum_pnl || 0);
+            document.getElementById('tbWin').textContent = tb.avg_win_pips ? fmtPips(tb.avg_win_pips) : '-';
+            document.getElementById('tbLoss').textContent = tb.avg_loss_pips ? fmtPips(tb.avg_loss_pips) : '-';
+            document.getElementById('tbPF').textContent = tb.profit_factor || '-';
+
+            // Verdict simple: pick winner si ambos tienen >=10 trades, si no esperar
+            const v = document.getElementById('trackVerdict');
+            if (v) {
+                if ((tb.total || 0) < 10) {
+                    v.textContent = `Track B aun con ${tb.total || 0}/10 trades minimos para evaluacion. Sigue acumulando data.`;
+                    v.style.color = 'var(--text-muted)';
+                } else {
+                    const aWins = (ta.sum_pnl || 0);
+                    const bWins = (tb.sum_pnl || 0);
+                    const aPF = ta.profit_factor || 0;
+                    const bPF = tb.profit_factor || 0;
+                    if (bWins > aWins && bPF > aPF) {
+                        v.innerHTML = `<strong style="color:#d97706;">Track B (M15) lidera:</strong> +$${(bWins-aWins).toFixed(2)} mas, PF ${bPF} vs ${aPF}.`;
+                    } else if (aWins > bWins && aPF > bPF) {
+                        v.innerHTML = `<strong style="color:#22c55e;">Track A (M5) lidera:</strong> +$${(aWins-bWins).toFixed(2)} mas, PF ${aPF} vs ${bPF}.`;
+                    } else {
+                        v.textContent = 'Tracks comparables. Sigue observando antes de decidir.';
+                    }
+                    v.style.color = 'var(--text-primary)';
+                }
+            }
+        } catch(e) {}
     }
 
     async function loadStrategyPerformance() {
