@@ -1,8 +1,40 @@
-# AIdan v3.18.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.19.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 
 **Un solo ejecutable de ~25MB - Portable, gratis y privado.**
+
+---
+
+## Que hay de nuevo en v3.19.0 — Track B M15 paralelo (dual-track)
+
+### Decisión 7 May 2026
+
+Después del win #396 (TP hit en 3 min con M5) seguido del expiry-loss #394 (15min mata trade direccionalmente correcto), confirmamos que M5 captura movimientos explosivos pero pierde sostenidos. La hipótesis: **dual-track M5 (mantenimiento) + M15 (experimental paralelo)** da data real para decidir el rumbo en 30+ trades comparativos.
+
+### Cambio v3.19.0
+
+**Nuevo módulo** `src/analyzer/technical_m15.py`:
+- `TechnicalAnalyzerM15` hereda de `TechnicalAnalyzer`, override solo `_fetch_candles` para usar `interval='15min'`
+- `M15_PROFILE`: SL=15p, TP=60p, expiry=45min (vs M5 5/25/15)
+
+**Loop M15 paralelo** en `AIdan_TodoEnUno.py:run_analyzer_service`:
+- Cada 60s (no 10s — M15 candles no cambian tan rápido)
+- Trigger type: `m15_structure`
+- Filtros mínimos: ATR floor 5p (M15 escala), counter-both, conf ceiling 80, anti-spam
+- Sin late breakout / hour gate (no aplican a M15)
+- Reusa MT5 executor con expiry M15
+- Strategies van a la misma DB pero etiquetadas para stats separadas
+
+### Riesgo
+
+**Cero al M5**. El loop M15 está dentro de un try/except y vive en su propio bloque temporal. Si falla, M5 sigue operando normal. El profile M15 es constante (no afecta DB de profiles).
+
+### Plan próximo (Día 3-5)
+
+- Día 3: Tab dashboard "Estrategias M15" con stats separadas
+- Día 4: Profile M15 ajustable (no constante hard-coded)
+- Día 5: Shadow run + comparativas WR/PnL/PF M5 vs M15
 
 ---
 

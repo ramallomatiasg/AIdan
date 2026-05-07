@@ -770,14 +770,19 @@ class AIdan:
                                        has_active_opposite_strategy)
             from src.analyzer.news_analyzer import NewsAnalyzer
             from src.analyzer.technical import TechnicalAnalyzer
+            from src.analyzer.technical_m15 import TechnicalAnalyzerM15, M15_PROFILE
             from src.analyzer.llm_auditor import audit_signal, build_signal_context
-            
+
             logger = setup_logging("analyzer", Config.LOG_LEVEL)
             logger.info("Initializing analyzer...")
             init_db()
-            
+
             analyzer = NewsAnalyzer(logger)
             tech = TechnicalAnalyzer(logger)
+            # v3.19.0 — Track B M15 experimental (paralelo, sin tocar M5)
+            tech_m15 = TechnicalAnalyzerM15(logger)
+            _last_m15_scan = 0  # timestamp last scan M15
+            M15_SCAN_INTERVAL = 60  # segundos entre scans M15 (M15 candles cambian cada 15min)
 
             # SMC Engine initialization
             from src.analyzer.mtf_analyzer import MTFAnalyzer
@@ -2722,6 +2727,112 @@ class AIdan:
                             mt5_exec.sync_closed_positions()
                         except Exception as e:
                             logger.error(f"MT5 sync error: {e}")
+
+                    # v3.19.0 — Track B: M15 structure scan paralelo (cada 60s)
+                    # Track separado del M5: trigger_type='m15_structure', profile M15.
+                    # Filtros mínimos (counter-both + conf ceiling). Sin late breakout
+                    # (M15 está en otra escala). Sin hour gate (ya removido v3.17).
+                    try:
+                        if (time.time() - _last_m15_scan) >= M15_SCAN_INTERVAL:
+                            _last_m15_scan = time.time()
+                            _m15_state = tech_m15.get_market_state()
+                            _m15_atr = _m15_state.get('avg_range_pips', 0)
+                            # ATR floor M15: 5p (vs M5 2.5p — M15 atr es ~3x)
+                            if _m15_atr >= 5.0:
+                                _htf_bias_now = htf_bias if 'htf_bias' in dir() else None
+                                _daily_ctx_now = daily_ctx if 'daily_ctx' in dir() else None
+                                _m15_signals = tech_m15.detect_structure_signals(
+                                    min_confidence=M15_PROFILE['min_confidence'],
+                                    htf_bias=_htf_bias_now,
+                                    daily_context=_daily_ctx_now
+                                )
+                                if _m15_signals:
+                                    # Pick highest confidence signal
+                                    _top = max(_m15_signals, key=lambda s: s['confidence'])
+                                    _m15_dir = _top['direction']
+                                    _m15_conf = _top['confidence']
+
+                                    # Counter-both filter: if HTF + M5 both AGAINST direction → block
+                                    _m5_state_now = tech.get_market_state()
+                                    _m5_trend_now = _m5_state_now.get('trend', 'neutral')
+                                    _m15_counter_both = (
+                                        _htf_bias_now and _htf_bias_now != 'neutral' and _m5_trend_now != 'neutral' and (
+                                            (_m15_dir == 'CALL' and _htf_bias_now == 'bearish' and _m5_trend_now == 'bearish') or
+                                            (_m15_dir == 'PUT' and _htf_bias_now == 'bullish' and _m5_trend_now == 'bullish')
+                                        )
+                                    )
+                                    # Conf ceiling: 80 (anti-predictive zone, mismo criterio M5)
+                                    _m15_conf_ceiling = _m15_conf >= 80
+                                    # Anti-spam: skip if active opposite OR active m15_structure already
+                                    _m15_skip_dup = False
+                                    try:
+                                        if has_active_opposite_strategy(_m15_dir):
+                                            _m15_skip_dup = True
+                                    except Exception:
+                                        pass
+
+                                    if _m15_counter_both:
+                                        logger.info(f"M15: counter-both blocked {_m15_dir} (htf={_htf_bias_now} m5={_m5_trend_now})")
+                                    elif _m15_conf_ceiling:
+                                        logger.info(f"M15: conf ceiling {_m15_dir} conf={_m15_conf} >= 80 (anti-predictive)")
+                                    elif _m15_skip_dup:
+                                        logger.info(f"M15: skipping {_m15_dir}, active opposite exists")
+                                    else:
+                                        _m15_price = _m15_state.get('price', 0)
+                                        # Use MT5 tick if available
+                                        if mt5_exec and mt5_exec.is_ready() and mt5_exec._mt5:
+                                            try:
+                                                _tk = mt5_exec._mt5.symbol_info_tick("EURUSD")
+                                                if _tk:
+                                                    _m15_price = _tk.ask if _m15_dir == 'CALL' else _tk.bid
+                                            except Exception:
+                                                pass
+                                        if _m15_price > 0:
+                                            _m15_adapt = tech_m15.compute_adaptive_sl_tp(
+                                                _m15_dir, _m15_price, _m15_state, M15_PROFILE,
+                                                trigger_type='m15_structure',
+                                                sl_tp_advice=_learn_adj.get('sl_tp_advice') if _learn_adj else None
+                                            )
+                                            _m15_sl = _m15_adapt['sl']
+                                            _m15_tp = _m15_adapt['tp']
+                                            # entry_context atomic
+                                            import json as _json
+                                            _m15_ctx = _json.dumps({
+                                                'rsi': _m15_state.get('rsi'),
+                                                'rsi_zone': _m15_state.get('rsi_zone'),
+                                                'avg_range_pips': _m15_atr,
+                                                'volatility': _m15_state.get('volatility'),
+                                                'trend': _m15_state.get('trend'),
+                                                'trend_strength': _m15_state.get('trend_strength'),
+                                                'momentum': _m15_state.get('momentum'),
+                                                'htf_bias': _htf_bias_now,
+                                                'timeframe': 'M15',
+                                            })
+                                            _m15_title = f"[M15-STRUCT] {_top.get('reason', '')[:200]}"
+                                            _m15_sid = add_auto_strategy(
+                                                alert_id=None,
+                                                news_title=_m15_title,
+                                                direction=_m15_dir,
+                                                entry_price=_m15_price,
+                                                stop_loss=_m15_sl,
+                                                take_profit=_m15_tp,
+                                                confidence=_m15_conf,
+                                                impact_score=_top.get('impact_score', 70),
+                                                expiry_minutes=M15_PROFILE['expiry_minutes'],
+                                                trigger_type='m15_structure',
+                                                profile_name=M15_PROFILE['name'],
+                                                candles_snapshot=None,
+                                                entry_context=_m15_ctx,
+                                            )
+                                            if _m15_sid:
+                                                logger.info(f"M15 strategy #{_m15_sid}: {_m15_dir} conf={_m15_conf} SL={_m15_adapt['sl_pips']:.1f}p TP={_m15_adapt['tp_pips']:.1f}p price={_m15_price:.5f} expiry={M15_PROFILE['expiry_minutes']}min")
+                                                _try_mt5_execute(_m15_sid, _m15_dir, _m15_price, _m15_sl, _m15_tp, _m15_conf)
+                                            else:
+                                                logger.info(f"M15: add_auto_strategy returned None for {_m15_dir} (cooldown/cap?)")
+                            else:
+                                logger.debug(f"M15 skip: ATR {_m15_atr:.1f}p < 5.0p floor")
+                    except Exception as _m15_e:
+                        logger.error(f"M15 scan error: {_m15_e}")
 
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")
