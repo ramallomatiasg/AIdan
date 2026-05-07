@@ -250,27 +250,54 @@ Anti-contradiction pre_planned (no PUT+CALL simultáneos)
 - Solo fixes surgical, sin cambios estructurales.
 - Sigue usando trigger_types: `news`, `structure`, `smc`, `pre_planned`, `calendar`.
 
-### Track B — M15 (experimental, paralelo)
+### Track B — M15 (experimental, paralelo) — IMPLEMENTADO v3.19.0 (7 May 2026)
 
-**Objetivo**: probar timeframe M15 sin abandonar M5. Comparar performance lado a lado.
+**Implementación**:
 
-**Implementación esperada**:
-- Nuevo trigger_type: `m15_structure`, `m15_smc`
-- Mismo flujo de detección pero usando candles M15
-- TP/SL ~3x los actuales (M5 4-7p → M15 12-20p)
-- Expiry ~3x (15min → 45min)
-- Tab dashboard "Estrategias M15"
-- Stats separadas por trigger_type prefix `m15_*`
-- Mismo balance MT5 (compartido) — para diferenciar usar cuenta demo separada (opcional)
+| Día | Componente | Archivos |
+|---|---|---|
+| 1 | `TechnicalAnalyzerM15` subclass + test standalone | `src/analyzer/technical_m15.py`, `tools/test_m15_feed.py` |
+| 2 | Loop M15 paralelo en analyzer (cada 60s) | `AIdan_TodoEnUno.py` |
+| 3 | UI: filtro `M15`, badge dorado en cards, chip stats | `dashboard_multi_theme.html` |
+| 4 | Endpoint `/strategy-performance-by-track` + panel comparativo | `src/admin/main.py`, `src/common/db.py` |
+| 5 | Verdict robusto + banner alert "M15 supera M5" | `dashboard_multi_theme.html` |
 
-**Métricas comparativas**:
-- WR M5 vs WR M15
-- Avg win/loss (pips y $)
-- Comisión vs avg win (target: M15 < 6%)
-- Trades/día
-- PnL acumulado side-by-side
+**Profile M15** (constante en `technical_m15.py:M15_PROFILE`):
+- SL: 15p, TP: 60p, expiry: 45min
+- min_confidence: 60
+- Frecuencia: ~1-3 trades/día (M15 candles cambian cada 15min)
 
-**Decisión del track ganador**: 30+ trades en cada uno, 2-3 semanas mínimo.
+**trigger_type**: `m15_structure` (futuro `m15_smc` cuando se agregue)
+
+**Filtros M15** (subset del M5):
+- ATR floor 5p (vs M5 2.5p, M15 escala 3x)
+- Counter-both (HTF + M5 ambos contrarios → block)
+- Conf ceiling 80
+- Anti-spam (no opposite activa)
+- SIN late breakout (escala distinta), SIN hour gate (ya removido v3.17)
+
+**Criterios de decisión** (en `loadTrackComparison` UI):
+- Bajo 10 trades M15: "esperando data"
+- 10-14 trades: comparativa preliminar, no decidir
+- 15+ trades:
+  - **M15 SIGNIFICATIVAMENTE mejor**: PF > 1.0 + PnL positivo + +$20 sobre M5 → banner "considerar migracion"
+  - **M15 mejor moderado**: PF > A_PF * 1.3 + PF >= 0.9
+  - **M5 mejor**: A_PF > B_PF * 1.3 + A_PF >= 0.9
+  - **Empate**: mantener ambos
+
+**UI elementos**:
+- Botón filtro `⏰ M15 (beta)` dorado en barra de filtros del tab Estrategias
+- Cards M15 con badge dorado `⏰ M15 STRUCT` distintivo
+- Chip header `⏰ M15 NW/NL · X act` (auto-hide si 0 trades)
+- Panel "Comparativa Dual-Track" con 2 cards lado a lado
+- Banner dorado destacado cuando M15 supera M5 significativamente
+
+**Riesgo al M5**: cero. Track B vive en try/except aislado. Si M15 falla, M5 sigue normal.
+
+**Próximos pasos abiertos**:
+- M15_PROFILE en DB en lugar de constante (permite ajuste sin rebuild)
+- Cuenta demo MT5 separada para Track B (aislamiento total de capital)
+- Más trigger types M15 (`m15_smc`)
 
 ---
 
