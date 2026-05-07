@@ -2761,8 +2761,10 @@ class AIdan:
                                             (_m15_dir == 'PUT' and _htf_bias_now == 'bullish' and _m5_trend_now == 'bullish')
                                         )
                                     )
-                                    # Conf ceiling: 80 (anti-predictive zone, mismo criterio M5)
-                                    _m15_conf_ceiling = _m15_conf >= 80
+                                    # v3.19.1 — REMOVED conf ceiling. Era data M5 contaminada aplicada
+                                    # a M15 sin evidencia. M15 puede ganar con conf alta (movimientos
+                                    # claros sostenidos != exhaustion entry M5). Re-evaluar con data
+                                    # fresca M15 si efectivamente conf>=80 pierde tambien aqui.
                                     # Anti-spam: skip if active opposite OR active m15_structure already
                                     _m15_skip_dup = False
                                     try:
@@ -2773,8 +2775,6 @@ class AIdan:
 
                                     if _m15_counter_both:
                                         logger.info(f"M15: counter-both blocked {_m15_dir} (htf={_htf_bias_now} m5={_m5_trend_now})")
-                                    elif _m15_conf_ceiling:
-                                        logger.info(f"M15: conf ceiling {_m15_dir} conf={_m15_conf} >= 80 (anti-predictive)")
                                     elif _m15_skip_dup:
                                         logger.info(f"M15: skipping {_m15_dir}, active opposite exists")
                                     else:
