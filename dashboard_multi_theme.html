@@ -2513,14 +2513,14 @@
             document.getElementById('taPnL').textContent = fmtPnL(ta.sum_pnl || 0);
             document.getElementById('taWin').textContent = ta.avg_win_pips ? fmtPips(ta.avg_win_pips) : '-';
             document.getElementById('taLoss').textContent = ta.avg_loss_pips ? fmtPips(ta.avg_loss_pips) : '-';
-            document.getElementById('taPF').textContent = ta.profit_factor || '-';
+            document.getElementById('taPF').textContent = (ta.profit_factor >= 999) ? '∞' : (ta.profit_factor || '-');
 
             document.getElementById('tbTotal').textContent = tb.total || 0;
             document.getElementById('tbWR').textContent = (tb.win_rate || 0) + '%';
             document.getElementById('tbPnL').textContent = fmtPnL(tb.sum_pnl || 0);
             document.getElementById('tbWin').textContent = tb.avg_win_pips ? fmtPips(tb.avg_win_pips) : '-';
             document.getElementById('tbLoss').textContent = tb.avg_loss_pips ? fmtPips(tb.avg_loss_pips) : '-';
-            document.getElementById('tbPF').textContent = tb.profit_factor || '-';
+            document.getElementById('tbPF').textContent = (tb.profit_factor >= 999) ? '∞' : (tb.profit_factor || '-');
 
             // Track C H1
             document.getElementById('tcTotal').textContent = tc.total || 0;
@@ -2528,7 +2528,7 @@
             document.getElementById('tcPnL').textContent = fmtPnL(tc.sum_pnl || 0);
             document.getElementById('tcWin').textContent = tc.avg_win_pips ? fmtPips(tc.avg_win_pips) : '-';
             document.getElementById('tcLoss').textContent = tc.avg_loss_pips ? fmtPips(tc.avg_loss_pips) : '-';
-            document.getElementById('tcPF').textContent = tc.profit_factor || '-';
+            document.getElementById('tcPF').textContent = (tc.profit_factor >= 999) ? '∞' : (tc.profit_factor || '-');
 
             // v3.19.0 Day 5: verdict con criterios robustos + alert destacado
             const v = document.getElementById('trackVerdict');

@@ -1155,14 +1155,46 @@ def get_strategy_performance_by_track(since=None):
         if since:
             where_since = " AND archived_at >= ?"
             params = [since]
+        # v3.21.0 fix: UNION trade_archive + auto_strategies cerradas
+        # auto_strategies cap-6 puede tener trades cerrados todavia no archivados.
+        # Cuento esos tambien para que el panel comparativo sea consistente con
+        # la lista de strategies del dashboard.
+        # auto_strategies: result viene de status (auto_win -> 'win', auto_loss -> 'loss').
+        # Pips: aproximamos desde mt5_pnl / 1.0 (lot 0.1 = $1/pip aprox).
+        as_where_since = ""
+        as_params = []
+        if since:
+            # auto_strategies usa created_at (no archived_at, no se archivan ahi)
+            as_where_since = " AND created_at >= ?"
+            as_params = [since]
         cursor.execute(f"""
-            SELECT result, COUNT(*), AVG(mt5_pnl), SUM(mt5_pnl), AVG(pips)
-            FROM trade_archive
-            WHERE {where_track}
-              AND strftime('%w', created_at) NOT IN ('0', '6')
-              {where_since}
+            SELECT result, COUNT(*) as n, AVG(mt5_pnl) as avg_pnl, SUM(mt5_pnl) as sum_pnl, AVG(pips) as avg_pips
+            FROM (
+                SELECT result, mt5_pnl, pips, created_at
+                FROM trade_archive
+                WHERE {where_track}
+                  AND strftime('%w', created_at) NOT IN ('0', '6')
+                  {where_since}
+                UNION ALL
+                SELECT
+                    CASE WHEN status = 'auto_win' THEN 'win'
+                         WHEN status = 'auto_loss' THEN 'loss'
+                         ELSE NULL END as result,
+                    mt5_pnl,
+                    CASE WHEN mt5_pnl IS NULL THEN NULL
+                         ELSE (mt5_pnl + 0.7) END as pips,
+                    created_at
+                FROM auto_strategies
+                WHERE {where_track}
+                  AND status IN ('auto_win', 'auto_loss')
+                  AND mt5_status = 'closed'
+                  AND id NOT IN (SELECT strategy_id FROM trade_archive WHERE strategy_id IS NOT NULL)
+                  AND strftime('%w', created_at) NOT IN ('0', '6')
+                  {as_where_since}
+            )
+            WHERE result IS NOT NULL
             GROUP BY result
-        """, params)
+        """, params + as_params)
         rows = cursor.fetchall()
         s = {'wins': 0, 'losses': 0, 'sum_pnl': 0.0, 'avg_win_pips': 0, 'avg_loss_pips': 0,
              'avg_pnl': 0, 'avg_win_pnl': 0, 'avg_loss_pnl': 0}
@@ -1186,10 +1218,14 @@ def get_strategy_performance_by_track(since=None):
         if s['total'] > 0:
             s['avg_pnl'] = round(s['sum_pnl'] / s['total'], 2)
         # Profit factor: |sum_wins / sum_losses|
+        # Edge case: si losses=0 pero wins>0 -> "perfect" (representado como 999 = infinito practico)
         if s['losses'] > 0 and s['avg_loss_pnl'] != 0:
             sum_wins = s['avg_win_pnl'] * s['wins']
             sum_losses = abs(s['avg_loss_pnl'] * s['losses'])
-            s['profit_factor'] = round(sum_wins / sum_losses, 2) if sum_losses > 0 else 0
+            s['profit_factor'] = round(sum_wins / sum_losses, 2) if sum_losses > 0 else 999
+        elif s['wins'] > 0:
+            # Solo wins sin losses: PF infinito (perfect)
+            s['profit_factor'] = 999
         else:
             s['profit_factor'] = 0
         return s
