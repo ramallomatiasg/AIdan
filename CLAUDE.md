@@ -250,6 +250,29 @@ Anti-contradiction pre_planned (no PUT+CALL simultáneos)
 - Solo fixes surgical, sin cambios estructurales.
 - Sigue usando trigger_types: `news`, `structure`, `smc`, `pre_planned`, `calendar`.
 
+### Track C — H1 (experimental) — IMPLEMENTADO v3.20.0 (8 May 2026)
+
+**Profile H1**:
+- SL: 40p, TP: 100p, expiry: 180min (3h)
+- min_confidence: 60
+- ATR floor: 10p
+- Frecuencia esperada: 1-2 trades/día
+
+**trigger_type**: `h1_structure`
+
+**Por qué H1 también**:
+- Comisión 0.7p / avg win esperado 30p = **2% drag** (vs 17% M5)
+- Cuenta demo, sin riesgo real, stats segregadas
+- Más data > menos data para decidir el mejor timeframe
+
+**Loop H1**: cada 5 min (`H1_SCAN_INTERVAL = 300`). H1 candles cambian cada hora.
+
+**UI elementos H1**:
+- Botón filtro `🌐 H1 (beta)` violeta
+- Badge violeta `🌐 H1 STRUCT` en cards
+- Chip header `🌐 H1 NW/NL · X act`
+- Tercera card en panel comparativo "Triple Track"
+
 ### Track B — M15 (experimental, paralelo) — IMPLEMENTADO v3.19.0 (7 May 2026)
 
 **Implementación**:
