@@ -98,6 +98,15 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
 
         prompt = POST_TRADE_PROMPT.format(**ctx)
 
+        # GPU-aware: skip si otro proceso (juego, render) usa GPU pesado
+        try:
+            from src.common.gpu_monitor import should_pause_llm, get_status_summary
+            if should_pause_llm():
+                logger.info(f"Post-trade analysis: skipped, {get_status_summary()}")
+                return None
+        except Exception:
+            pass
+
         response = requests.post(
             f'{OLLAMA_URL}/api/generate',
             json={
@@ -105,6 +114,7 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
                 'prompt': prompt,
                 'stream': False,
                 'format': 'json',
+                'keep_alive': '2m',  # descargar de VRAM tras 2 min idle
                 'options': {
                     'temperature': 0.3,
                     'top_p': 0.9,

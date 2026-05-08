@@ -209,6 +209,14 @@ def _parse_plan_response(result):
 def _ask_gemma(prompt):
     """Ask Gemma 4 (local) for a plan."""
     try:
+        # GPU-aware: si GPU ocupada por otro proceso, retorna None (caller fallback)
+        try:
+            from src.common.gpu_monitor import should_pause_llm
+            if should_pause_llm():
+                return None
+        except Exception:
+            pass
+
         response = requests.post(
             f'{OLLAMA_URL}/api/generate',
             json={
@@ -216,6 +224,7 @@ def _ask_gemma(prompt):
                 'prompt': prompt,
                 'stream': False,
                 'format': 'json',
+                'keep_alive': '2m',
                 'options': {
                     'temperature': 0.3,
                     'top_p': 0.9,

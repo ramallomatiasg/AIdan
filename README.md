@@ -1,4 +1,4 @@
-# AIdan v3.19.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
+# AIdan v3.21.0 - Asistente de Scalping EUR/USD con IA + Auto-Optimizacion
 
 Sistema de trading asistido que monitorea noticias financieras en tiempo real, analiza estructura de mercado en multiples temporalidades (D1, H4, H1, M15, M5), genera senales de trading para EUR/USD usando inteligencia artificial, y **optimiza sus propios parametros automaticamente** aprendiendo de resultados pasados.
 

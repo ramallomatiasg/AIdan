@@ -88,6 +88,15 @@ def audit_signal(signal_context: dict) -> dict | None:
 
         prompt = AUDIT_PROMPT_TEMPLATE.format(**ctx)
 
+        # GPU-aware: skip audit si GPU ocupada (no es critical-path)
+        try:
+            from src.common.gpu_monitor import should_pause_llm
+            if should_pause_llm():
+                logger.info(f"Signal audit: skipped (GPU busy)")
+                return None
+        except Exception:
+            pass
+
         response = requests.post(
             f'{OLLAMA_URL}/api/generate',
             json={
@@ -95,6 +104,7 @@ def audit_signal(signal_context: dict) -> dict | None:
                 'prompt': prompt,
                 'stream': False,
                 'format': 'json',
+                'keep_alive': '2m',
                 'options': {
                     'temperature': 0.2,
                     'top_p': 0.9,

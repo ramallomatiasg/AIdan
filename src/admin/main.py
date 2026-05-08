@@ -223,7 +223,23 @@ async def ai_status():
     if _groq_status["last_error"]:
         result["groq_error"] = _groq_status["last_error"]
         result["groq_error_time"] = _groq_status["last_error_time"]
+    # v3.21.0 — GPU monitor status
+    try:
+        from src.common.gpu_monitor import get_gpu_state
+        result["gpu"] = get_gpu_state()
+    except Exception as e:
+        result["gpu"] = {"available": False, "reason": str(e)}
     return JSONResponse(result)
+
+
+@app.get("/gpu-status")
+async def gpu_status():
+    """v3.21.0 — GPU utilization + LLM pause flag for gaming-aware mode."""
+    try:
+        from src.common.gpu_monitor import get_gpu_state
+        return JSONResponse({"status": "success", "data": get_gpu_state(force_refresh=True)})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 # Servir página About
 @app.get("/about")

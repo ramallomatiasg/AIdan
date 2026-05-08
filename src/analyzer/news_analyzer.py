@@ -36,10 +36,37 @@ class NewsAnalyzer:
         }
     
     def _detect_ai_mode(self):
-        """Detecta qué modo de IA usar: groq > ollama > keywords"""
-        # Prioridad: Groq (nube, Llama 70B gratis) > Ollama (local) > Keywords (fallback)
-        from src.common.config import Config
+        """Detecta qué modo de IA usar.
 
+        v3.21.0: respeta env var LLM_PROVIDER_PRIMARY ('ollama' | 'groq' | 'auto').
+        - 'ollama' (recomendado con GPU 16GB+): local primero, Groq fallback.
+        - 'groq' (default histórico): cloud primero, Ollama fallback.
+        - 'auto' (default actual): elige el primero disponible.
+        """
+        from src.common.config import Config
+        import os
+
+        primary = (os.getenv('LLM_PROVIDER_PRIMARY', 'auto') or 'auto').lower().strip()
+
+        if primary == 'ollama':
+            # Local-first: solo cae a Groq si Ollama está caído
+            if self._check_ollama():
+                self.logger.info("LLM_PROVIDER_PRIMARY=ollama, using local LLM")
+                return 'ollama'
+            self.logger.warning("Ollama not available, fallback to Groq")
+            if self._check_groq():
+                return 'groq'
+            return 'keywords'
+
+        if primary == 'groq':
+            if self._check_groq():
+                return 'groq'
+            self.logger.warning("Groq not available, fallback to Ollama")
+            if self._check_ollama():
+                return 'ollama'
+            return 'keywords'
+
+        # auto (default): Groq primero (histórico), Ollama después
         if self._check_groq():
             return 'groq'
         elif self._check_ollama():
@@ -187,11 +214,21 @@ class NewsAnalyzer:
             if not self._check_ollama():
                 return True  # can't check, assume relevant
 
+            # GPU-aware: si GPU ocupada, default to "relevant" (no perdemos news)
+            try:
+                from src.common.gpu_monitor import should_pause_llm
+                if should_pause_llm():
+                    self.logger.debug(f"Pre-filter skip (GPU busy), assuming relevant")
+                    return True
+            except Exception:
+                pass
+
             resp = requests.post(f'{Config.OLLAMA_URL}/api/generate',
                 json={
                     'model': Config.GEMMA_MODEL or 'gemma4',
                     'prompt': f'Can this news move EUR/USD forex pair? Answer ONLY "YES" or "NO".\n"{title}"',
                     'stream': False,
+                    'keep_alive': '2m',
                     'options': {'temperature': 0, 'num_predict': 5}
                 },
                 timeout=15
@@ -494,19 +531,26 @@ class NewsAnalyzer:
         return implications[:max_length]
     
     def _analyze_with_ai(self, news_id, title, summary, entities, tags):
-        """Analiza noticia con IA (Groq > Ollama > Keywords fallback)"""
+        """Analiza noticia con IA. v3.21.0: bidireccional fallback Ollama<->Groq."""
         try:
             if self.ai_mode == 'groq':
                 result = self._analyze_with_groq(news_id, title, summary, entities, tags)
                 if result:
                     return result
-                # Fallback to Ollama if Groq fails
                 self.logger.warning("Groq failed, falling back to Ollama")
                 if self._check_ollama():
                     return self._analyze_with_ollama(news_id, title, summary, entities, tags)
                 return None
             elif self.ai_mode == 'ollama':
-                return self._analyze_with_ollama(news_id, title, summary, entities, tags)
+                # v3.21.0: si Ollama retorna None (GPU pausado, modelo caído),
+                # intentamos Groq como fallback siempre que esté disponible.
+                result = self._analyze_with_ollama(news_id, title, summary, entities, tags)
+                if result:
+                    return result
+                self.logger.warning("Ollama returned None, falling back to Groq")
+                if self._check_groq():
+                    return self._analyze_with_groq(news_id, title, summary, entities, tags)
+                return None
         except Exception as e:
             self.logger.error(f"AI analysis error: {str(e)}")
             return None
@@ -709,12 +753,22 @@ REGLAS OBLIGATORIAS:
             model = Config.GEMMA_MODEL or 'gemma4'
             self.logger.info(f"Analizando noticia #{news_id} con Ollama/{model}...")
 
+            # GPU-aware: si GPU ocupada, retorna None (caller hace fallback a Groq)
+            try:
+                from src.common.gpu_monitor import should_pause_llm
+                if should_pause_llm():
+                    self.logger.info(f"Ollama news analysis skipped (GPU busy), fallback Groq")
+                    return None
+            except Exception:
+                pass
+
             response = requests.post(f'{Config.OLLAMA_URL}/api/generate',
                 json={
                     'model': model,
                     'prompt': prompt,
                     'stream': False,
                     'format': 'json',
+                    'keep_alive': '2m',
                     'options': {
                         'temperature': 0.3,
                         'top_p': 0.9,
