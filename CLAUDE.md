@@ -242,13 +242,25 @@ Anti-contradiction pre_planned (no PUT+CALL simultáneos)
 
 ---
 
-## Plan dual-track (decidido 7 May 2026)
+## Plan triple-track (decidido 7-8 May 2026)
 
 ### Track A — M5 (mantenimiento)
 
 - Continúa la línea v3.18.x con la versión actual.
 - Solo fixes surgical, sin cambios estructurales.
 - Sigue usando trigger_types: `news`, `structure`, `smc`, `pre_planned`, `calendar`.
+
+## Roadmap aprobado 8 May 2026 (multi-cuenta / multi-moneda / dinero real)
+
+Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
+
+**Fase 1 (próximas 3-4 semanas)**: validación demo. Dejar M5+M15+H1 corriendo sin tocar arquitectura. Acumular 30+ trades por track. Decisión basada en PF + frecuencia + comisión-drag.
+
+**Fase 2 (1-3 meses post Fase 1)**: cuenta real con TODOS los tracks que pasen PF >1.2. Si los 3 califican → operar los 3 (M5 explosivos, M15 sostenidos, H1 macro = patrones complementarios, NO competidores). Lote 0.01 por track. Risk: max 4 posiciones total, lote dividido entre tracks rentables.
+
+**Fase 3 (6+ meses post real)**: escalar — multi-cuenta (5-7 días refactor) o multi-moneda (2-3 semanas + research por par) o profesionalizar como sistema único.
+
+**Bloqueos actuales**: PF 0.48 (target >1.3), comisión 87% del drag M5, hardcoding EUR/USD en 104 sitios. NO escalar hasta demostrar rentabilidad en demo.
 
 ### Track C — H1 (experimental) — IMPLEMENTADO v3.20.0 (8 May 2026)
 
