@@ -771,6 +771,7 @@ class AIdan:
             from src.analyzer.news_analyzer import NewsAnalyzer
             from src.analyzer.technical import TechnicalAnalyzer
             from src.analyzer.technical_m15 import TechnicalAnalyzerM15, M15_PROFILE
+            from src.analyzer.technical_h1 import TechnicalAnalyzerH1, H1_PROFILE
             from src.analyzer.llm_auditor import audit_signal, build_signal_context
 
             logger = setup_logging("analyzer", Config.LOG_LEVEL)
@@ -783,6 +784,10 @@ class AIdan:
             tech_m15 = TechnicalAnalyzerM15(logger)
             _last_m15_scan = 0  # timestamp last scan M15
             M15_SCAN_INTERVAL = 60  # segundos entre scans M15 (M15 candles cambian cada 15min)
+            # v3.20.0 — Track C H1 experimental (paralelo a M5+M15)
+            tech_h1 = TechnicalAnalyzerH1(logger)
+            _last_h1_scan = 0  # timestamp last scan H1
+            H1_SCAN_INTERVAL = 300  # 5 min — H1 candles cambian cada 60min
 
             # SMC Engine initialization
             from src.analyzer.mtf_analyzer import MTFAnalyzer
@@ -2833,6 +2838,104 @@ class AIdan:
                                 logger.debug(f"M15 skip: ATR {_m15_atr:.1f}p < 5.0p floor")
                     except Exception as _m15_e:
                         logger.error(f"M15 scan error: {_m15_e}")
+
+                    # v3.20.0 — Track C: H1 structure scan paralelo (cada 5 min)
+                    # Track separado de M5+M15: trigger_type='h1_structure', profile H1.
+                    # H1 candles cambian cada hora, no tiene sentido escanear más seguido.
+                    try:
+                        if (time.time() - _last_h1_scan) >= H1_SCAN_INTERVAL:
+                            _last_h1_scan = time.time()
+                            _h1_state = tech_h1.get_market_state()
+                            _h1_atr = _h1_state.get('avg_range_pips', 0)
+                            # ATR floor H1: 10p (vs M15 5p, M5 2.5p — escala ~2x cada step)
+                            if _h1_atr >= 10.0:
+                                _htf_bias_h1 = htf_bias if 'htf_bias' in dir() else None
+                                _daily_ctx_h1 = daily_ctx if 'daily_ctx' in dir() else None
+                                _h1_signals = tech_h1.detect_structure_signals(
+                                    min_confidence=H1_PROFILE['min_confidence'],
+                                    htf_bias=_htf_bias_h1,
+                                    daily_context=_daily_ctx_h1
+                                )
+                                if _h1_signals:
+                                    _h1_top = max(_h1_signals, key=lambda s: s['confidence'])
+                                    _h1_dir = _h1_top['direction']
+                                    _h1_conf = _h1_top['confidence']
+
+                                    # Counter-both filter (HTF + M5 ambos contra direction → block)
+                                    _m5_state_h1 = tech.get_market_state()
+                                    _m5_trend_h1 = _m5_state_h1.get('trend', 'neutral')
+                                    _h1_counter_both = (
+                                        _htf_bias_h1 and _htf_bias_h1 != 'neutral' and _m5_trend_h1 != 'neutral' and (
+                                            (_h1_dir == 'CALL' and _htf_bias_h1 == 'bearish' and _m5_trend_h1 == 'bearish') or
+                                            (_h1_dir == 'PUT' and _htf_bias_h1 == 'bullish' and _m5_trend_h1 == 'bullish')
+                                        )
+                                    )
+                                    # Anti-spam: skip si hay opposite activa
+                                    _h1_skip_dup = False
+                                    try:
+                                        if has_active_opposite_strategy(_h1_dir):
+                                            _h1_skip_dup = True
+                                    except Exception:
+                                        pass
+
+                                    if _h1_counter_both:
+                                        logger.info(f"H1: counter-both blocked {_h1_dir} (htf={_htf_bias_h1} m5={_m5_trend_h1})")
+                                    elif _h1_skip_dup:
+                                        logger.info(f"H1: skipping {_h1_dir}, active opposite exists")
+                                    else:
+                                        _h1_price = _h1_state.get('price', 0)
+                                        if mt5_exec and mt5_exec.is_ready() and mt5_exec._mt5:
+                                            try:
+                                                _tk = mt5_exec._mt5.symbol_info_tick("EURUSD")
+                                                if _tk:
+                                                    _h1_price = _tk.ask if _h1_dir == 'CALL' else _tk.bid
+                                            except Exception:
+                                                pass
+                                        if _h1_price > 0:
+                                            _h1_adapt = tech_h1.compute_adaptive_sl_tp(
+                                                _h1_dir, _h1_price, _h1_state, H1_PROFILE,
+                                                trigger_type='h1_structure',
+                                                sl_tp_advice=_learn_adj.get('sl_tp_advice') if _learn_adj else None
+                                            )
+                                            _h1_sl = _h1_adapt['sl']
+                                            _h1_tp = _h1_adapt['tp']
+                                            import json as _json2
+                                            _h1_ctx = _json2.dumps({
+                                                'rsi': _h1_state.get('rsi'),
+                                                'rsi_zone': _h1_state.get('rsi_zone'),
+                                                'avg_range_pips': _h1_atr,
+                                                'volatility': _h1_state.get('volatility'),
+                                                'trend': _h1_state.get('trend'),
+                                                'trend_strength': _h1_state.get('trend_strength'),
+                                                'momentum': _h1_state.get('momentum'),
+                                                'htf_bias': _htf_bias_h1,
+                                                'timeframe': 'H1',
+                                            })
+                                            _h1_title = f"[H1-STRUCT] {_h1_top.get('reason', '')[:200]}"
+                                            _h1_sid = add_auto_strategy(
+                                                alert_id=None,
+                                                news_title=_h1_title,
+                                                direction=_h1_dir,
+                                                entry_price=_h1_price,
+                                                stop_loss=_h1_sl,
+                                                take_profit=_h1_tp,
+                                                confidence=_h1_conf,
+                                                impact_score=_h1_top.get('impact_score', 70),
+                                                expiry_minutes=H1_PROFILE['expiry_minutes'],
+                                                trigger_type='h1_structure',
+                                                profile_name=H1_PROFILE['name'],
+                                                candles_snapshot=None,
+                                                entry_context=_h1_ctx,
+                                            )
+                                            if _h1_sid:
+                                                logger.info(f"H1 strategy #{_h1_sid}: {_h1_dir} conf={_h1_conf} SL={_h1_adapt['sl_pips']:.1f}p TP={_h1_adapt['tp_pips']:.1f}p price={_h1_price:.5f} expiry={H1_PROFILE['expiry_minutes']}min")
+                                                _try_mt5_execute(_h1_sid, _h1_dir, _h1_price, _h1_sl, _h1_tp, _h1_conf)
+                                            else:
+                                                logger.info(f"H1: add_auto_strategy returned None for {_h1_dir}")
+                            else:
+                                logger.debug(f"H1 skip: ATR {_h1_atr:.1f}p < 10.0p floor")
+                    except Exception as _h1_e:
+                        logger.error(f"H1 scan error: {_h1_e}")
 
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")

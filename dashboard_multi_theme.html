@@ -1012,12 +1012,14 @@
             <button class="strat-filter-btn trigger-filter" data-trigger="pattern" onclick="setTriggerFilter('pattern')">&#x1F56F; Patron</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="pre_planned" onclick="setTriggerFilter('pre_planned')">&#x1F4CB; Planificadas</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="m15" onclick="setTriggerFilter('m15')" title="Track B experimental (M15 timeframe)" style="background:linear-gradient(135deg,#fbbf24,#d97706);color:#000;font-weight:700;border-left:2px solid #d97706;">&#x23F0; M15 (beta)</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="h1" onclick="setTriggerFilter('h1')" title="Track C experimental (H1 timeframe)" style="background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:700;border-left:2px solid #7c3aed;">&#x1F310; H1 (beta)</button>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center;" id="stratPerfBar">
             <button onclick="generateReport()" id="reportBtn" style="background:var(--accent-purple,#9b59b6);color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;" title="Subir reporte diario a Google Sheets">Reporte</button>
             <span class="stat-chip">Win Rate <span id="stratWR">0%</span></span>
             <span class="stat-chip">W/L/BE <span id="stratWL">0/0/0</span></span>
             <span class="stat-chip" id="m15StatChip" style="display:none;background:linear-gradient(135deg,#fbbf24,#d97706);color:#000;font-weight:700;" title="Track B M15 (paralelo experimental)">&#x23F0; M15 <span id="m15Stats">0W/0L</span></span>
+            <span class="stat-chip" id="h1StatChip" style="display:none;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:700;" title="Track C H1 (paralelo experimental)">&#x1F310; H1 <span id="h1Stats">0W/0L</span></span>
         </div>
     </div>
 
@@ -1030,27 +1032,38 @@
             <span style="font-weight:700;font-size:16px;color:var(--text-primary);">&#x1F50D; COMPARATIVA DUAL-TRACK</span>
             <span style="font-size:13px;color:var(--text-muted);">Decision viernes / +30 trades</span>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
             <div id="trackACard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #22c55e;">
                 <div style="font-weight:700;font-size:14px;color:#22c55e;margin-bottom:6px;">TRACK A &mdash; M5 (produccion)</div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:13px;" id="trackAStats">
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;font-size:13px;" id="trackAStats">
                     <div>Trades: <span id="taTotal">-</span></div>
                     <div>WR: <span id="taWR">-</span></div>
                     <div>PnL: <span id="taPnL">-</span></div>
-                    <div>Avg win: <span id="taWin">-</span></div>
-                    <div>Avg loss: <span id="taLoss">-</span></div>
                     <div>PF: <span id="taPF">-</span></div>
+                    <div>Avg W: <span id="taWin">-</span></div>
+                    <div>Avg L: <span id="taLoss">-</span></div>
                 </div>
             </div>
             <div id="trackBCard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #d97706;">
                 <div style="font-weight:700;font-size:14px;color:#d97706;margin-bottom:6px;">&#x23F0; TRACK B &mdash; M15 (experimental)</div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:13px;" id="trackBStats">
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;font-size:13px;" id="trackBStats">
                     <div>Trades: <span id="tbTotal">-</span></div>
                     <div>WR: <span id="tbWR">-</span></div>
                     <div>PnL: <span id="tbPnL">-</span></div>
-                    <div>Avg win: <span id="tbWin">-</span></div>
-                    <div>Avg loss: <span id="tbLoss">-</span></div>
                     <div>PF: <span id="tbPF">-</span></div>
+                    <div>Avg W: <span id="tbWin">-</span></div>
+                    <div>Avg L: <span id="tbLoss">-</span></div>
+                </div>
+            </div>
+            <div id="trackCCard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #7c3aed;">
+                <div style="font-weight:700;font-size:14px;color:#7c3aed;margin-bottom:6px;">&#x1F310; TRACK C &mdash; H1 (experimental)</div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;font-size:13px;" id="trackCStats">
+                    <div>Trades: <span id="tcTotal">-</span></div>
+                    <div>WR: <span id="tcWR">-</span></div>
+                    <div>PnL: <span id="tcPnL">-</span></div>
+                    <div>PF: <span id="tcPF">-</span></div>
+                    <div>Avg W: <span id="tcWin">-</span></div>
+                    <div>Avg L: <span id="tcLoss">-</span></div>
                 </div>
             </div>
         </div>
@@ -2178,22 +2191,25 @@
             // Apply filter
             const allData = data.data;
 
-            // Track B M15 stats (calculadas siempre aunque el filtro esté en 'all')
+            // Track B M15 + Track C H1 stats (calculadas siempre)
             try {
-                const m15All = allData.filter(s => (s.trigger_type||'').startsWith('m15_'));
-                const m15Chip = document.getElementById('m15StatChip');
-                const m15Stats = document.getElementById('m15Stats');
-                if (m15Chip && m15Stats) {
-                    if (m15All.length > 0) {
-                        const m15Wins = m15All.filter(s => s.result === 'win' || s.status === 'auto_win').length;
-                        const m15Losses = m15All.filter(s => s.result === 'loss' || s.status === 'auto_loss').length;
-                        const m15Active = m15All.filter(s => (s.status==='active' || s.status==='paused') && !s.result).length;
-                        m15Stats.textContent = m15Wins + 'W/' + m15Losses + 'L' + (m15Active ? ' · ' + m15Active + ' act' : '');
-                        m15Chip.style.display = '';
+                const updateChip = (prefix, chipId, statsId) => {
+                    const tracks = allData.filter(s => (s.trigger_type||'').startsWith(prefix + '_'));
+                    const chip = document.getElementById(chipId);
+                    const stats = document.getElementById(statsId);
+                    if (!chip || !stats) return;
+                    if (tracks.length > 0) {
+                        const wins = tracks.filter(s => s.result === 'win' || s.status === 'auto_win').length;
+                        const losses = tracks.filter(s => s.result === 'loss' || s.status === 'auto_loss').length;
+                        const active = tracks.filter(s => (s.status==='active' || s.status==='paused') && !s.result).length;
+                        stats.textContent = wins + 'W/' + losses + 'L' + (active ? ' · ' + active + ' act' : '');
+                        chip.style.display = '';
                     } else {
-                        m15Chip.style.display = 'none';
+                        chip.style.display = 'none';
                     }
-                }
+                };
+                updateChip('m15', 'm15StatChip', 'm15Stats');
+                updateChip('h1', 'h1StatChip', 'h1Stats');
             } catch(e){}
 
             const filtered = allData.filter(s => {
@@ -2205,11 +2221,14 @@
                 }
                 // Trigger type filter
                 if (currentTriggerFilter === 'm15') {
-                    // M15 filter: matchea cualquier trigger m15_* (Track B)
                     if (!(s.trigger_type || '').startsWith('m15_')) return false;
+                } else if (currentTriggerFilter === 'h1') {
+                    if (!(s.trigger_type || '').startsWith('h1_')) return false;
                 } else if (currentTriggerFilter !== 'all') {
-                    // Otros filtros: exact match. Excluye m15_* del filtro 'structure' por ej.
-                    if ((s.trigger_type || 'news') !== currentTriggerFilter) return false;
+                    // Otros filtros: exact match. Excluye m15_*/h1_* del filtro 'structure' por ej.
+                    const tt = s.trigger_type || 'news';
+                    if (tt.startsWith('m15_') || tt.startsWith('h1_')) return false;
+                    if (tt !== currentTriggerFilter) return false;
                 }
                 return true;
             });
@@ -2335,6 +2354,11 @@
                                 const sub = tt === 'm15_structure' ? 'STRUCT' : (tt === 'm15_smc' ? 'SMC' : tt.replace('m15_','').toUpperCase());
                                 return '<span style="background:linear-gradient(135deg,#fbbf24,#d97706);color:#000;padding:1px 8px;border-radius:8px;font-size:16px;font-weight:700;" title="Track B experimental">&#x23F0; M15 ' + sub + '</span>';
                             }
+                            // H1 Track C - badge violeta distintivo
+                            if (tt.startsWith('h1_')) {
+                                const sub = tt === 'h1_structure' ? 'STRUCT' : tt.replace('h1_','').toUpperCase();
+                                return '<span style="background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;padding:1px 8px;border-radius:8px;font-size:16px;font-weight:700;" title="Track C experimental">&#x1F310; H1 ' + sub + '</span>';
+                            }
                             return ({
                                 smc: '<span style="background:#e040fb;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F9E0; SMC</span>',
                                 structure: '<span style="background:var(--accent-green,#22c55e);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CA; ESTRUCTURA</span>',
@@ -2343,7 +2367,7 @@
                                 pre_planned: '<span style="background:#a78bfa;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CB; PRE-PLAN</span>'
                             }[tt] || '<span style="background:var(--accent-blue);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4F0; NEWS</span>');
                         })()}
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">${((s.trigger_type||'').startsWith('m15_') ? '&#x23F0;' : ({smc:'&#x1F9E0;',structure:'&#x1F4CA;',calendar:'&#x1F4C5;',pattern:'&#x1F56F;'}[s.trigger_type] || '&#x1F4F0;'))} ${escapeHtml(s.news_title)}</span>
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">${((s.trigger_type||'').startsWith('m15_') ? '&#x23F0;' : ((s.trigger_type||'').startsWith('h1_') ? '&#x1F310;' : ({smc:'&#x1F9E0;',structure:'&#x1F4CA;',calendar:'&#x1F4C5;',pattern:'&#x1F56F;'}[s.trigger_type] || '&#x1F4F0;')))} ${escapeHtml(s.news_title)}</span>
                     </div>
                     <div style="padding:8px 12px;display:flex;gap:6px;align-items:center;">
                         ${isPlanned && !s.result ? '<span style="font-size:13px;color:#a78bfa;">Se activa automáticamente antes del evento</span>' : `
@@ -2473,10 +2497,11 @@
             if (data.status !== 'success') return;
             const ta = data.data.track_a_m5 || {};
             const tb = data.data.track_b_m15 || {};
+            const tc = data.data.track_c_h1 || {};
             const panel = document.getElementById('trackComparePanel');
-            // Mostrar panel solo si Track B tiene >=1 trade
+            // Mostrar panel solo si Track B o Track C tiene >=1 trade
             if (!panel) return;
-            const showPanel = (tb.total || 0) >= 1;
+            const showPanel = (tb.total || 0) >= 1 || (tc.total || 0) >= 1;
             panel.style.display = showPanel ? '' : 'none';
             if (!showPanel) return;
 
@@ -2496,6 +2521,14 @@
             document.getElementById('tbWin').textContent = tb.avg_win_pips ? fmtPips(tb.avg_win_pips) : '-';
             document.getElementById('tbLoss').textContent = tb.avg_loss_pips ? fmtPips(tb.avg_loss_pips) : '-';
             document.getElementById('tbPF').textContent = tb.profit_factor || '-';
+
+            // Track C H1
+            document.getElementById('tcTotal').textContent = tc.total || 0;
+            document.getElementById('tcWR').textContent = (tc.win_rate || 0) + '%';
+            document.getElementById('tcPnL').textContent = fmtPnL(tc.sum_pnl || 0);
+            document.getElementById('tcWin').textContent = tc.avg_win_pips ? fmtPips(tc.avg_win_pips) : '-';
+            document.getElementById('tcLoss').textContent = tc.avg_loss_pips ? fmtPips(tc.avg_loss_pips) : '-';
+            document.getElementById('tcPF').textContent = tc.profit_factor || '-';
 
             // v3.19.0 Day 5: verdict con criterios robustos + alert destacado
             const v = document.getElementById('trackVerdict');

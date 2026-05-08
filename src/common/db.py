@@ -1129,9 +1129,11 @@ def get_strategy_performance(since=None):
     return stats
 
 def get_strategy_performance_by_track(since=None):
-    """v3.19.0 — Stats segmentadas Track A (M5) vs Track B (M15).
+    """v3.19.0 — Stats segmentadas Track A (M5) vs Track B (M15) vs Track C (H1).
     Para cada track: wins, losses, total, WR%, avg_pnl_per_trade, sum_pnl, avg_win_pips, avg_loss_pips.
     Usa trade_archive para histórico persistente.
+
+    v3.20.0: agregado Track C (H1).
     """
     if since is None:
         import os
@@ -1140,13 +1142,14 @@ def get_strategy_performance_by_track(since=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    def _stats_for_track(is_m15):
-        # Track B M15: trigger_type LIKE 'm15_%'
-        # Track A M5: trigger_type NOT LIKE 'm15_%' (todo lo demás)
-        if is_m15:
+    def _stats_for_track(track):
+        # track: 'm5' | 'm15' | 'h1'
+        if track == 'm15':
             where_track = "trigger_type LIKE 'm15_%'"
-        else:
-            where_track = "(trigger_type NOT LIKE 'm15_%' OR trigger_type IS NULL)"
+        elif track == 'h1':
+            where_track = "trigger_type LIKE 'h1_%'"
+        else:  # m5
+            where_track = "(trigger_type NOT LIKE 'm15_%' AND trigger_type NOT LIKE 'h1_%' OR trigger_type IS NULL)"
         params = []
         where_since = ""
         if since:
@@ -1191,13 +1194,15 @@ def get_strategy_performance_by_track(since=None):
             s['profit_factor'] = 0
         return s
 
-    track_a = _stats_for_track(is_m15=False)
-    track_b = _stats_for_track(is_m15=True)
+    track_a = _stats_for_track('m5')
+    track_b = _stats_for_track('m15')
+    track_c = _stats_for_track('h1')
 
     conn.close()
     return {
         'track_a_m5': track_a,
         'track_b_m15': track_b,
+        'track_c_h1': track_c,
         'since': since,
     }
 
