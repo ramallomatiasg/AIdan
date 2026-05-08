@@ -778,7 +778,13 @@ async def structure_status():
 
 @app.get("/auto-strategies")
 async def list_auto_strategies():
-    """Get active auto-generated strategies (max 6)"""
+    """Get active auto-generated strategies (max 6) + today's archived trades.
+
+    v3.19.2: Combina auto_strategies (cap 6 activas) + trade_archive del dia AR
+    para que la lista del dashboard muestre todos los trades del dia, no solo
+    los ultimos 6. Bug observado: M15 trade #403 (3W) desaparecio del filtro
+    M15 al activarse el cap.
+    """
     try:
         rows = get_active_strategies(6)
         strategies = []
@@ -849,6 +855,54 @@ async def list_auto_strategies():
                 "sl_pips": r[26] if len(r) > 26 else None,
                 "tp_pips": r[27] if len(r) > 27 else None,
             })
+
+        # v3.19.2 — Append today's archived trades (NOT in current strategies list)
+        # to fix the cap-6 disappearance bug for M15 strategies.
+        try:
+            import sqlite3 as _sql
+            from src.common.db import DB_PATH
+            existing_ids = {s['id'] for s in strategies}
+            _conn = _sql.connect(DB_PATH)
+            _cur = _conn.cursor()
+            _cur.execute("""
+                SELECT strategy_id, direction, result, mt5_pnl, trigger_type, news_title,
+                       created_at, confidence, impact_score, profile_name,
+                       entry_price, exit_price, stop_loss, take_profit, sl_pips, tp_pips
+                FROM trade_archive
+                WHERE datetime(created_at,'-3 hours') >= date('now','-3 hours')
+                ORDER BY strategy_id DESC
+                LIMIT 30
+            """)
+            for ar in _cur.fetchall():
+                sid = ar[0]
+                if sid in existing_ids:
+                    continue  # already in active list
+                strategies.append({
+                    "id": sid, "alert_id": None, "news_title": ar[5] or "",
+                    "direction": ar[1],
+                    "entry_price": ar[10],
+                    "stop_loss": ar[12], "take_profit": ar[13],
+                    "confidence": ar[7], "impact_score": ar[8],
+                    "expiry_minutes": None,
+                    "status": ('auto_win' if ar[2] == 'win' else ('auto_loss' if ar[2] == 'loss' else 'expired')),
+                    "created_at": _utc_iso(str(ar[6])) if ar[6] else None,
+                    "expires_at": None,
+                    "result": ar[2],
+                    "trigger_type": ar[4] or "news",
+                    "candles_snapshot": None,
+                    "profile_name": ar[9],
+                    "mt5_ticket": None,
+                    "mt5_lot": None,
+                    "mt5_status": "closed",
+                    "mt5_pnl": ar[3],
+                    "from_archive": True,
+                    "sl_pips": ar[14],
+                    "tp_pips": ar[15],
+                })
+            _conn.close()
+        except Exception as _ae:
+            logger.debug(f"Archive merge: {_ae}")
+
         return JSONResponse({"status": "success", "data": strategies, "count": len(strategies)})
     except Exception as e:
         logger.error(f"Error listing auto-strategies: {e}")
