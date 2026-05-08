@@ -17,9 +17,16 @@ from src.common.config import Config
 
 logger = logging.getLogger("analyzer")
 
-ANALYSIS_TIMEOUT = 30  # mas tiempo que audit (analisis mas complejo)
+ANALYSIS_TIMEOUT = 60  # v3.22.0: 60s para permitir modelos mas grandes via env override
 OLLAMA_URL = Config.OLLAMA_URL or "http://localhost:11434"
 GEMMA_MODEL = Config.GEMMA_MODEL or "gemma4"
+# v3.22.0 — modelo dedicado para post-trade.
+# Default GEMMA_MODEL (qwen2.5:7b) por latencia razonable.
+# Para usar deepseek-r1:14b: set POST_TRADE_MODEL=deepseek-r1:14b en .env.
+# CAVEAT: deepseek-r1:14b causa OOM cuando AIdan corre en paralelo (qwen 7b + dr1 14b
+# = 14GB VRAM, no caben ambos). Usar solo offline (rebuild AIdan stopped).
+import os
+POST_TRADE_MODEL = os.getenv('POST_TRADE_MODEL', '') or GEMMA_MODEL
 
 POST_TRADE_PROMPT = """Eres un analista post-trade para EUR/USD en timeframe M5.
 Analiza este trade completado y genera insights accionables.
@@ -107,22 +114,38 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
         except Exception:
             pass
 
+        # v3.22.0: usa POST_TRADE_MODEL (deepseek-r1:14b) si disponible, fallback a Gemma
+        active_model = POST_TRADE_MODEL or GEMMA_MODEL
         response = requests.post(
             f'{OLLAMA_URL}/api/generate',
             json={
-                'model': GEMMA_MODEL,
+                'model': active_model,
                 'prompt': prompt,
                 'stream': False,
                 'format': 'json',
-                'keep_alive': '2m',  # descargar de VRAM tras 2 min idle
+                'keep_alive': '5m',
                 'options': {
                     'temperature': 0.3,
                     'top_p': 0.9,
-                    'num_predict': 300,
+                    'num_predict': 400,
+                    'num_ctx': 2048,  # context limitado para que 14b quepa en RAM
                 }
             },
             timeout=ANALYSIS_TIMEOUT
         )
+
+        # Fallback: si deepseek-r1 falla, retry con qwen2.5:7b
+        if response.status_code != 200 and active_model != GEMMA_MODEL:
+            logger.warning(f"Post-trade {active_model} HTTP {response.status_code}, fallback to {GEMMA_MODEL}")
+            response = requests.post(
+                f'{OLLAMA_URL}/api/generate',
+                json={
+                    'model': GEMMA_MODEL, 'prompt': prompt, 'stream': False, 'format': 'json',
+                    'keep_alive': '2m',
+                    'options': {'temperature': 0.3, 'top_p': 0.9, 'num_predict': 300}
+                },
+                timeout=ANALYSIS_TIMEOUT
+            )
 
         if response.status_code != 200:
             logger.warning(f"Post-trade analysis HTTP error: {response.status_code}")
@@ -131,7 +154,23 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
         result_text = response.json().get('response', '')
         logger.debug(f"Post-trade raw: {result_text[:400]}")
 
-        result = json.loads(result_text)
+        # v3.22.0 — strip DeepSeek-R1 <think> tags si presente
+        if '<think>' in result_text:
+            # Mantener solo despues de </think>
+            after_think = result_text.split('</think>')
+            if len(after_think) > 1:
+                result_text = after_think[-1].strip()
+
+        try:
+            result = json.loads(result_text)
+        except json.JSONDecodeError:
+            # A veces el JSON está dentro de markdown code blocks ```json ... ```
+            import re
+            match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', result_text)
+            if match:
+                result = json.loads(match.group())
+            else:
+                raise
 
         # Validar y normalizar campos
         valid_qualities = ('good', 'fair', 'poor')
