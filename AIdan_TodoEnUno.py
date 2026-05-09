@@ -832,6 +832,20 @@ class AIdan:
                             set_mt5_executor(mt5_exec)
                         except Exception as e:
                             logger.debug(f"MT5 API export: {e}")
+                        # v3.24.0 — Telegram startup alert
+                        try:
+                            from src.common.telegram_alerts import send_startup, is_configured
+                            if is_configured():
+                                _bal = None
+                                try:
+                                    _info = mt5_exec._mt5.account_info() if mt5_exec._mt5 else None
+                                    if _info:
+                                        _bal = _info.balance
+                                except Exception:
+                                    pass
+                                send_startup(Config.VERSION, _bal)
+                        except Exception as _se:
+                            logger.debug(f"Telegram startup: {_se}")
                     else:
                         logger.warning("MT5 connection failed - paper mode only")
                         mt5_exec = None
@@ -2732,6 +2746,33 @@ class AIdan:
                             mt5_exec.sync_closed_positions()
                         except Exception as e:
                             logger.error(f"MT5 sync error: {e}")
+
+                    # v3.24.0 — Telegram drawdown + milestone alerts (cada N cycles, throttled)
+                    if iteration % 30 == 0:  # cada ~5min (interval 10s × 30)
+                        try:
+                            from src.common.telegram_alerts import check_and_send_drawdown, check_and_send_milestone, is_configured
+                            if is_configured() and mt5_exec and mt5_exec.is_ready():
+                                # Drawdown check
+                                try:
+                                    info = mt5_exec._mt5.account_info() if mt5_exec._mt5 else None
+                                    if info:
+                                        check_and_send_drawdown(info.balance, info.profit if hasattr(info, 'profit') else 0.0)
+                                except Exception:
+                                    pass
+                                # Milestone check Track B/C
+                                try:
+                                    from src.common.db import get_strategy_performance_by_track
+                                    stats = get_strategy_performance_by_track()
+                                    tb = stats.get('track_b_m15', {})
+                                    tc = stats.get('track_c_h1', {})
+                                    if tb.get('total', 0) > 0:
+                                        check_and_send_milestone('Track B M15', tb['total'], tb['win_rate'], tb['profit_factor'], tb['sum_pnl'])
+                                    if tc.get('total', 0) > 0:
+                                        check_and_send_milestone('Track C H1', tc['total'], tc['win_rate'], tc['profit_factor'], tc['sum_pnl'])
+                                except Exception:
+                                    pass
+                        except Exception as _ta:
+                            logger.debug(f"Telegram periodic check: {_ta}")
 
                     # v3.19.0 — Track B: M15 structure scan paralelo (cada 60s)
                     # Track separado del M5: trigger_type='m15_structure', profile M15.

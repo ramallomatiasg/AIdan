@@ -35,6 +35,9 @@ class TechnicalAnalyzerH1(TechnicalAnalyzer):
         self.timeframe_label = 'H1'
         # Cache TTL alto: H1 candles cambian cada hora
         self._cache_ttl = 60  # vs 5s default M5, 30s M15
+        # v3.24.0 — Dedup window 90min (H1 candles son 60min, evitar duplicados
+        # como #412/#413 mismo breakout 1.17769 con 5min apart)
+        self._dedup_window_sec = 5400  # 90 min
 
     def _fetch_candles(self):
         """Fetch 1-hour candles from best available source."""

@@ -123,7 +123,7 @@ def send_trade_result(strategy_id, direction, trigger_type, pnl, conf, balance=N
 
 
 def send_drawdown_alert(daily_pnl, balance, baseline=1000):
-    """Alert si drawdown serio."""
+    """Alert si drawdown serio. Solo dispara con drawdown >=5%."""
     drawdown = baseline - balance
     pct = drawdown / baseline * 100
     if pct >= 5:
@@ -142,6 +142,56 @@ def send_milestone(track, trades_count, wr, pf, pnl):
     msg += f"PnL: ${pnl:+.2f}\n\n"
     msg += "Posible candidato Fase 2 (cuenta real)."
     return send_alert(msg, level='INFO')
+
+
+def send_startup(version, mt5_balance=None):
+    """v3.24.0 - Aviso al arrancar AIdan."""
+    msg = f"AIdan iniciado v{version}"
+    if mt5_balance is not None:
+        msg += f"\nBalance MT5: ${mt5_balance:.2f}"
+    return send_alert(msg, level='INFO', silent=True)
+
+
+def send_shutdown(version, reason='manual'):
+    """v3.24.0 - Aviso al apagar AIdan."""
+    return send_alert(f"AIdan v{version} detenido ({reason})", level='WARN', silent=True)
+
+
+# Throttle state: evitar alerts repetitivos
+_DRAWDOWN_LAST_SENT = 0
+_MILESTONE_SENT = set()  # set de "{track}_{trade_count_milestone}" para no repetir
+
+
+def check_and_send_drawdown(balance, daily_pnl, baseline=1000):
+    """Throttled drawdown alert: max 1 cada 30min, escala thresholds."""
+    global _DRAWDOWN_LAST_SENT
+    drawdown = baseline - balance
+    pct = drawdown / baseline * 100
+    now = time.time()
+    if pct >= 5 and (now - _DRAWDOWN_LAST_SENT) > 1800:  # 30min throttle
+        if send_drawdown_alert(daily_pnl, balance, baseline):
+            _DRAWDOWN_LAST_SENT = now
+            return True
+    return False
+
+
+def check_and_send_milestone(track_label, total_trades, wr, pf, pnl):
+    """Throttled milestone alert: solo dispara una vez por umbral.
+    Umbrales: 15 trades + PF>=1.2 (preliminar) y 30 trades + PF>=1.2 (Fase 2 ready)."""
+    if total_trades < 15 or pf < 1.2 or pnl <= 0:
+        return False
+    # Pick milestone: 15 (preliminar) o 30 (Fase 2 ready)
+    if total_trades >= 30:
+        milestone_key = f"{track_label}_30trades"
+        if milestone_key not in _MILESTONE_SENT:
+            _MILESTONE_SENT.add(milestone_key)
+            return send_milestone(f"{track_label} (READY FASE 2)", total_trades, wr, pf, pnl)
+    elif total_trades >= 15:
+        milestone_key = f"{track_label}_15trades"
+        if milestone_key not in _MILESTONE_SENT:
+            _MILESTONE_SENT.add(milestone_key)
+            return send_milestone(f"{track_label} (preliminar)", total_trades, wr, pf, pnl)
+    return False
 
 
 def test_connection():

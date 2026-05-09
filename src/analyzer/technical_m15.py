@@ -37,6 +37,8 @@ class TechnicalAnalyzerM15(TechnicalAnalyzer):
         self.timeframe_label = 'M15'
         # Cache TTL más alto: M15 candles cambian cada 15 min, no cada 5
         self._cache_ttl = 30  # vs 5s default
+        # v3.24.0 — Dedup window 45min (M15 candles 15min)
+        self._dedup_window_sec = 2700  # 45 min
 
     def _fetch_candles(self):
         """Fetch 15-min candles from best available source."""

@@ -390,10 +390,14 @@ class TechnicalAnalyzer:
         except Exception as e:
             self.logger.debug(f"Setup win rates: {e}")
 
-        # Cleanup old triggered levels (every 30 min)
+        # v3.24.0 — Cleanup window adaptado por timeframe.
+        # Bug observado: H1 #412/#413 mismo breakout 1.17769 con 5min apart.
+        # Causa: level oscilaba 0.3p entre cycles + cleanup 30min suficiente para M5
+        # pero insuficiente para H1 (candles 60min). Override en TechnicalAnalyzerH1.
+        cleanup_window_sec = getattr(self, '_dedup_window_sec', 1800)  # default 30min
         now = time.time()
         if now - self._last_trigger_cleanup > 120:  # cleanup every 2 min
-            cutoff = now - 1800  # forget levels older than 30 min (avoid duplicate strategies)
+            cutoff = now - cleanup_window_sec
             self._triggered_levels = {k: v for k, v in self._triggered_levels.items() if v > cutoff}
             self._last_trigger_cleanup = now
 
@@ -430,13 +434,15 @@ class TechnicalAnalyzer:
             from src.optimizer.auto_tuner import DEFAULT_PARAMS
             tuner_params = dict(DEFAULT_PARAMS)
 
-        # Helper: check if we already triggered this level recently
+        # Helper: check if we already triggered this level recently.
+        # v3.24.0: round(level, 4) = 1 pip granularity (vs 0.1p antes).
+        # Niveles 1.17769 y 1.17770 ahora cuentan como mismo level para dedup.
         def already_triggered(level, direction):
-            key = f"{round(level, 5)}_{direction}"
+            key = f"{round(level, 4)}_{direction}"
             return key in self._triggered_levels
 
         def mark_triggered(level, direction):
-            key = f"{round(level, 5)}_{direction}"
+            key = f"{round(level, 4)}_{direction}"
             self._triggered_levels[key] = time.time()
 
         def dynamic_conf(_unused_base, setup_type, signal_direction=None):
