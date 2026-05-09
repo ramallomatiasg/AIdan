@@ -49,10 +49,31 @@ class MTFAnalyzer:
             'M5':  {...},
             'summary': str
         }
+
+        v3.30.1: candle fetching paralelizado con ThreadPoolExecutor.
+        Antes: 3 fetchs seriales (~500ms cada uno) = ~1.5s
+        Ahora: 3 fetchs en paralelo = ~500ms (max de los 3)
+        Si ya estan en cache, no hay overhead extra (cache hit es <1ms).
         """
+        from concurrent.futures import ThreadPoolExecutor
+
         result = {}
-        for tf in ['H1', 'M15', 'M5']:
-            candles = self.get_candles(tf)
+        timeframes = ['H1', 'M15', 'M5']
+
+        # Parallel fetch (cache hits skipean este overhead)
+        with ThreadPoolExecutor(max_workers=3, thread_name_prefix='mtf-fetch') as ex:
+            future_to_tf = {ex.submit(self.get_candles, tf): tf for tf in timeframes}
+            candles_by_tf = {}
+            for fut in future_to_tf:
+                tf = future_to_tf[fut]
+                try:
+                    candles_by_tf[tf] = fut.result(timeout=15)
+                except Exception as e:
+                    self.logger.warning(f"MTF fetch {tf} failed: {e}")
+                    candles_by_tf[tf] = []
+
+        for tf in timeframes:
+            candles = candles_by_tf.get(tf, [])
             if len(candles) < 10:
                 result[tf] = self._empty_tf_state(tf)
                 continue

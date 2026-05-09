@@ -1267,7 +1267,7 @@ class AIdan:
                         logger.warning(f"Planned activation error: {_ae}", exc_info=True)
 
                     news_items = get_unprocessed_news()
-                    
+
                     alerts_sent = 0
                     strategies_created = 0
                     # Get current price for alert auto-evaluation
@@ -1281,8 +1281,32 @@ class AIdan:
                         logger.debug(f"Learning adjustments: {e}")
                     # Source conflict resolution: track directions from each source
                     cycle_signals = []  # list of {'source': str, 'direction': str, 'confidence': int}
-                    for news_id, url, title, summary, entities, tags in news_items:
-                        result = analyzer.analyze(news_id, title, summary, entities, tags)
+
+                    # v3.30.1 — Paralelizar analyzer.analyze() para batches de news.
+                    # Antes: 5 news x 2-3s LLM = 10-15s seriales
+                    # Ahora: ThreadPoolExecutor max 5 workers en paralelo = ~3s
+                    # analyzer.analyze() es thread-safe (no escribe a DB internamente,
+                    # solo llama LLM y retorna dict).
+                    _precomputed = None
+                    if len(news_items) >= 2:
+                        try:
+                            from concurrent.futures import ThreadPoolExecutor
+                            workers = min(5, len(news_items))
+                            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='news-llm') as _ex:
+                                _precomputed = list(_ex.map(
+                                    lambda item: analyzer.analyze(item[0], item[2], item[3], item[4], item[5]),
+                                    news_items
+                                ))
+                            logger.info(f"News batch analyzed in parallel: {len(news_items)} items / {workers} workers")
+                        except Exception as _pe:
+                            logger.warning(f"News parallel analyze failed: {_pe}, fallback to serial")
+                            _precomputed = None
+
+                    for _news_idx, (news_id, url, title, summary, entities, tags) in enumerate(news_items):
+                        if _precomputed is not None and _news_idx < len(_precomputed):
+                            result = _precomputed[_news_idx]
+                        else:
+                            result = analyzer.analyze(news_id, title, summary, entities, tags)
 
                         if result:
                             # Freshness check: stale news (>30min) get price=0 so they don't show as "Evaluando"
