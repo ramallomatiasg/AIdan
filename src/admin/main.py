@@ -1126,14 +1126,81 @@ async def consensus_state():
 
 
 @app.get("/wr-heatmap")
-async def wr_heatmap():
-    """v3.29.0 — Heatmap WR por hour_utc x day_of_week.
-    Returns: {matrix: {dayName: {hour: {wins, total, wr}}}, total}"""
+async def wr_heatmap(mode: str = 'weekday', days: int = 30):
+    """v3.29.1 — Heatmap WR. Dos modos:
+    - mode='weekday' (default): agrega por dia de semana (Lun-Vie) x hora UTC
+    - mode='date': por fecha calendario ultimos N dias x hora UTC
+
+    Returns: {mode, rows: [{label, hours: {h: {wins, total, wr}}, day_total: {wins, total, wr}}]}
+    """
     try:
         from src.common.db import DB_PATH
         import sqlite3
+        from datetime import datetime
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
+
+        if mode == 'date':
+            # Por fecha calendario: ultimos N dias
+            cur.execute(f"""
+                SELECT date(datetime(created_at,'-3 hours')) as d, hour_utc, result, COUNT(*)
+                FROM trade_archive
+                WHERE result IN ('win', 'loss')
+                  AND created_at >= date('now', '-{int(days)} days')
+                  AND hour_utc IS NOT NULL
+                GROUP BY d, hour_utc, result
+                ORDER BY d DESC
+            """)
+            rows_data = cur.fetchall()
+            # Agg into rows ordered by date desc
+            row_map = {}  # date_str -> {hours: {}, day_total: {}}
+            for date_str, hour, result, count in rows_data:
+                if not date_str: continue
+                try: hour = int(hour)
+                except: continue
+                if date_str not in row_map:
+                    row_map[date_str] = {'hours': {}, 'wins': 0, 'losses': 0}
+                row = row_map[date_str]
+                if hour not in row['hours']:
+                    row['hours'][hour] = {'wins': 0, 'total': 0}
+                row['hours'][hour]['total'] += count
+                if result == 'win':
+                    row['hours'][hour]['wins'] += count
+                    row['wins'] += count
+                else:
+                    row['losses'] += count
+            # Format output
+            out_rows = []
+            total_trades = 0
+            for date_str, row in row_map.items():
+                # Calc WR por hora
+                for h, cell in row['hours'].items():
+                    cell['wr'] = round((cell['wins'] / cell['total'] * 100) if cell['total'] else 0, 1)
+                # Day total
+                d_total = row['wins'] + row['losses']
+                d_wr = round((row['wins'] / d_total * 100) if d_total else 0, 1)
+                # Friendly label: 9 May (Sáb)
+                try:
+                    dt = datetime.strptime(date_str, '%Y-%m-%d')
+                    day_short = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'][dt.weekday()]
+                    label = f"{dt.day}/{dt.month} {day_short}"
+                except Exception:
+                    label = date_str
+                out_rows.append({
+                    'label': label,
+                    'date': date_str,
+                    'hours': row['hours'],
+                    'day_total': {'wins': row['wins'], 'losses': row['losses'], 'total': d_total, 'wr': d_wr},
+                })
+                total_trades += d_total
+            conn.close()
+            return JSONResponse({'status': 'success', 'data': {
+                'mode': 'date',
+                'rows': out_rows,
+                'total': total_trades,
+            }})
+
+        # mode='weekday' (default)
         cur.execute("""
             SELECT day_of_week, hour_utc, result, COUNT(*)
             FROM trade_archive
@@ -1141,35 +1208,46 @@ async def wr_heatmap():
               AND day_of_week IS NOT NULL AND hour_utc IS NOT NULL
             GROUP BY day_of_week, hour_utc, result
         """)
-        rows = cur.fetchall()
+        rows_data = cur.fetchall()
         conn.close()
-        # day_of_week: Python weekday() 0=Mon,1=Tue,...,4=Fri,5=Sat,6=Sun
-        # Forex: solo Lun-Vie (0-4)
         day_names = {0: 'Lun', 1: 'Mar', 2: 'Mié', 3: 'Jue', 4: 'Vie'}
-        matrix = {}
-        total = 0
-        for dow_str, hour, result, count in rows:
+        row_map = {}
+        for dow_str, hour, result, count in rows_data:
             try:
-                dow = int(dow_str)
-                hour = int(hour)
-            except (ValueError, TypeError):
-                continue
-            if dow not in day_names:
-                continue
+                dow = int(dow_str); hour = int(hour)
+            except: continue
+            if dow not in day_names: continue
             day = day_names[dow]
-            if day not in matrix:
-                matrix[day] = {}
-            if hour not in matrix[day]:
-                matrix[day][hour] = {'wins': 0, 'total': 0}
-            matrix[day][hour]['total'] += count
+            if day not in row_map:
+                row_map[day] = {'hours': {}, 'wins': 0, 'losses': 0}
+            row = row_map[day]
+            if hour not in row['hours']:
+                row['hours'][hour] = {'wins': 0, 'total': 0}
+            row['hours'][hour]['total'] += count
             if result == 'win':
-                matrix[day][hour]['wins'] += count
-            total += count
-        # Calc wr per cell
-        for day, hours in matrix.items():
-            for h, cell in hours.items():
+                row['hours'][hour]['wins'] += count
+                row['wins'] += count
+            else:
+                row['losses'] += count
+        out_rows = []
+        total_trades = 0
+        for day_label in ['Lun', 'Mar', 'Mié', 'Jue', 'Vie']:
+            row = row_map.get(day_label, {'hours': {}, 'wins': 0, 'losses': 0})
+            for h, cell in row['hours'].items():
                 cell['wr'] = round((cell['wins'] / cell['total'] * 100) if cell['total'] else 0, 1)
-        return JSONResponse({'status': 'success', 'data': {'matrix': matrix, 'total': total}})
+            d_total = row['wins'] + row['losses']
+            d_wr = round((row['wins'] / d_total * 100) if d_total else 0, 1)
+            out_rows.append({
+                'label': day_label,
+                'hours': row['hours'],
+                'day_total': {'wins': row['wins'], 'losses': row['losses'], 'total': d_total, 'wr': d_wr},
+            })
+            total_trades += d_total
+        return JSONResponse({'status': 'success', 'data': {
+            'mode': 'weekday',
+            'rows': out_rows,
+            'total': total_trades,
+        }})
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
