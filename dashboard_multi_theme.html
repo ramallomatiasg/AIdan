@@ -1509,8 +1509,8 @@
                     <div class="alert-title">
                         <a href="${alert.url}" target="_blank" rel="noopener">${escapeHtml(alert.title)}</a>
                     </div>
-                    <div class="alert-action-line ${isOperate ? 'op' : 'noop'}">${actionText || (isOperate ? 'OPERAR' : 'NO OPERAR')}</div>
-                    <div class="alert-impact">${impactText || explainText}</div>
+                    ${isOperate ? `<div class="alert-action-line op">${actionText || 'OPERAR'}</div>` : ''}
+                    ${impactText ? `<div class="alert-impact">${impactText}</div>` : ''}
                     <div class="alert-footer">
                         <span class="alert-time">${time}</span>
                         <div class="alert-score-display">
