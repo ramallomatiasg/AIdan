@@ -414,17 +414,26 @@ async def get_recent_news_endpoint(limit: int = 200):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
+        # v3.27.0: LEFT JOIN con alerts para incluir direction/confidence/impact
+        # ORDER BY fetched_at DESC (mas estable que published_at que puede estar mal)
         cursor.execute("""
-            SELECT id, title, url, fetched_at, language, tags, published_at
-            FROM news
-            ORDER BY fetched_at DESC
+            SELECT n.id, n.title, n.url, n.fetched_at, n.language, n.tags, n.published_at,
+                   a.direction, a.confidence, a.impact_score, a.alert_level, a.alert_result
+            FROM news n
+            LEFT JOIN alerts a ON a.news_id = n.id
+            ORDER BY n.fetched_at DESC
             LIMIT ?
         """, (limit,))
 
         news_items = []
         for row in cursor.fetchall():
             news_id, title, url, fetched_at, language, tags = row[:6]
-            published_at = row[6] if len(row) > 6 else None
+            published_at = row[6]
+            direction = row[7]
+            confidence = row[8]
+            impact_score = row[9]
+            alert_level = row[10]
+            alert_result = row[11]
             news_items.append({
                 "id": news_id,
                 "title": title,
@@ -432,7 +441,13 @@ async def get_recent_news_endpoint(limit: int = 200):
                 "fetched_at": _utc_iso(fetched_at),
                 "published_at": _published_iso(published_at) if published_at else None,
                 "language": language,
-                "tags": tags
+                "tags": tags,
+                # v3.27.0: campos de alerta si la news fue analizada
+                "direction": direction,           # 'CALL'|'PUT'|'NEUTRAL'|None
+                "confidence": confidence,         # 0-100 o None
+                "impact_score": impact_score,     # 0-100 o None
+                "alert_level": alert_level,       # 'BAJA'|'MEDIA'|'ALTA' o None
+                "alert_result": alert_result,     # 'win'|'loss'|'break_even' o None
             })
 
         conn.close()
