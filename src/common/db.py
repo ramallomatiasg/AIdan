@@ -507,6 +507,30 @@ def init_db():
             WHERE sr.result IN ('win', 'loss', 'break_even')
         """)
 
+    # v3.30.0 — INDEXES para queries frecuentes (audit perf revelo full table scans)
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_alerts_sent_at ON alerts(alert_sent_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_alerts_news_id ON alerts(news_id)",
+        "CREATE INDEX IF NOT EXISTS idx_alerts_score_date ON alerts(impact_score, alert_sent_at)",
+        "CREATE INDEX IF NOT EXISTS idx_news_fetched ON news(fetched_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_signal_result_date ON signal_results(result, recorded_at)",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_results_recorded ON strategy_results(recorded_at)",
+        "CREATE INDEX IF NOT EXISTS idx_auto_strategies_status ON auto_strategies(status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_auto_strategies_created ON auto_strategies(created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_auto_strategies_trigger ON auto_strategies(trigger_type, status)",
+        "CREATE INDEX IF NOT EXISTS idx_trade_archive_archived ON trade_archive(archived_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_trade_archive_trigger ON trade_archive(trigger_type, result)",
+        "CREATE INDEX IF NOT EXISTS idx_trade_archive_dow_hour ON trade_archive(day_of_week, hour_utc)",
+        "CREATE INDEX IF NOT EXISTS idx_trade_archive_strategy ON trade_archive(strategy_id)",
+        "CREATE INDEX IF NOT EXISTS idx_post_trade_strategy ON post_trade_analysis(strategy_id)",
+        "CREATE INDEX IF NOT EXISTS idx_learning_created ON learning_insights(created_at)",
+    ]
+    for idx_sql in indexes:
+        try:
+            cursor.execute(idx_sql)
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
 

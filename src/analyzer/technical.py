@@ -13,7 +13,10 @@ class TechnicalAnalyzer:
     def __init__(self, logger):
         self.logger = logger
         self._cache = {}
-        self._cache_ttl = 5  # seconds — MT5 data is instant, keep price fresh
+        # v3.30.0: TTL extendido 5s -> 10s. El analyzer cycle es 10s, asi reusa
+        # market_state entre news/structure/smc en mismo cycle (3-4 llamadas
+        # ahorradas por cycle). Para M5 (vela 5min) 10s de cache es seguro.
+        self._cache_ttl = 10
         self._triggered_levels = {}  # {level_key: timestamp} — avoid duplicate signals
         self._last_trigger_cleanup = 0
 

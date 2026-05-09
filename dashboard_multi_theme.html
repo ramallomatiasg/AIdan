@@ -1365,6 +1365,8 @@
     // ── Real-time price via Twelve Data WebSocket (tick-by-tick, free tier: 1 symbol) ──
     let priceWs = null;
     let wsReconnectTimer = null;
+    let wsConnected = false;  // v3.30.0: estado para skip fallback polling
+    let fallbackPollTimer = null;
     const TD_WS_KEY = '46f407e058674f159a2a176e023ab536';
 
     function connectPriceWs() {
@@ -1373,10 +1375,17 @@
             priceWs = new WebSocket(`wss://ws.twelvedata.com/v1/quotes/price?apikey=${TD_WS_KEY}`);
             priceWs.onopen = () => {
                 console.log('WS: connected to Twelve Data');
+                wsConnected = true;
                 priceWs.send(JSON.stringify({ action: 'subscribe', params: { symbols: 'EUR/USD' } }));
                 // Update LIVE indicator
                 const liveEl = document.querySelector('.live-indicator');
                 if (liveEl) liveEl.style.opacity = '1';
+                // v3.30.0: WS ON -> stop fallback polling (evita doble fetch redundante)
+                if (fallbackPollTimer) {
+                    clearInterval(fallbackPollTimer);
+                    fallbackPollTimer = null;
+                    console.log('WS active: REST polling fallback disabled');
+                }
             };
             priceWs.onmessage = (evt) => {
                 try {
@@ -1389,8 +1398,13 @@
             };
             priceWs.onclose = () => {
                 console.log('WS: disconnected, reconnecting in 5s...');
+                wsConnected = false;
                 const liveEl = document.querySelector('.live-indicator');
                 if (liveEl) liveEl.style.opacity = '0.4';
+                // v3.30.0: WS DOWN -> activar fallback solo cuando hace falta
+                if (!fallbackPollTimer) {
+                    fallbackPollTimer = setInterval(tickPriceFallback, 10000);
+                }
                 clearTimeout(wsReconnectTimer);
                 wsReconnectTimer = setTimeout(connectPriceWs, 5000);
             };
@@ -1398,9 +1412,9 @@
                 priceWs.close();
             };
         } catch(e) {
-            // Fallback to polling if WebSocket fails
             console.warn('WS: failed, falling back to polling');
-            setInterval(tickPriceFallback, 3000);
+            wsConnected = false;
+            if (!fallbackPollTimer) fallbackPollTimer = setInterval(tickPriceFallback, 10000);
         }
     }
 
@@ -2559,9 +2573,9 @@
         // Candle data refresh every 60s
         setInterval(refreshMainChart, 60000);
         // Real-time price via WebSocket (tick-by-tick)
+        // v3.30.0: fallback polling se activa AUTOMATICO solo si WS cae (en onclose).
+        // Evita el polling redundante 24/7 cuando WS funciona.
         connectPriceWs();
-        // Fallback polling every 10s in case WS drops
-        setInterval(tickPriceFallback, 10000);
         // Data refresh every 30 seconds
         setInterval(() => {
             loadStats(); loadAlerts(); loadPerformance();
