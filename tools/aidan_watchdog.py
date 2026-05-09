@@ -43,6 +43,45 @@ ALERT_THROTTLE_FILE = os.path.join(os.environ.get('APPDATA', '/tmp'), 'AIdan', '
 ALERT_THROTTLE_SEC = 1800  # 30 min entre alerts repetidos
 
 
+def is_user_gaming():
+    """Detect si user esta en juego/render pesado. Retorna True si:
+    - Algun proceso conocido de juego está corriendo, O
+    - GPU utilization > 50% (otra app pesada)
+
+    Si True, watchdog hace skip silencioso (sin Telegram, sin nada).
+    """
+    # Check GPU usage primero (mas confiable)
+    try:
+        from src.common.gpu_monitor import get_gpu_state
+        state = get_gpu_state(force_refresh=True)
+        if state.get('available') and state.get('gpu_util', 0) > 50:
+            return True
+    except Exception:
+        pass
+    # Check known gaming processes
+    try:
+        import subprocess
+        out = subprocess.run(['tasklist', '/FO', 'CSV'], capture_output=True, text=True, timeout=5, encoding='cp850', errors='replace')
+        if out.returncode == 0:
+            text = (out.stdout or '').lower()
+            gaming_processes = [
+                'cs2.exe', 'csgo.exe', 'valorant', 'leagueclient', 'lol.exe',
+                'fortnite', 'overwatch', 'gta5.exe', 'gtav.exe', 'rdr2.exe',
+                'cyberpunk', 'eldenring', 'r5apex.exe', 'apex.exe',
+                'pubg.exe', 'dota2.exe', 'r6sgame.exe', 'rocketleague.exe',
+                'minecraft', 'wow.exe', 'destiny2.exe', 'warzone.exe',
+                'fifa', 'pes2', 'efootball',
+                'obs64.exe', 'obs32.exe',  # streaming/recording
+                'photoshop.exe', 'premiere.exe', 'aftereffects',
+            ]
+            for p in gaming_processes:
+                if p in text:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def aidan_is_running():
     """Check si AIdan.exe está corriendo."""
     try:
@@ -94,7 +133,12 @@ def mark_alert_sent():
 
 
 def check_once():
-    """Check + alert if needed."""
+    """Check + alert if needed. v3.28.1: gaming-aware silent skip."""
+    # v3.28.1 — skip silencioso si user esta en juego/render
+    if is_user_gaming():
+        print(f"[watchdog] gaming detected, silent skip")
+        return True
+
     running = aidan_is_running()
     api_ok = aidan_api_responds()
 
