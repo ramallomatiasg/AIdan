@@ -59,25 +59,35 @@ def extract_top_combo_summary(output):
 
 
 def is_user_gaming():
-    """Skip silencioso si user esta en juego/render pesado."""
+    """Skip silencioso si user esta en juego/render. Detection por uso real:
+    GPU mem > 7GB OR GPU util > 30% OR CPU avg > 60%."""
+    import subprocess
     try:
         from src.common.gpu_monitor import get_gpu_state
         s = get_gpu_state(force_refresh=True)
-        if s.get('available') and s.get('gpu_util', 0) > 50:
-            return True
+        if s.get('available'):
+            if s.get('gpu_mem_used_mb', 0) > 7000:
+                return True
+            if s.get('gpu_util', 0) > 30:
+                return True
     except Exception:
         pass
+    # CPU promedio
     try:
-        import subprocess
-        out = subprocess.run(['tasklist', '/FO', 'CSV'], capture_output=True, text=True, timeout=5, encoding='cp850', errors='replace')
-        if out.returncode == 0:
-            text = (out.stdout or '').lower()
-            for p in ['cs2.exe', 'csgo.exe', 'valorant', 'leagueclient', 'fortnite',
-                      'overwatch', 'cyberpunk', 'apex.exe', 'dota2.exe', 'pubg.exe',
-                      'rocketleague.exe', 'minecraft', 'wow.exe', 'destiny2.exe',
-                      'photoshop.exe', 'premiere.exe', 'obs64.exe']:
-                if p in text:
-                    return True
+        samples = []
+        for _ in range(3):
+            out = subprocess.run(
+                ['powershell', '-NoProfile', '-Command',
+                 '(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average'],
+                capture_output=True, text=True, timeout=4
+            )
+            if out.returncode == 0:
+                try:
+                    samples.append(float(out.stdout.strip()))
+                except (ValueError, TypeError):
+                    pass
+        if samples and (sum(samples) / len(samples)) > 60:
+            return True
     except Exception:
         pass
     return False

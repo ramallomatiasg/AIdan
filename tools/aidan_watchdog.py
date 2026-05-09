@@ -44,41 +44,81 @@ ALERT_THROTTLE_SEC = 1800  # 30 min entre alerts repetidos
 
 
 def is_user_gaming():
-    """Detect si user esta en juego/render pesado. Retorna True si:
-    - Algun proceso conocido de juego está corriendo, O
-    - GPU utilization > 50% (otra app pesada)
+    """Detect si user esta en juego/render/app pesada.
 
-    Si True, watchdog hace skip silencioso (sin Telegram, sin nada).
+    Estrategia: medir USO REAL de recursos (no listas de procesos).
+
+    1. GPU memory used > 7000MB:
+       AIdan idle (Ollama qwen2.5:7b cargado) usa ~5GB.
+       Si total > 7GB, hay algo MAS demandando VRAM (juego/render/AAA app).
+
+    2. GPU util > 30% sostenido:
+       Juego con frames activos. AIdan idle = 0% util.
+
+    3. CPU promedio > 60% (sostenido 3 samples):
+       Render/compilación/encoding/juego CPU-heavy.
+
+    Si CUALQUIERA es True -> skip silencioso.
+
+    NO usamos nvidia-smi compute-apps porque lista TODOS los procesos con
+    GPU access (dwm, chrome, explorer) — falsea constantemente.
+
+    Lista hardcoded de juegos como fallback solo para juegos light que no
+    detectan via metricas (ej: titulos viejos sin GPU usage alto).
     """
-    # Check GPU usage primero (mas confiable)
+    import subprocess
+
+    # 1+2. GPU usage o memoria
     try:
         from src.common.gpu_monitor import get_gpu_state
         state = get_gpu_state(force_refresh=True)
-        if state.get('available') and state.get('gpu_util', 0) > 50:
-            return True
+        if state.get('available'):
+            if state.get('gpu_mem_used_mb', 0) > 7000:
+                return True
+            if state.get('gpu_util', 0) > 30:
+                return True
     except Exception:
         pass
-    # Check known gaming processes
+
+    # 3. CPU promedio (3 samples de 1s, descarta primer sample)
     try:
-        import subprocess
+        samples = []
+        for i in range(3):
+            out = subprocess.run(
+                ['powershell', '-NoProfile', '-Command',
+                 '(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average'],
+                capture_output=True, text=True, timeout=4
+            )
+            if out.returncode == 0:
+                try:
+                    samples.append(float(out.stdout.strip()))
+                except (ValueError, TypeError):
+                    pass
+        if samples:
+            avg = sum(samples) / len(samples)
+            if avg > 60:
+                return True
+    except Exception:
+        pass
+
+    # 4. Lista hardcoded fallback (juegos light que escapan a metricas)
+    try:
         out = subprocess.run(['tasklist', '/FO', 'CSV'], capture_output=True, text=True, timeout=5, encoding='cp850', errors='replace')
         if out.returncode == 0:
             text = (out.stdout or '').lower()
-            gaming_processes = [
-                'cs2.exe', 'csgo.exe', 'valorant', 'leagueclient', 'lol.exe',
-                'fortnite', 'overwatch', 'gta5.exe', 'gtav.exe', 'rdr2.exe',
-                'cyberpunk', 'eldenring', 'r5apex.exe', 'apex.exe',
-                'pubg.exe', 'dota2.exe', 'r6sgame.exe', 'rocketleague.exe',
-                'minecraft', 'wow.exe', 'destiny2.exe', 'warzone.exe',
-                'fifa', 'pes2', 'efootball',
-                'obs64.exe', 'obs32.exe',  # streaming/recording
-                'photoshop.exe', 'premiere.exe', 'aftereffects',
+            light_games = [
+                'cs2.exe', 'csgo.exe', 'valorant', 'leagueclient',
+                'fortnite', 'overwatch', 'cyberpunk', 'apex.exe',
+                'dota2.exe', 'pubg.exe', 'minecraft', 'wow.exe',
+                'gta5.exe', 'rdr2.exe', 'eldenring',
+                'obs64.exe', 'photoshop.exe', 'premiere.exe',
             ]
-            for p in gaming_processes:
+            for p in light_games:
                 if p in text:
                     return True
     except Exception:
         pass
+
     return False
 
 
