@@ -2741,8 +2741,14 @@
     }
 
     function showHeatmapTooltip(e, cell) {
-        const tt = document.getElementById('heatmapTooltip');
+        let tt = document.getElementById('heatmapTooltip');
         if (!tt) return;
+        // v3.29.2: mover el tooltip al body si está en un parent con transform.
+        // Card padre tiene transform en hover -> position:fixed queda relativo a ese
+        // parent (CSS containing block), causando que tooltip quede contenido en card.
+        if (tt.parentElement !== document.body) {
+            document.body.appendChild(tt);
+        }
         const label = cell.dataset.label;
         const hour = cell.dataset.hour;
         const wins = cell.dataset.wins;
@@ -2766,14 +2772,31 @@
     function moveHeatmapTooltip(e) {
         const tt = document.getElementById('heatmapTooltip');
         if (!tt) return;
+        // Force layout — getBoundingClientRect tras display:block
         const rect = tt.getBoundingClientRect();
-        const x = e.clientX + 14;
-        const y = e.clientY + 14;
-        // Avoid going off-screen
-        const maxX = window.innerWidth - rect.width - 10;
-        const maxY = window.innerHeight - rect.height - 10;
-        tt.style.left = Math.min(x, maxX) + 'px';
-        tt.style.top = Math.min(y, maxY) + 'px';
+        const tw = rect.width || 200;
+        const th = rect.height || 100;
+        const margin = 14;
+        const safe = 10;
+
+        // Default: down-right del cursor
+        let x = e.clientX + margin;
+        let y = e.clientY + margin;
+
+        // FLIP horizontal: si no entra a la derecha, mostrar a la izquierda
+        if (x + tw > window.innerWidth - safe) {
+            x = e.clientX - tw - margin;
+        }
+        // FLIP vertical: si no entra abajo, mostrar arriba
+        if (y + th > window.innerHeight - safe) {
+            y = e.clientY - th - margin;
+        }
+        // Safety clamp final
+        x = Math.max(safe, Math.min(x, window.innerWidth - tw - safe));
+        y = Math.max(safe, Math.min(y, window.innerHeight - th - safe));
+
+        tt.style.left = x + 'px';
+        tt.style.top = y + 'px';
     }
 
     function hideHeatmapTooltip() {
