@@ -287,11 +287,42 @@
         .filter-select:focus { border-color: var(--accent-cyan); box-shadow: 0 0 8px rgba(0,245,212,0.1); }
         .filter-range { width: 70px; padding: 0; accent-color: var(--accent-blue); }
 
-        /* v3.27.0: alert cards compactas (denser layout) */
+        /* v3.27.0: alert cards compactas. v3.27.1: 4 cards por fila + paginación */
         .alerts-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-            gap: 8px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            min-height: 380px;  /* reservar espacio para 3 filas, evita salto al paginar */
+            align-content: start;
+        }
+        @media (max-width: 1400px) {
+            .alerts-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 900px) {
+            .alerts-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 600px) {
+            .alerts-grid { grid-template-columns: 1fr; }
+        }
+        /* v3.27.1: paginación */
+        .alerts-pagination {
+            display: flex; justify-content: center; align-items: center;
+            gap: 10px; padding: 10px 0; margin-top: 8px;
+            border-top: 1px solid var(--border);
+        }
+        .alerts-pagination button {
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 6px; padding: 4px 12px; font-size: 12px;
+            color: var(--text-secondary); cursor: pointer; font-weight: 600;
+            transition: all 0.2s; font-family: inherit;
+        }
+        .alerts-pagination button:hover:not(:disabled) {
+            border-color: var(--accent-cyan); color: var(--accent-cyan);
+        }
+        .alerts-pagination button:disabled { opacity: 0.3; cursor: not-allowed; }
+        .alerts-pagination .page-info {
+            font-size: 12px; color: var(--text-muted);
+            font-variant-numeric: tabular-nums; min-width: 80px; text-align: center;
         }
 
         .alert-card {
@@ -1415,8 +1446,12 @@
         setTimeout(() => btn.classList.remove('spinning'), 500);
     }
 
-    // ===== FILTERS =====
-    function applyFilters() {
+    // ===== FILTERS + PAGINATION (v3.27.1) =====
+    let alertPage = 0;
+    const ALERTS_PER_PAGE = 12;  // 3 filas × 4 cols
+    let lastFilteredAlerts = [];
+
+    function applyFilters(resetPage = true) {
         const direction = document.getElementById('filterDirection').value;
         const minConfidence = parseInt(document.getElementById('filterConfidence').value);
         const timePeriod = document.getElementById('filterTime').value;
@@ -1440,7 +1475,41 @@
             });
         }
 
-        renderAlerts(filtered);
+        lastFilteredAlerts = filtered;
+        if (resetPage) alertPage = 0;
+        renderAlertsPage();
+    }
+
+    function renderAlertsPage() {
+        const total = lastFilteredAlerts.length;
+        const totalPages = Math.max(1, Math.ceil(total / ALERTS_PER_PAGE));
+        if (alertPage >= totalPages) alertPage = totalPages - 1;
+        if (alertPage < 0) alertPage = 0;
+        const start = alertPage * ALERTS_PER_PAGE;
+        const slice = lastFilteredAlerts.slice(start, start + ALERTS_PER_PAGE);
+        renderAlerts(slice);
+        // Render pagination controls
+        const grid = document.getElementById('alertsGrid');
+        const existingPag = grid.parentElement.querySelector('.alerts-pagination');
+        if (existingPag) existingPag.remove();
+        if (total > ALERTS_PER_PAGE) {
+            const pag = document.createElement('div');
+            pag.className = 'alerts-pagination';
+            pag.innerHTML = `
+                <button onclick="alertPagePrev()" ${alertPage === 0 ? 'disabled' : ''}>← Anterior</button>
+                <span class="page-info">${alertPage + 1} / ${totalPages} (${total})</span>
+                <button onclick="alertPageNext()" ${alertPage >= totalPages - 1 ? 'disabled' : ''}>Siguiente →</button>
+            `;
+            grid.parentElement.appendChild(pag);
+        }
+    }
+
+    function alertPagePrev() {
+        if (alertPage > 0) { alertPage--; renderAlertsPage(); }
+    }
+    function alertPageNext() {
+        const totalPages = Math.ceil(lastFilteredAlerts.length / ALERTS_PER_PAGE);
+        if (alertPage < totalPages - 1) { alertPage++; renderAlertsPage(); }
     }
 
     function renderAlerts(alerts) {
