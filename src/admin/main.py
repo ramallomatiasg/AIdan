@@ -181,6 +181,13 @@ if os.path.exists(static_path):
     app.mount("/static", StaticFiles(directory=static_path), name="static")
 
 # Servir dashboard en la raíz
+# v3.27.2: agregar Cache-Control no-cache para forzar reload de HTML siempre
+NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
 @app.get("/")
 async def root():
     """Servir dashboard multi-theme con chat"""
@@ -189,15 +196,15 @@ async def root():
     logger.info(f"Existe: {os.path.exists(dashboard_path)}")
     if os.path.exists(dashboard_path):
         logger.info("✓ Sirviendo dashboard_multi_theme.html")
-        return FileResponse(dashboard_path, media_type="text/html")
+        return FileResponse(dashboard_path, media_type="text/html", headers=NO_CACHE_HEADERS)
     dashboard_path = os.path.join(base_path, 'dashboard_retro.html')
     if os.path.exists(dashboard_path):
         logger.info("⚠ Sirviendo dashboard_retro.html (fallback)")
-        return FileResponse(dashboard_path, media_type="text/html")
+        return FileResponse(dashboard_path, media_type="text/html", headers=NO_CACHE_HEADERS)
     dashboard_path = os.path.join(os.path.dirname(__file__), '../../dashboard.html')
     if os.path.exists(dashboard_path):
         logger.info("⚠ Sirviendo dashboard.html (fallback)")
-        return FileResponse(dashboard_path, media_type="text/html")
+        return FileResponse(dashboard_path, media_type="text/html", headers=NO_CACHE_HEADERS)
     logger.error("❌ No se encontró ningún dashboard")
     return {"message": "Dashboard not found"}
 
