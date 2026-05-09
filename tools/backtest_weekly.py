@@ -15,12 +15,25 @@ Flow:
 
 Si Telegram no configurado: log local, no crash.
 """
+import logging
 import os
 import subprocess
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, ROOT)
+
+# v3.28.1: log a archivo (compat con pythonw que no tiene stdout)
+LOG_FILE = os.path.join(os.environ.get('APPDATA', '/tmp'), 'AIdan', 'state', 'backtest_weekly.log')
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+def print(*args, **kwargs):
+    logging.info(' '.join(str(a) for a in args))
 
 
 def run_backtest_for_track(track):

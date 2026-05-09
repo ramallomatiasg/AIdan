@@ -1,6 +1,6 @@
 @echo off
-REM AIdan Watchdog runner - llamado por Windows Task Scheduler cada 5 min
-REM Verifica si AIdan.exe corre y manda alert Telegram si esta caido
+REM AIdan Watchdog - silent run via pythonw (no console window)
+REM Llamado por Windows Task Scheduler cada 5 min cuando AIdan esta corriendo
 cd /d F:\AIdan
-"C:\Program Files\Python311\python.exe" tools\aidan_watchdog.py >> "%APPDATA%\AIdan\state\watchdog.log" 2>&1
-exit /b %ERRORLEVEL%
+start "" /b "C:\Program Files\Python311\pythonw.exe" tools\aidan_watchdog.py
+exit /b 0

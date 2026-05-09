@@ -16,6 +16,7 @@ Lógica:
 Si Telegram no está configurado en .env, log local y skip.
 """
 import argparse
+import logging
 import os
 import sys
 import time
@@ -23,6 +24,20 @@ import time
 # Add project root
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, ROOT)
+
+# v3.28.1: log a archivo (compat con pythonw que no tiene stdout)
+LOG_FILE = os.path.join(os.environ.get('APPDATA', '/tmp'), 'AIdan', 'state', 'watchdog.log')
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# Compat: usar print() con redirección a logger
+def print(*args, **kwargs):
+    logging.info(' '.join(str(a) for a in args))
 
 ALERT_THROTTLE_FILE = os.path.join(os.environ.get('APPDATA', '/tmp'), 'AIdan', 'state', '.watchdog_last_alert')
 ALERT_THROTTLE_SEC = 1800  # 30 min entre alerts repetidos

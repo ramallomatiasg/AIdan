@@ -1,6 +1,6 @@
 @echo off
-REM AIdan Backtest Weekly - llamado por Task Scheduler domingos 23:00
-REM Corre backtest_parallel para M5/M15/H1 y manda summary via Telegram
+REM AIdan Backtest Weekly - silent run via pythonw (no console window)
+REM Llamado por Task Scheduler domingos 23:00
 cd /d F:\AIdan
-"C:\Program Files\Python311\python.exe" tools\backtest_weekly.py >> "%APPDATA%\AIdan\state\backtest_weekly.log" 2>&1
-exit /b %ERRORLEVEL%
+start "" /b "C:\Program Files\Python311\pythonw.exe" tools\backtest_weekly.py
+exit /b 0
