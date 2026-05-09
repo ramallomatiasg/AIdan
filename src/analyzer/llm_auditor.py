@@ -19,7 +19,8 @@ logger = logging.getLogger("llm_auditor")
 
 AUDIT_TIMEOUT = 20  # segundos max para respuesta de Gemma (cold start ~15s, warm ~3s)
 OLLAMA_URL = Config.OLLAMA_URL or "http://localhost:11434"
-GEMMA_MODEL = Config.GEMMA_MODEL or "gemma4"
+# v3.25.0 — modelo dedicado para signal auditor
+GEMMA_MODEL = Config.get_llm_model('signal_audit')
 
 AUDIT_PROMPT_TEMPLATE = """Eres un auditor de trading para EUR/USD en timeframe M5.
 Analiza esta senal y decide si es buena operacion.
@@ -247,10 +248,11 @@ def log_pretrade_audit(strategy_id, model, audit_result, signal_context):
 
 
 def audit_pretrade_strict(signal_context: dict, model: str = None, strategy_id: int = None):
-    """v3.22.0 — Pre-trade strict audit usando deepseek-r1:14b (chain-of-thought).
+    """v3.22.0 — Pre-trade strict audit usando deepseek-r1 (chain-of-thought).
+    v3.25.0 — modelo desde Config.LLM_MODELS['pretrade_strict']
 
     A diferencia de audit_signal (suave, ajusta conf):
-    - Usa modelo razonador (deepseek-r1:14b) por default
+    - Usa modelo razonador (default deepseek-r1:14b) por default
     - Detecta patrones de fallo conocidos de AIdan (counter-HTF, catch-knife, etc)
     - Loguea predicción a tabla pretrade_audits para validación posterior
     - SOLO LOGGEA — NO veta el trade en este momento
@@ -258,7 +260,7 @@ def audit_pretrade_strict(signal_context: dict, model: str = None, strategy_id: 
 
     Returns: dict con {veto_recommended, risk_score, concerns, reasoning} o None si error.
     """
-    audit_model = model or 'deepseek-r1:14b'
+    audit_model = model or Config.get_llm_model('pretrade_strict')
     try:
         # GPU-aware
         try:

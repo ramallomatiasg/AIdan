@@ -25,10 +25,11 @@ from src.common.config import Config
 
 logger = logging.getLogger("analyzer")
 
-PLANNING_TIMEOUT = 30
+PLANNING_TIMEOUT = 60  # v3.25.0: subido de 30s a 60s para permitir deepseek-r1 reasoning
 GROQ_TIMEOUT = 15
 OLLAMA_URL = Config.OLLAMA_URL or "http://localhost:11434"
-GEMMA_MODEL = Config.GEMMA_MODEL or "gemma4"
+# v3.25.0 — modelo dedicado para pre-planner (razonamiento estrategico)
+GEMMA_MODEL = Config.get_llm_model('pre_planner')
 
 PLANNING_PROMPT = """Eres un planificador de trading EUR/USD en timeframe M5.
 Manana hay este evento economico de alto impacto:
@@ -224,11 +225,12 @@ def _ask_gemma(prompt):
                 'prompt': prompt,
                 'stream': False,
                 'format': 'json',
-                'keep_alive': '2m',
+                'keep_alive': '5m',  # v3.25.0: deepseek-r1:7b en pre-planner
                 'options': {
                     'temperature': 0.3,
                     'top_p': 0.9,
-                    'num_predict': 300,
+                    'num_predict': 400,
+                    'num_ctx': 2048,  # context limitado para deepseek-r1
                 }
             },
             timeout=PLANNING_TIMEOUT
@@ -238,7 +240,20 @@ def _ask_gemma(prompt):
             return None
 
         result_text = response.json().get('response', '')
-        result = json.loads(result_text)
+        # v3.25.0 — strip DeepSeek-R1 <think> tags
+        if '<think>' in result_text:
+            after = result_text.split('</think>')
+            if len(after) > 1:
+                result_text = after[-1].strip()
+        try:
+            result = json.loads(result_text)
+        except json.JSONDecodeError:
+            import re
+            match = re.search(r'\{[\s\S]*\}', result_text)
+            if match:
+                result = json.loads(match.group())
+            else:
+                raise
         return _parse_plan_response(result)
 
     except requests.exceptions.Timeout:

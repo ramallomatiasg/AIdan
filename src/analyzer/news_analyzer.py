@@ -223,9 +223,11 @@ class NewsAnalyzer:
             except Exception:
                 pass
 
+            # v3.25.0 — usar modelo dedicado para pre-filter (rapido binary YES/NO)
+            _prefilter_model = Config.get_llm_model('news_prefilter')
             resp = requests.post(f'{Config.OLLAMA_URL}/api/generate',
                 json={
-                    'model': Config.GEMMA_MODEL or 'gemma4',
+                    'model': _prefilter_model,
                     'prompt': f'Can this news move EUR/USD forex pair? Answer ONLY "YES" or "NO".\n"{title}"',
                     'stream': False,
                     'keep_alive': '2m',
@@ -750,7 +752,8 @@ REGLAS OBLIGATORIAS:
             from src.common.config import Config
 
             prompt = self._build_analysis_prompt(title, summary)
-            model = Config.GEMMA_MODEL or 'gemma4'
+            # v3.25.0 — modelo dedicado para news analysis (Ollama fallback)
+            model = Config.get_llm_model('news_analysis_ollama')
             self.logger.info(f"Analizando noticia #{news_id} con Ollama/{model}...")
 
             # GPU-aware: si GPU ocupada, retorna None (caller hace fallback a Groq)

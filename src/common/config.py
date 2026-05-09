@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.24.0"
+APP_VERSION = "3.25.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -47,6 +47,32 @@ class Config:
     # same filter quality (neither adds significant signal). See bench_audit_*.csv.
     GEMMA_MODEL = os.getenv("GEMMA_MODEL", "qwen2.5:7b")
     OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+    # v3.25.0 — LLM_MODELS centralized: modelo apropiado por tarea.
+    # Cada modulo lee Config.LLM_MODELS['task_name'] en lugar de Config.GEMMA_MODEL.
+    # Backward compat: si LLM_MODELS_<TASK> env var setteada, override.
+    # Si modelo no existe en Ollama -> graceful fallback a GEMMA_MODEL.
+    LLM_MODELS = {
+        # News pre-filter: tarea binaria YES/NO.
+        # Probamos qwen3:1.7b pero su "thinking mode" rompe responses cortas
+        # (devuelve vacio con num_predict bajo). qwen2.5:7b estable y rapido (~2s warm).
+        'news_prefilter': os.getenv("LLM_MODEL_NEWS_PREFILTER", "qwen2.5:7b"),
+        # Signal auditor: JSON breve, tarea de validacion. Modelo medio.
+        'signal_audit': os.getenv("LLM_MODEL_SIGNAL_AUDIT", "qwen2.5:7b"),
+        # Pre-planner: estrategia diaria, decision compleja. Razonador.
+        'pre_planner': os.getenv("LLM_MODEL_PRE_PLANNER", "deepseek-r1:7b"),
+        # Post-trade analyzer: feedback loop critico. Razonador para sl_tp_advice.
+        'post_trade': os.getenv("LLM_MODEL_POST_TRADE", "qwen2.5:7b"),
+        # Pretrade audit strict: cuando se hookee, razonador maximo. Offline.
+        'pretrade_strict': os.getenv("LLM_MODEL_PRETRADE_STRICT", "deepseek-r1:14b"),
+        # News analysis (Ollama fallback): si Groq cae, modelo medio capaz.
+        'news_analysis_ollama': os.getenv("LLM_MODEL_NEWS_OLLAMA", "qwen2.5:7b"),
+    }
+
+    @staticmethod
+    def get_llm_model(task_name):
+        """Get model name for a task with graceful fallback to GEMMA_MODEL."""
+        return Config.LLM_MODELS.get(task_name, Config.GEMMA_MODEL)
     GOOGLE_SHEETS_WEBHOOK = os.getenv("GOOGLE_SHEETS_WEBHOOK", "https://script.google.com/macros/s/AKfycbzZqRaz_37eSjky1I4F1-2bnQQtRPC15_wDGA5ohxUvzTPq38ez74mbc7oYoNb4NvfyFw/exec")
 
     # MT5 Broker Integration

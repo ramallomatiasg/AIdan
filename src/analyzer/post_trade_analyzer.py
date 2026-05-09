@@ -20,13 +20,9 @@ logger = logging.getLogger("analyzer")
 ANALYSIS_TIMEOUT = 60  # v3.22.0: 60s para permitir modelos mas grandes via env override
 OLLAMA_URL = Config.OLLAMA_URL or "http://localhost:11434"
 GEMMA_MODEL = Config.GEMMA_MODEL or "gemma4"
-# v3.22.0 — modelo dedicado para post-trade.
-# Default GEMMA_MODEL (qwen2.5:7b) por latencia razonable.
-# Para usar deepseek-r1:14b: set POST_TRADE_MODEL=deepseek-r1:14b en .env.
-# CAVEAT: deepseek-r1:14b causa OOM cuando AIdan corre en paralelo (qwen 7b + dr1 14b
-# = 14GB VRAM, no caben ambos). Usar solo offline (rebuild AIdan stopped).
-import os
-POST_TRADE_MODEL = os.getenv('POST_TRADE_MODEL', '') or GEMMA_MODEL
+# v3.25.0 — modelo dedicado desde Config.LLM_MODELS['post_trade']
+# Override: env LLM_MODEL_POST_TRADE
+POST_TRADE_MODEL = Config.get_llm_model('post_trade')
 
 POST_TRADE_PROMPT = """Eres un analista post-trade para EUR/USD en timeframe M5.
 Analiza este trade completado y genera insights accionables.
