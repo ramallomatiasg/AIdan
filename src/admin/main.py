@@ -1124,6 +1124,111 @@ async def consensus_state():
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
+
+@app.get("/wr-heatmap")
+async def wr_heatmap():
+    """v3.29.0 — Heatmap WR por hour_utc x day_of_week.
+    Returns: {matrix: {dayName: {hour: {wins, total, wr}}}, total}"""
+    try:
+        from src.common.db import DB_PATH
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT day_of_week, hour_utc, result, COUNT(*)
+            FROM trade_archive
+            WHERE result IN ('win', 'loss')
+              AND day_of_week IS NOT NULL AND hour_utc IS NOT NULL
+            GROUP BY day_of_week, hour_utc, result
+        """)
+        rows = cur.fetchall()
+        conn.close()
+        # day_of_week: Python weekday() 0=Mon,1=Tue,...,4=Fri,5=Sat,6=Sun
+        # Forex: solo Lun-Vie (0-4)
+        day_names = {0: 'Lun', 1: 'Mar', 2: 'Mié', 3: 'Jue', 4: 'Vie'}
+        matrix = {}
+        total = 0
+        for dow_str, hour, result, count in rows:
+            try:
+                dow = int(dow_str)
+                hour = int(hour)
+            except (ValueError, TypeError):
+                continue
+            if dow not in day_names:
+                continue
+            day = day_names[dow]
+            if day not in matrix:
+                matrix[day] = {}
+            if hour not in matrix[day]:
+                matrix[day][hour] = {'wins': 0, 'total': 0}
+            matrix[day][hour]['total'] += count
+            if result == 'win':
+                matrix[day][hour]['wins'] += count
+            total += count
+        # Calc wr per cell
+        for day, hours in matrix.items():
+            for h, cell in hours.items():
+                cell['wr'] = round((cell['wins'] / cell['total'] * 100) if cell['total'] else 0, 1)
+        return JSONResponse({'status': 'success', 'data': {'matrix': matrix, 'total': total}})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.get("/filter-contribution")
+async def filter_contribution():
+    """v3.29.0 — Análisis: cada filtro, cuántos trades hubiera bloqueado y PnL impact.
+
+    Para cada filtro activo en el sistema, simulamos sobre trade_archive:
+    - ¿cuántos trades cumplen el criterio del filtro?
+    - ¿cuál es el PnL acumulado de ESOS trades?
+    - 'saved_pnl' positivo = filtro bloqueó perdedores (bueno)
+    - 'saved_pnl' negativo = filtro hubiera bloqueado ganadores (malo)
+    """
+    try:
+        from src.common.db import DB_PATH
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT direction, confidence, impact_score, htf_bias, market_trend,
+                   avg_range_pips, mt5_pnl, sl_pips, tp_pips, trigger_type
+            FROM trade_archive
+            WHERE result IN ('win', 'loss')
+              AND mt5_pnl IS NOT NULL
+        """)
+        rows = cur.fetchall()
+        conn.close()
+        total = len(rows)
+
+        def filter_stats(name, predicate):
+            blocked = [r for r in rows if predicate(r)]
+            n = len(blocked)
+            saved = -sum((r[6] or 0) for r in blocked)  # positivo si bloqueó perdedores
+            return {'name': name, 'would_block': n, 'saved_pnl': round(saved, 2)}
+
+        filters = [
+            filter_stats('ATR floor (<2.5p)', lambda r: (r[5] or 99) < 2.5),
+            filter_stats('ATR ceiling (>6p)', lambda r: (r[5] or 0) > 6.0),
+            filter_stats('Min conf (<60)', lambda r: (r[1] or 100) < 60),
+            filter_stats('Conf ceiling (>=80)', lambda r: (r[1] or 0) >= 80),
+            filter_stats('Counter-HTF (CALL+bear / PUT+bull)',
+                         lambda r: ((r[0] == 'CALL' and (r[3] or '') == 'bearish') or
+                                    (r[0] == 'PUT' and (r[3] or '') == 'bullish'))),
+            filter_stats('Counter-both (HTF+M5 ambos contra)',
+                         lambda r: (((r[0] == 'CALL' and (r[3] or '') == 'bearish' and (r[4] or '') == 'bearish') or
+                                    (r[0] == 'PUT' and (r[3] or '') == 'bullish' and (r[4] or '') == 'bullish')))),
+            filter_stats('SIM A (fully aligned)',
+                         lambda r: ((r[0] == 'CALL' and (r[3] or '') == 'bullish' and (r[4] or '') == 'bullish') or
+                                    (r[0] == 'PUT' and (r[3] or '') == 'bearish' and (r[4] or '') == 'bearish'))),
+            filter_stats('Impact score (<55)', lambda r: (r[2] or 100) < 55),
+            filter_stats('pre_planned trigger', lambda r: (r[9] or '') == 'pre_planned'),
+        ]
+        # Sort by absolute saved_pnl
+        filters.sort(key=lambda f: abs(f['saved_pnl']), reverse=True)
+        return JSONResponse({'status': 'success', 'data': {'filters': filters, 'total_archive': total}})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
 _candles_cache = {"data": [], "last_fetch": 0}
 
 def _convert_candles_to_lw(candles):

@@ -427,6 +427,67 @@
         .result-btn.recorded.active-loss { border-color: var(--accent-red); color: var(--accent-red); background: var(--accent-red-dim); opacity: 1; }
         .result-btn.recorded.active-skip { border-color: var(--text-muted); color: var(--text-secondary); opacity: 1; }
 
+        /* v3.29.0: nuevas secciones del dashboard */
+        .equity-section, .heatmap-section, .slippage-section, .filters-section {
+            grid-column: 1;
+        }
+        /* Heatmap cells */
+        .wr-heatmap { display: grid; gap: 2px; padding: 8px 0; }
+        .wr-heatmap-row { display: grid; grid-template-columns: 50px repeat(24, 1fr); gap: 2px; align-items: center; }
+        .wr-heatmap-row .day-label { font-weight: 700; color: var(--text-muted); padding-right: 4px; font-size: 11px; }
+        .wr-heatmap-cell {
+            aspect-ratio: 1; min-height: 22px; border-radius: 3px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 9px; font-weight: 600; color: rgba(255,255,255,0.85);
+            position: relative; cursor: help;
+        }
+        .wr-heatmap-cell.empty { background: var(--bg-input); color: var(--text-muted); opacity: 0.3; }
+        .wr-heatmap-cell.wr-low { background: linear-gradient(135deg, #dc2626, #991b1b); }
+        .wr-heatmap-cell.wr-mid-low { background: linear-gradient(135deg, #f97316, #ea580c); }
+        .wr-heatmap-cell.wr-mid { background: linear-gradient(135deg, #eab308, #ca8a04); color: #000; }
+        .wr-heatmap-cell.wr-mid-high { background: linear-gradient(135deg, #84cc16, #65a30d); color: #000; }
+        .wr-heatmap-cell.wr-high { background: linear-gradient(135deg, #22c55e, #16a34a); }
+        .wr-heatmap-header { display: grid; grid-template-columns: 50px repeat(24, 1fr); gap: 2px; padding: 0 0 4px 0; font-size: 9px; color: var(--text-muted); text-align: center; }
+        .wr-heatmap-header > span { padding: 2px 0; }
+        /* Filter contribution bars */
+        .filter-bar-row {
+            display: grid; grid-template-columns: 130px 1fr 80px 80px;
+            gap: 8px; align-items: center; padding: 6px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .filter-bar-row:last-child { border-bottom: none; }
+        .filter-bar-row .filter-name { font-weight: 600; color: var(--text-primary); }
+        .filter-bar-progress {
+            background: var(--bg-input); height: 14px; border-radius: 4px;
+            overflow: hidden; position: relative;
+        }
+        .filter-bar-progress > .fill {
+            height: 100%; transition: width 0.5s ease;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));
+        }
+        .filter-bar-progress > .label {
+            position: absolute; top: 0; left: 8px; line-height: 14px;
+            font-size: 10px; font-weight: 700; color: #fff; text-shadow: 0 0 4px rgba(0,0,0,0.6);
+        }
+        .filter-impact {
+            font-variant-numeric: tabular-nums; font-weight: 700; text-align: right;
+        }
+        .filter-impact.positive { color: var(--accent-green); }
+        .filter-impact.negative { color: var(--accent-red); }
+        /* Slippage stats grid */
+        .slippage-stats-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+        }
+        .slippage-stat-card {
+            background: var(--bg-input); padding: 10px; border-radius: 6px; text-align: center;
+        }
+        .slippage-stat-card .label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .slippage-stat-card .value { font-size: 18px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+        @media (max-width: 700px) {
+            .slippage-stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .filter-bar-row { grid-template-columns: 100px 1fr 60px 60px; }
+        }
+
         /* ===== CALENDAR ===== */
         .calendar-section { grid-column: 1; grid-row: 3; }
         .calendar-container {
@@ -768,6 +829,88 @@
             <div class="empty-state">
                 <div class="icon">&#x1F4F0;</div>
                 <div class="text">Cargando noticias...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- v3.29.0: EQUITY CURVE chart -->
+    <div class="card equity-section" style="grid-column:1;grid-row:4;">
+        <div class="card-header">
+            <span class="card-title">
+                <span class="icon">&#x1F4C8;</span>
+                Equity Curve
+            </span>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span class="card-badge badge-count" id="equityFinalBalance">$0</span>
+                <span class="card-badge" id="equityPnLBadge" style="background:var(--bg-input);color:var(--text-muted);">+$0.00</span>
+                <select id="equityDays" onchange="loadEquityCurve()" style="background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text-primary);font-size:12px;">
+                    <option value="7">7 días</option>
+                    <option value="14">14 días</option>
+                    <option value="30" selected>30 días</option>
+                    <option value="90">90 días</option>
+                </select>
+            </div>
+        </div>
+        <div id="equityChartContainer" style="height:280px;width:100%;padding:8px;"></div>
+    </div>
+
+    <!-- v3.29.0: WR HEATMAP por hora -->
+    <div class="card heatmap-section" style="grid-column:1;grid-row:5;">
+        <div class="card-header">
+            <span class="card-title">
+                <span class="icon">&#x1F525;</span>
+                Heatmap WR por Hora del día (UTC)
+            </span>
+            <span class="card-badge badge-count" id="heatmapCount">0 trades</span>
+        </div>
+        <div class="card-body">
+            <div id="heatmapContainer" style="overflow-x:auto;font-size:11px;">
+                <div class="empty-state"><div class="icon">&#x1F525;</div><div class="text">Cargando heatmap...</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- v3.29.0: SLIPPAGE stats -->
+    <div class="card slippage-section" style="grid-column:1;grid-row:6;">
+        <div class="card-header">
+            <span class="card-title">
+                <span class="icon">&#x1F4CF;</span>
+                Slippage tracker
+            </span>
+            <span class="card-badge badge-count" id="slippageCount">0 fills</span>
+        </div>
+        <div class="card-body" style="padding:12px;font-size:12px;">
+            <div id="slippageStatsContainer">
+                <div class="empty-state" style="padding:20px;"><div class="text">Sin datos de slippage aún (se acumulan con trades nuevos).</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- v3.29.0: TRADE DETAIL MODAL (hidden by default) -->
+    <div id="tradeDetailModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;width:90%;max-width:680px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 80px rgba(0,0,0,0.5);">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);">
+                <span style="font-weight:700;font-size:16px;color:var(--text-primary);" id="tradeDetailTitle">Trade detail</span>
+                <button onclick="closeTradeDetail()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:20px;padding:0 4px;">&times;</button>
+            </div>
+            <div id="tradeDetailBody" style="padding:18px;font-size:13px;color:var(--text-secondary);">
+                <div class="empty-state"><div class="text">Cargando...</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- v3.29.0: FILTER CONTRIBUTION -->
+    <div class="card filters-section" style="grid-column:1;grid-row:7;">
+        <div class="card-header">
+            <span class="card-title">
+                <span class="icon">&#x1F6AA;</span>
+                Contribución de filtros
+            </span>
+            <span class="card-badge badge-count" id="filtersBlockedCount">0 bloqueos</span>
+        </div>
+        <div class="card-body">
+            <div id="filterContributionContainer" style="padding:12px;font-size:12px;">
+                <div class="empty-state"><div class="icon">&#x1F6AA;</div><div class="text">Cargando análisis de filtros...</div></div>
             </div>
         </div>
     </div>
@@ -1999,6 +2142,9 @@
             lwChartInstances.forEach(c => { try { c.remove(); } catch(e) {} });
             lwChartInstances = [];
 
+            // v3.29.0: cache para Trade Detail modal
+            _allStrategiesCache = filtered;
+
             grid.innerHTML = filtered.map(s => {
                 const dirColor = s.direction === 'CALL' ? 'var(--accent-green)' : 'var(--accent-red)';
                 const dirBg = s.direction === 'CALL' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)';
@@ -2048,7 +2194,7 @@
                     mt5Badge = '<span style="background:rgba(234,179,8,0.15);color:#eab308;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;">MT5 Error</span>';
                 }
 
-                return `<div class="card" style="opacity:${opacity};border-left:3px solid ${dirColor};min-width:700px;">
+                return `<div class="card strategy-card" data-sid="${s.id}" onclick="_cardClick(event, ${s.id})" style="opacity:${opacity};border-left:3px solid ${dirColor};min-width:700px;cursor:pointer;" title="Click para ver detalle">
                     <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px 6px;">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <span style="background:${dirBg};color:${dirColor};padding:3px 10px;border-radius:6px;font-weight:800;font-size:16px;">${s.direction}</span>
@@ -2361,6 +2507,11 @@
         loadPerformance();
         loadAutoStrategies();
         loadStrategyPerformance();
+        // v3.29.0: nuevas mejoras del dashboard
+        loadEquityCurve();
+        loadHeatmap();
+        loadSlippageStats();
+        loadFilterContribution();
 
         if ('Notification' in window && Notification.permission === 'default') {
             Notification.requestPermission();
@@ -2379,6 +2530,301 @@
         }, 30000);
         // Refresh news every 2 minutes
         setInterval(loadNewsTicker, 120000);
+        // v3.29.0: refresh dashboards cada 5 min (no son hot)
+        setInterval(() => {
+            loadEquityCurve();
+            loadHeatmap();
+            loadSlippageStats();
+            loadFilterContribution();
+        }, 300000);
+    }
+
+    // ===== v3.29.0: EQUITY CURVE =====
+    let equityChart = null;
+    let equitySeries = null;
+    async function loadEquityCurve() {
+        try {
+            const days = parseInt(document.getElementById('equityDays')?.value || '30');
+            const res = await fetch(`${API_BASE}/equity-curve?days=${days}`);
+            const data = await res.json();
+            if (data.status !== 'success') return;
+            const points = data.data?.points || [];
+            const finalBalance = data.data?.final_balance || 1000;
+            const totalPnL = data.data?.total_pnl || 0;
+            // Update header badges
+            const balEl = document.getElementById('equityFinalBalance');
+            if (balEl) balEl.textContent = '$' + finalBalance.toFixed(2);
+            const pnlEl = document.getElementById('equityPnLBadge');
+            if (pnlEl) {
+                pnlEl.textContent = (totalPnL >= 0 ? '+$' : '-$') + Math.abs(totalPnL).toFixed(2);
+                pnlEl.style.background = totalPnL >= 0 ? 'var(--accent-green-dim)' : 'var(--accent-red-dim)';
+                pnlEl.style.color = totalPnL >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+            }
+            const container = document.getElementById('equityChartContainer');
+            if (!container || typeof LightweightCharts === 'undefined') return;
+            // Init chart si no existe
+            if (!equityChart) {
+                equityChart = LightweightCharts.createChart(container, {
+                    layout: { background: { color: 'transparent' }, textColor: '#a0a0a0' },
+                    grid: {
+                        vertLines: { color: 'rgba(80,80,80,0.15)' },
+                        horzLines: { color: 'rgba(80,80,80,0.15)' },
+                    },
+                    rightPriceScale: { borderColor: 'rgba(80,80,80,0.4)' },
+                    timeScale: { borderColor: 'rgba(80,80,80,0.4)', timeVisible: true, secondsVisible: false },
+                    crosshair: { mode: 1 },
+                    height: 280,
+                });
+                equitySeries = equityChart.addAreaSeries({
+                    lineColor: '#22c55e',
+                    topColor: 'rgba(34,197,94,0.4)',
+                    bottomColor: 'rgba(34,197,94,0.0)',
+                    lineWidth: 2,
+                });
+            }
+            // Convert points (timestamp ISO -> unix sec, balance value)
+            const lwData = [];
+            const seen = new Set();
+            for (const p of points) {
+                let ts;
+                try {
+                    ts = Math.floor(new Date(p.timestamp).getTime() / 1000);
+                } catch { continue; }
+                if (!ts || isNaN(ts)) continue;
+                // Lightweight Charts requires increasing unique time
+                while (seen.has(ts)) ts += 1;
+                seen.add(ts);
+                lwData.push({ time: ts, value: p.balance });
+            }
+            // Add baseline point at start if data
+            if (lwData.length > 0) {
+                const firstTs = lwData[0].time - 3600;  // 1h before first trade
+                lwData.unshift({ time: firstTs, value: data.data.baseline || 1000 });
+            }
+            equitySeries.setData(lwData);
+            equityChart.timeScale().fitContent();
+            // Color line: red si total negativo
+            equitySeries.applyOptions({
+                lineColor: totalPnL >= 0 ? '#22c55e' : '#ef4444',
+                topColor: totalPnL >= 0 ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)',
+                bottomColor: totalPnL >= 0 ? 'rgba(34,197,94,0.0)' : 'rgba(239,68,68,0.0)',
+            });
+        } catch (e) { console.error('loadEquityCurve:', e); }
+    }
+
+    // ===== v3.29.0: WR HEATMAP =====
+    async function loadHeatmap() {
+        try {
+            const res = await fetch(`${API_BASE}/wr-heatmap`);
+            const data = await res.json();
+            if (data.status !== 'success') return;
+            const matrix = data.data?.matrix || {};  // {dayName: {hour: {wins, total, wr}}}
+            const totalTrades = data.data?.total || 0;
+            const countEl = document.getElementById('heatmapCount');
+            if (countEl) countEl.textContent = `${totalTrades} trades`;
+            const container = document.getElementById('heatmapContainer');
+            if (!container) return;
+            const days = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'];  // FX no opera fines de semana
+            // Build header con horas UTC
+            let html = '<div class="wr-heatmap">';
+            html += '<div class="wr-heatmap-header"><span></span>';
+            for (let h = 0; h < 24; h++) html += `<span>${h.toString().padStart(2,'0')}</span>`;
+            html += '</div>';
+            for (const day of days) {
+                html += `<div class="wr-heatmap-row"><span class="day-label">${day}</span>`;
+                for (let h = 0; h < 24; h++) {
+                    const cell = matrix[day]?.[h];
+                    if (!cell || cell.total === 0) {
+                        html += '<div class="wr-heatmap-cell empty"></div>';
+                    } else {
+                        const wr = cell.wr;
+                        let cls = 'wr-low';
+                        if (wr >= 60) cls = 'wr-high';
+                        else if (wr >= 50) cls = 'wr-mid-high';
+                        else if (wr >= 40) cls = 'wr-mid';
+                        else if (wr >= 30) cls = 'wr-mid-low';
+                        const tt = `${day} ${h}h UTC: ${cell.wins}/${cell.total} (${wr.toFixed(0)}% WR)`;
+                        html += `<div class="wr-heatmap-cell ${cls}" title="${tt}">${cell.total}</div>`;
+                    }
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        } catch (e) { console.error('loadHeatmap:', e); }
+    }
+
+    // ===== v3.29.0: SLIPPAGE STATS =====
+    async function loadSlippageStats() {
+        try {
+            const res = await fetch(`${API_BASE}/slippage-stats?days=30`);
+            const data = await res.json();
+            if (data.status !== 'success') return;
+            const s = data.data || {};
+            const count = s.count || 0;
+            const countEl = document.getElementById('slippageCount');
+            if (countEl) countEl.textContent = `${count} fills`;
+            const container = document.getElementById('slippageStatsContainer');
+            if (!container) return;
+            if (count === 0) {
+                container.innerHTML = '<div class="empty-state" style="padding:20px;"><div class="text">Sin datos de slippage aún (se acumulan con trades nuevos a partir de v3.28.0).</div></div>';
+                return;
+            }
+            const slip = s.avg_slippage_pips || 0;
+            const slipColor = slip > 0.5 ? 'var(--accent-red)' : slip > 0 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+            const spread = s.avg_spread_pips || 0;
+            const spreadColor = spread > 2 ? 'var(--accent-red)' : spread > 1.5 ? 'var(--accent-yellow)' : 'var(--accent-green)';
+            container.innerHTML = `<div class="slippage-stats-grid">
+                <div class="slippage-stat-card">
+                    <div class="label">Total fills</div>
+                    <div class="value">${count}</div>
+                </div>
+                <div class="slippage-stat-card">
+                    <div class="label">Avg slippage</div>
+                    <div class="value" style="color:${slipColor};">${slip > 0 ? '+' : ''}${slip.toFixed(2)}p</div>
+                </div>
+                <div class="slippage-stat-card">
+                    <div class="label">Max slippage</div>
+                    <div class="value" style="color:var(--text-muted);">${(s.max_slippage_pips || 0).toFixed(2)}p</div>
+                </div>
+                <div class="slippage-stat-card">
+                    <div class="label">Avg spread</div>
+                    <div class="value" style="color:${spreadColor};">${spread.toFixed(2)}p</div>
+                </div>
+            </div>`;
+        } catch (e) { console.error('loadSlippageStats:', e); }
+    }
+
+    // ===== v3.29.0: TRADE DETAIL MODAL =====
+    let _allStrategiesCache = [];
+
+    // Click handler para card: abre modal SI no fue click en button/input
+    function _cardClick(e, sid) {
+        if (e.target.closest('button, input, select, a')) return;
+        showTradeDetail(sid);
+    }
+
+    function showTradeDetail(strategyId) {
+        const modal = document.getElementById('tradeDetailModal');
+        const title = document.getElementById('tradeDetailTitle');
+        const body = document.getElementById('tradeDetailBody');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        // Find in cache
+        const s = _allStrategiesCache.find(x => x.id === strategyId);
+        if (!s) {
+            body.innerHTML = '<div class="empty-state"><div class="text">Strategy no encontrada en cache.</div></div>';
+            return;
+        }
+        title.textContent = `#${s.id} ${s.direction} - ${s.trigger_type}`;
+        // Parse entry_context if string
+        let ctx = s.entry_context;
+        if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch { ctx = null; } }
+        const fmt = (v, d=5) => v == null ? '-' : (typeof v === 'number' ? v.toFixed(d) : v);
+        const fmtP = v => v == null ? '-' : (v >= 0 ? '+' : '') + Number(v).toFixed(2);
+        const result = s.status === 'auto_win' ? 'WIN' : s.status === 'auto_loss' ? 'LOSS' : (s.result ? s.result.toUpperCase() : 'PENDING');
+        const resultColor = result === 'WIN' ? 'var(--accent-green)' : result === 'LOSS' ? 'var(--accent-red)' : 'var(--text-muted)';
+        let html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">`;
+        html += `<div><strong>Result:</strong> <span style="color:${resultColor};font-weight:700;">${result}</span></div>`;
+        html += `<div><strong>PnL:</strong> $${fmtP(s.mt5_pnl)}</div>`;
+        html += `<div><strong>Direction:</strong> ${s.direction}</div>`;
+        html += `<div><strong>Confidence:</strong> ${s.confidence?.toFixed(1) || '-'}%</div>`;
+        html += `<div><strong>Trigger:</strong> <code>${s.trigger_type}</code></div>`;
+        html += `<div><strong>Profile:</strong> ${s.profile_name || '-'}</div>`;
+        html += `</div>`;
+        html += `<hr style="margin:12px 0;border:none;border-top:1px solid var(--border);">`;
+        html += `<h4 style="margin:0 0 6px 0;font-size:13px;">Levels</h4>`;
+        html += `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-variant-numeric:tabular-nums;">`;
+        html += `<div><strong>Entry:</strong><br>${fmt(s.entry_price)}</div>`;
+        html += `<div><strong>SL:</strong><br>${fmt(s.stop_loss)}</div>`;
+        html += `<div><strong>TP:</strong><br>${fmt(s.take_profit)}</div>`;
+        html += `</div>`;
+        if (s.mt5_close_price) {
+            html += `<div style="margin-top:6px;"><strong>Exit price:</strong> ${fmt(s.mt5_close_price)}</div>`;
+        }
+        html += `<hr style="margin:12px 0;border:none;border-top:1px solid var(--border);">`;
+        html += `<h4 style="margin:0 0 6px 0;font-size:13px;">Times</h4>`;
+        html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-variant-numeric:tabular-nums;">`;
+        html += `<div><strong>Created:</strong><br>${s.created_at || '-'}</div>`;
+        html += `<div><strong>Expires:</strong><br>${s.expires_at || '-'}</div>`;
+        html += `</div>`;
+        if (ctx && Object.keys(ctx).length) {
+            html += `<hr style="margin:12px 0;border:none;border-top:1px solid var(--border);">`;
+            html += `<h4 style="margin:0 0 6px 0;font-size:13px;">Market context (entrada)</h4>`;
+            html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">`;
+            for (const [k, v] of Object.entries(ctx)) {
+                html += `<div><strong>${k}:</strong> ${v}</div>`;
+            }
+            html += `</div>`;
+        }
+        if (s.news_title) {
+            html += `<hr style="margin:12px 0;border:none;border-top:1px solid var(--border);">`;
+            html += `<h4 style="margin:0 0 6px 0;font-size:13px;">News / Reason</h4>`;
+            html += `<div style="background:var(--bg-input);padding:8px;border-radius:6px;line-height:1.4;">${escapeHtml(s.news_title)}</div>`;
+        }
+        if (s.mt5_ticket) {
+            html += `<hr style="margin:12px 0;border:none;border-top:1px solid var(--border);">`;
+            html += `<div style="font-size:11px;color:var(--text-muted);">MT5 ticket: ${s.mt5_ticket} | Lot: ${s.mt5_lot || '-'}</div>`;
+        }
+        body.innerHTML = html;
+    }
+
+    function closeTradeDetail() {
+        const modal = document.getElementById('tradeDetailModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    // Close modal on background click
+    document.addEventListener('click', function(e) {
+        const modal = document.getElementById('tradeDetailModal');
+        if (e.target === modal) closeTradeDetail();
+    });
+    // Close on Esc
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeTradeDetail();
+    });
+
+    // ===== v3.29.0: FILTER CONTRIBUTION =====
+    async function loadFilterContribution() {
+        try {
+            const res = await fetch(`${API_BASE}/filter-contribution`);
+            const data = await res.json();
+            if (data.status !== 'success') return;
+            const filters = data.data?.filters || [];
+            const container = document.getElementById('filterContributionContainer');
+            const countEl = document.getElementById('filtersBlockedCount');
+            if (!container) return;
+            const totalBlocked = filters.reduce((acc, f) => acc + (f.would_block || 0), 0);
+            if (countEl) countEl.textContent = `${totalBlocked} bloqueos`;
+            if (filters.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="text">Sin data suficiente para análisis de filtros.</div></div>';
+                return;
+            }
+            const maxBlocks = Math.max(...filters.map(f => f.would_block || 0), 1);
+            let html = `<div style="margin-bottom:10px;color:var(--text-muted);">
+                Análisis sobre ${data.data?.total_archive || 0} trades históricos. <strong>"Saved PnL"</strong> es positivo si el filtro bloqueó trades perdedores.
+            </div>`;
+            html += '<div class="filter-bar-row" style="font-weight:700;color:var(--text-muted);font-size:11px;border-bottom:2px solid var(--border);">';
+            html += '<div>Filtro</div><div>Trades bloqueados</div><div style="text-align:right;">Saved PnL</div><div style="text-align:right;">Saved %</div></div>';
+            for (const f of filters) {
+                const blocks = f.would_block || 0;
+                const savedPnl = f.saved_pnl || 0;
+                const pct = (blocks / Math.max(data.data?.total_archive || 1, 1) * 100).toFixed(0);
+                const barWidth = (blocks / maxBlocks * 100).toFixed(0);
+                const impactClass = savedPnl > 0 ? 'positive' : (savedPnl < 0 ? 'negative' : '');
+                const sign = savedPnl > 0 ? '+' : '';
+                html += `<div class="filter-bar-row">
+                    <div class="filter-name">${f.name}</div>
+                    <div class="filter-bar-progress">
+                        <div class="fill" style="width:${barWidth}%"></div>
+                        <div class="label">${blocks}</div>
+                    </div>
+                    <div class="filter-impact ${impactClass}">${sign}$${Math.abs(savedPnl).toFixed(2)}</div>
+                    <div class="filter-impact" style="color:var(--text-muted);">${pct}%</div>
+                </div>`;
+            }
+            container.innerHTML = html;
+        } catch (e) { console.error('loadFilterContribution:', e); }
     }
 
     // ── MT5 Functions ──
