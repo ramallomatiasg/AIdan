@@ -232,6 +232,26 @@ async def ai_status():
     return JSONResponse(result)
 
 
+@app.get("/telegram/test")
+async def telegram_test():
+    """v3.23.0 — Test conexion Telegram bot. GET para verificar setup."""
+    try:
+        from src.common.telegram_alerts import test_connection
+        return JSONResponse(test_connection())
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/telegram/status")
+async def telegram_status():
+    """v3.23.0 — Status del modulo telegram (configurado o no)."""
+    try:
+        from src.common.telegram_alerts import is_configured
+        return JSONResponse({"configured": is_configured()})
+    except Exception as e:
+        return JSONResponse({"configured": False, "error": str(e)})
+
+
 @app.get("/gpu-status")
 async def gpu_status():
     """v3.21.0 — GPU utilization + LLM pause flag for gaming-aware mode."""

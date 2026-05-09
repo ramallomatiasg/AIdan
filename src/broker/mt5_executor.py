@@ -609,6 +609,30 @@ class MT5Executor:
             update_mt5_close(sid, pnl, close_price)
             self.logger.info(f"MT5 position closed: #{ticket} Strategy #{sid} P&L=${pnl:.2f} @ {close_price:.5f}")
 
+            # v3.23.0 — Telegram alert (graceful: skip si no configurado)
+            try:
+                from src.common.telegram_alerts import send_trade_result, is_configured
+                if is_configured():
+                    # Get current balance
+                    _bal = None
+                    try:
+                        info = self._mt5.account_info()
+                        _bal = info.balance if info else None
+                    except Exception:
+                        pass
+                    # Infer trigger_type
+                    _tt_alert = 'structure'
+                    if news_title:
+                        _nt_a = news_title.upper()
+                        if 'CALENDARIO' in _nt_a: _tt_alert = 'calendar'
+                        elif 'SMC' in _nt_a: _tt_alert = 'smc'
+                        elif 'NOTICIA' in _nt_a or 'NEWS' in _nt_a: _tt_alert = 'news'
+                        elif 'M15-STRUCT' in _nt_a or 'M15' in _nt_a: _tt_alert = 'm15_structure'
+                        elif 'H1-STRUCT' in _nt_a or 'H1' in _nt_a: _tt_alert = 'h1_structure'
+                    send_trade_result(sid, direction, _tt_alert, pnl, confidence or 0, balance=_bal)
+            except Exception as _te:
+                self.logger.debug(f"Telegram alert skip: {_te}")
+
             # Immediate evaluation: don't wait for expiry
             try:
                 from src.common.db import auto_evaluate_strategy
