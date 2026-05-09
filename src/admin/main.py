@@ -1055,6 +1055,75 @@ async def strategy_perf_by_track():
     """v3.19.0 - Stats segmentadas Track A (M5) vs Track B (M15) para comparativa dual-track."""
     return JSONResponse({"status": "success", "data": get_strategy_performance_by_track()})
 
+
+@app.get("/equity-curve")
+async def equity_curve(days: int = 30):
+    """v3.28.0 — Equity curve: balance over time computed from trade_archive.
+
+    Returns: {points: [{timestamp, balance, pnl_acum, trade_id}], baseline}
+    """
+    try:
+        from src.common.db import DB_PATH
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(f"""
+            SELECT strategy_id, mt5_pnl, archived_at
+            FROM trade_archive
+            WHERE archived_at >= datetime('now', '-{int(days)} days')
+              AND mt5_pnl IS NOT NULL
+            ORDER BY archived_at ASC
+        """)
+        rows = cur.fetchall()
+        conn.close()
+        baseline = 1000.0
+        points = []
+        running = 0.0
+        for sid, pnl, ts in rows:
+            running += float(pnl or 0)
+            points.append({
+                'timestamp': ts,
+                'balance': round(baseline + running, 2),
+                'pnl_acum': round(running, 2),
+                'trade_id': sid,
+            })
+        return JSONResponse({
+            'status': 'success',
+            'data': {
+                'points': points,
+                'baseline': baseline,
+                'final_balance': round(baseline + running, 2),
+                'total_pnl': round(running, 2),
+                'count': len(points),
+            }
+        })
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.get("/slippage-stats")
+async def slippage_stats(days: int = 7):
+    """v3.28.0 — Slippage tracking stats."""
+    try:
+        from src.common.slippage_tracker import get_slippage_stats
+        return JSONResponse({"status": "success", "data": get_slippage_stats(days=days)})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.get("/consensus-state")
+async def consensus_state():
+    """v3.28.0 — Recent consensus tracker state (debug)."""
+    try:
+        from src.common.consensus_tracker import get_recent_state
+        events = get_recent_state()
+        return JSONResponse({"status": "success", "data": [
+            {'ts': ts, 'track': track, 'direction': direction}
+            for ts, track, direction in events
+        ]})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
 _candles_cache = {"data": [], "last_fetch": 0}
 
 def _convert_candles_to_lw(candles):

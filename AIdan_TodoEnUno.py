@@ -846,6 +846,46 @@ class AIdan:
                                 send_startup(Config.VERSION, _bal)
                         except Exception as _se:
                             logger.debug(f"Telegram startup: {_se}")
+                        # v3.28.0 — Telegram bot bidireccional (commands)
+                        try:
+                            from src.common.telegram_bot import TelegramBot
+                            self._telegram_bot = TelegramBot(mt5_executor_provider=lambda: mt5_exec)
+                            if self._telegram_bot.start():
+                                logger.info("Telegram bidirectional bot started (use /help in chat)")
+                        except Exception as _tbe:
+                            logger.debug(f"Telegram bot start: {_tbe}")
+
+                        # v3.28.0 — Pre-warmup Ollama models (background thread, no bloquea)
+                        def _warmup_models():
+                            try:
+                                import requests as _r
+                                models_to_warm = list(set(Config.LLM_MODELS.values()))
+                                # Pre-warm en orden de prioridad (mas usados primero)
+                                priority = ['signal_audit', 'news_prefilter', 'news_analysis_ollama', 'post_trade', 'pre_planner']
+                                ordered = []
+                                seen = set()
+                                for task in priority:
+                                    m = Config.LLM_MODELS.get(task)
+                                    if m and m not in seen:
+                                        ordered.append(m)
+                                        seen.add(m)
+                                for m in models_to_warm:
+                                    if m not in seen and m != 'deepseek-r1:14b':  # skip 14b (no live use)
+                                        ordered.append(m)
+                                        seen.add(m)
+                                for m in ordered:
+                                    try:
+                                        logger.info(f"Pre-warming Ollama model: {m}")
+                                        _r.post(f"{Config.OLLAMA_URL}/api/generate",
+                                                json={'model': m, 'prompt': 'ok', 'stream': False,
+                                                      'keep_alive': '5m',
+                                                      'options': {'num_predict': 1, 'num_ctx': 512}},
+                                                timeout=60)
+                                    except Exception as _e:
+                                        logger.debug(f"Pre-warm {m}: {_e}")
+                            except Exception as _e:
+                                logger.debug(f"Pre-warmup error: {_e}")
+                        Thread(target=_warmup_models, daemon=True, name="OllamaWarmup").start()
                     else:
                         logger.warning("MT5 connection failed - paper mode only")
                         mt5_exec = None
@@ -854,7 +894,9 @@ class AIdan:
                 except Exception as e:
                     logger.error(f"MT5 init error: {e}")
 
-            def _try_mt5_execute(sid, direction, entry_price, sl, tp, confidence):
+            def _try_mt5_execute(sid, direction, entry_price, sl, tp, confidence, track='m5'):
+                """v3.28.0: track param para consensus boost + spread guardian.
+                track: 'm5'|'m15'|'h1'."""
                 if mt5_exec and mt5_exec.is_ready():
                     # Block new trades 10min before market close (Friday 20:50+ UTC)
                     try:
@@ -865,10 +907,37 @@ class AIdan:
                             return None
                     except Exception as e:
                         logger.debug(f"MT5 market-close check: {e}")
+                    # v3.28.0 Spread guardian
                     try:
-                        ticket = mt5_exec.open_position(sid, direction, entry_price, sl, tp, confidence)
+                        from src.common.slippage_tracker import is_spread_acceptable
+                        ok, current_spread = is_spread_acceptable(mt5_exec._mt5, max_pips=Config.MAX_SPREAD_PIPS)
+                        if not ok:
+                            logger.warning(f"Spread guardian: blocking #{sid} {direction}, spread {current_spread}p > {Config.MAX_SPREAD_PIPS}p")
+                            return None
+                    except Exception as _se:
+                        logger.debug(f"Spread guardian check: {_se}")
+                    # v3.28.0 Consensus tracker + boost
+                    lot_mult = 1.0
+                    try:
+                        from src.common.consensus_tracker import record_signal, check_consensus
+                        record_signal(track, direction)
+                        # Check si hay 1+ otro track con misma direction reciente
+                        consensus_count = check_consensus(direction, window_sec=Config.CONSENSUS_WINDOW_SEC, exclude_track=track)
+                        if consensus_count >= 1:
+                            lot_mult = Config.CONSENSUS_BOOST_MULTIPLIER
+                            logger.info(f"Consensus boost: #{sid} {track} {direction} - {consensus_count} other track(s) agree -> lot x{lot_mult}")
+                            try:
+                                from src.common.telegram_alerts import send_alert, is_configured
+                                if is_configured():
+                                    send_alert(f"Consensus boost activado #{sid} {direction} (track {track}, +{consensus_count} convergence) -> lote x{lot_mult}", level='INFO', silent=True)
+                            except Exception:
+                                pass
+                    except Exception as _ce:
+                        logger.debug(f"Consensus check: {_ce}")
+                    try:
+                        ticket = mt5_exec.open_position(sid, direction, entry_price, sl, tp, confidence, lot_multiplier=lot_mult)
                         if ticket:
-                            logger.info(f"MT5 executed: ticket #{ticket} for strategy #{sid}")
+                            logger.info(f"MT5 executed: ticket #{ticket} for strategy #{sid} (track={track}, lot_mult={lot_mult})")
                         return ticket
                     except Exception as e:
                         logger.error(f"MT5 execution error for #{sid}: {e}")
@@ -2750,7 +2819,7 @@ class AIdan:
                     # v3.24.0 — Telegram drawdown + milestone alerts (cada N cycles, throttled)
                     if iteration % 30 == 0:  # cada ~5min (interval 10s × 30)
                         try:
-                            from src.common.telegram_alerts import check_and_send_drawdown, check_and_send_milestone, is_configured
+                            from src.common.telegram_alerts import check_and_send_drawdown, check_and_send_milestone, is_configured, send_alert
                             if is_configured() and mt5_exec and mt5_exec.is_ready():
                                 # Drawdown check
                                 try:
@@ -2773,6 +2842,49 @@ class AIdan:
                                     pass
                         except Exception as _ta:
                             logger.debug(f"Telegram periodic check: {_ta}")
+
+                    # v3.28.0 — Daily loss limit auto-pause
+                    # Cada cycle: si daily_pnl <= -LIMIT y kill switch OFF -> activar kill switch
+                    # Reset al día siguiente: si cambió la fecha, asegurar kill switch OFF (si no fue activado manual)
+                    if mt5_exec and mt5_exec.is_ready() and Config.DAILY_LOSS_LIMIT_USD > 0:
+                        try:
+                            info = mt5_exec._mt5.account_info() if mt5_exec._mt5 else None
+                            if info:
+                                daily_pnl = info.profit if hasattr(info, 'profit') else 0.0
+                                # Detect day change to reset auto-pause flag
+                                from datetime import datetime as _dlt
+                                today_str = _dlt.now().strftime('%Y-%m-%d')
+                                if not hasattr(self, '_dll_today_paused') or self._dll_today_paused != today_str:
+                                    # New day: clear paused state (kill switch can be reset by analyzer)
+                                    if hasattr(self, '_dll_auto_paused') and self._dll_auto_paused and not getattr(self, '_dll_user_paused', False):
+                                        # We auto-paused yesterday, restore
+                                        mt5_exec.kill_switch = False
+                                        logger.info(f"Daily loss limit: new day, auto-pause cleared")
+                                        try:
+                                            from src.common.telegram_alerts import send_alert
+                                            send_alert("Nuevo dia: auto-pause del daily loss limit liberado. Trading REANUDADO.", level='INFO')
+                                        except Exception:
+                                            pass
+                                    self._dll_today_paused = today_str
+                                    self._dll_auto_paused = False
+                                # Check trigger
+                                if daily_pnl <= -Config.DAILY_LOSS_LIMIT_USD and not mt5_exec.kill_switch:
+                                    mt5_exec.kill_switch = True
+                                    self._dll_auto_paused = True
+                                    logger.warning(f"Daily loss limit TRIGGERED: ${daily_pnl:+.2f} <= -${Config.DAILY_LOSS_LIMIT_USD} -> kill switch ON")
+                                    try:
+                                        from src.common.telegram_alerts import send_alert
+                                        send_alert(
+                                            f"*Daily loss limit alcanzado*\n"
+                                            f"PnL hoy: ${daily_pnl:+.2f}\n"
+                                            f"Limit: -${Config.DAILY_LOSS_LIMIT_USD}\n"
+                                            f"Trading auto-pausado hasta manana.",
+                                            level='CRITICAL'
+                                        )
+                                    except Exception:
+                                        pass
+                        except Exception as _dle:
+                            logger.debug(f"Daily loss limit check: {_dle}")
 
                     # v3.19.0 — Track B: M15 structure scan paralelo (cada 60s)
                     # Track separado del M5: trigger_type='m15_structure', profile M15.
@@ -2872,7 +2984,7 @@ class AIdan:
                                             )
                                             if _m15_sid:
                                                 logger.info(f"M15 strategy #{_m15_sid}: {_m15_dir} conf={_m15_conf} SL={_m15_adapt['sl_pips']:.1f}p TP={_m15_adapt['tp_pips']:.1f}p price={_m15_price:.5f} expiry={M15_PROFILE['expiry_minutes']}min")
-                                                _try_mt5_execute(_m15_sid, _m15_dir, _m15_price, _m15_sl, _m15_tp, _m15_conf)
+                                                _try_mt5_execute(_m15_sid, _m15_dir, _m15_price, _m15_sl, _m15_tp, _m15_conf, track='m15')
                                             else:
                                                 logger.info(f"M15: add_auto_strategy returned None for {_m15_dir} (cooldown/cap?)")
                             else:
@@ -2970,7 +3082,7 @@ class AIdan:
                                             )
                                             if _h1_sid:
                                                 logger.info(f"H1 strategy #{_h1_sid}: {_h1_dir} conf={_h1_conf} SL={_h1_adapt['sl_pips']:.1f}p TP={_h1_adapt['tp_pips']:.1f}p price={_h1_price:.5f} expiry={H1_PROFILE['expiry_minutes']}min")
-                                                _try_mt5_execute(_h1_sid, _h1_dir, _h1_price, _h1_sl, _h1_tp, _h1_conf)
+                                                _try_mt5_execute(_h1_sid, _h1_dir, _h1_price, _h1_sl, _h1_tp, _h1_conf, track='h1')
                                             else:
                                                 logger.info(f"H1: add_auto_strategy returned None for {_h1_dir}")
                             else:

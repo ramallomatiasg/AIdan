@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.27.2"
+APP_VERSION = "3.28.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -81,6 +81,21 @@ class Config:
     MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
     MT5_SERVER = os.getenv("MT5_SERVER", "ICMarketsSC-Demo")
     MT5_SYMBOL = os.getenv("MT5_SYMBOL", "EURUSD")
+
+    # v3.28.0 — Daily loss limit auto-pause
+    # Si daily_pnl <= -DAILY_LOSS_LIMIT_USD, auto-pausa hasta dia siguiente.
+    # Default $30 (3% del capital base $1000). Set 0 para desactivar.
+    DAILY_LOSS_LIMIT_USD = float(os.getenv("DAILY_LOSS_LIMIT_USD", "30"))
+
+    # v3.28.0 — Multi-TF consensus boost
+    # Si N tracks coinciden en direction dentro de CONSENSUS_WINDOW_SEC, ultimo trade
+    # entra con lote multiplicado. Detecta convergencia M5+M15+H1.
+    CONSENSUS_WINDOW_SEC = int(os.getenv("CONSENSUS_WINDOW_SEC", "300"))  # 5 min
+    CONSENSUS_BOOST_MULTIPLIER = float(os.getenv("CONSENSUS_BOOST_MULTIPLIER", "2.0"))  # 2x lot
+
+    # v3.28.0 — Spread guardian
+    # Bloquea entries si spread actual > MAX_SPREAD_PIPS
+    MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))
 
     @staticmethod
     def get_sources():

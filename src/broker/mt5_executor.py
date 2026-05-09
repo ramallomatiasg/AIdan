@@ -150,8 +150,9 @@ class MT5Executor:
         lots = max(0.01, min(lots, max_lot))
         return round(lots, 2)
 
-    def open_position(self, strategy_id, direction, entry_price, sl, tp, confidence):
-        """Open position: tries limit order first (better price), falls back to market."""
+    def open_position(self, strategy_id, direction, entry_price, sl, tp, confidence, lot_multiplier=1.0):
+        """Open position: tries limit order first (better price), falls back to market.
+        v3.28.0: lot_multiplier permite consensus boost (M5+M15+H1 coinciden)."""
         if not self.is_ready() or not self._mt5:
             return None
 
@@ -180,6 +181,12 @@ class MT5Executor:
         tp_distance = abs(entry_price - tp)
         sl_pips = sl_distance / 0.0001
         lot = self.calculate_lot_size(sl_pips)
+        # v3.28.0 — apply consensus boost multiplier (clamp to max_lot)
+        if lot_multiplier and lot_multiplier != 1.0:
+            boosted = lot * lot_multiplier
+            max_lot = config.get('max_lot', 0.1)
+            lot = min(boosted, max_lot)
+            self.logger.info(f"Lot multiplier {lot_multiplier} applied: {lot:.2f} (capped at {max_lot})")
 
         # Pre-flight: retry up to 3 times if spread > SL distance (news event spikes)
         current_spread = abs(tick.ask - tick.bid)
