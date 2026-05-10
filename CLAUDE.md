@@ -176,20 +176,16 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | Version | Cambio | Estado |
 |---|---|---|
 | v3.6.3 | Baseline (-$93 sobre 100 trades, PF 0.59) | superada |
-| v3.7.0 | Confidence formula neutralizada + SL cap | mejoró pero PF cayó |
-| v3.7.1 | Hotfix momentum scoring restaurado | mejoró |
-| v3.8.0 | SL cap revert + ATR ceiling 6p | data-driven |
-| v3.9.0 | Expiry fix + SIM A (block fully-aligned) | +$53 simulación |
-| v3.10.0 | Counter-both filter | marginal |
-| v3.11.0 | ATR floor 2.5p + hour gate + conf ceiling 80 | restrictivo |
-| v3.12.x | News bypass + anti-contradiction pre_planned | bug-fixes |
-| v3.13.0 | Late breakout 15→3p (REVERTIDO en v3.18) | data contaminada |
-| v3.14.0 | Counter-HTF news bypass | preventivo |
-| v3.15.0 | Gemma SL/TP feedback loop (write→read→apply) | sin data aún |
-| v3.16.0 | Counter-HTF news regular path (conf>=65) | preventivo |
-| v3.16.1 | Hotfix UnicodeEncodeError al arrancar | crítico |
-| v3.17.0 | REMOVIDO hour gate (data contaminada cross-version) | recuperar frec |
-| **v3.18.0** | **Late breakout 3→7p (recuperar frecuencia)** | **actual** |
+| v3.7-3.17 | Filter tuning iterations (ver historial git) | superada |
+| v3.18.0 | Late breakout 3→7p (recuperar frecuencia) | superada |
+| v3.19.0 | Track B M15 implementado (paralelo M5) | activo |
+| v3.20.0 | Track C H1 implementado (paralelo M5+M15) | activo |
+| v3.21-3.27 | LLM provider primario, news improvements, etc | superada |
+| v3.28.0 | Telegram bot bidireccional + daily loss limit + consensus boost + spread guardian | activo |
+| v3.29.x | Dashboard equity curve + heatmap + trade modal + slippage stats + filter contrib | activo |
+| v3.30.0 | Performance: 15 DB indexes + cache TTL + polling redundante eliminado | activo |
+| v3.30.1 | MTF candle fetch paralelo + news LLM analysis paralelo | activo |
+| **v3.30.2** | **Shutdown rapido <2s + LRU cache news + query optimization /auto-strategies** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -347,6 +343,49 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 
 ---
 
+## Tools disponibles en `tools/`
+
+| Script | Propósito |
+|---|---|
+| `backtest_h1_m15.py` | Backtest estructural-only sobre candles MT5 históricas. Re-corre `detect_structure_signals()` y simula SL/TP/expiry hit. Solo trigger `structure`, sin news/calendar/pre_planned/smc-live. |
+| `backtest_parallel.py` | Backtest paralelo de combinaciones de filtros sobre `trade_archive` (trades ya ejecutados). |
+| `backtest_weekly.py` | Wrapper semanal de `backtest_parallel.py` con notificación Telegram. |
+| `test_m15_feed.py` | Test standalone del feed M15 (verificar candles + indicators). |
+| `analyze_trending.py` | Analiza % tiempo en tendencia vs lateral del histórico. |
+| `deep_analysis.py` | Análisis profundo de trade_archive (patrones, correlaciones). |
+| `ml_feature_analysis.py` | Feature importance ML sobre features de trades. |
+| `benchmark_llm_models.py` | Benchmark velocidad/calidad de modelos Ollama. |
+| `aidan_watchdog.py` | Watchdog que reinicia AIdan si se cuelga. |
+
+### Backtest H1+M15 results (30 días, 27 Mar → 8 May 2026)
+
+**M15** (693 signals, sin filtros completos):
+- WR 49.2%, PF 1.10, +189.6p, avg 0.27p/trade
+- Setup ganadores: `trend_continuation_bull` (+236p), `trend_continuation_bear` (+82p)
+- Setup perdedores: `momentum_expansion` (-52p), `breakdown_support` (-71p)
+
+**H1** (212 signals):
+- WR 50.5%, PF 1.17, +156.2p, avg **0.74p/trade** (mejor avg)
+- Setup ganador estrella: `breakout_resistance` WR 72% +209p
+- Setup perdedores: `breakdown_support` (-50p), `momentum_expansion` (-15p)
+
+**Lecturas honestas**:
+- 99% de trades terminan en expiry (SL/TP raramente hit) → thresholds holgados vs ATR real
+- Ambos tracks tienen edge MARGINAL estructural sin filtros adicionales (PF 1.1 ≈ break-even con fricción)
+- H1 confirma tesis de comisión drag bajo: avg 0.74p/trade vs M15 0.27p
+- Backtest **infla metricas 20-30%** vs real → PF real estimado ~0.85-0.95 (NO rentable solo)
+- Necesita capas adicionales (htf_bias, anti-spam, LLM auditor) que demo SÍ tiene
+
+### Caveats del backtest H1+M15
+
+1. Solo trigger `structure` (sin news ~30% de signals reales)
+2. Sin htf_bias derivado de SMC live (filtro counter-HTF inactivo)
+3. AutoTuner params actuales sobre data vieja (mild data leakage)
+4. Sin spread variable, slippage, latency execution
+5. Backtest infla metricas vs producción real con fricción
+
+---
+
 ## Cosas que NO se deben hacer
 
 1. ❌ Modificar código sin aprobación explícita del user.
@@ -393,4 +432,22 @@ cat F:/AIdan/CLAUDE.md
 
 ---
 
-**Última actualización**: 7 May 2026 — v3.18.0
+## Reglas de mantenimiento de este archivo
+
+**IMPORTANTE**: con cada cambio significativo (nueva versión, feature, herramienta, hallazgo de backtest), CLAUDE.md DEBE actualizarse. Antes de cada sesión nueva con asistentes IA, leer este archivo completo para mantener contexto. La última actualización siempre debe coincidir con la versión activa en `Config.APP_VERSION`.
+
+**Checklist tras cada cambio**:
+- ✅ Bumpear `APP_VERSION` en `src/common/config.py`
+- ✅ Actualizar tabla de versiones en CLAUDE.md
+- ✅ Si agregaste tool nuevo → línea en sección Tools
+- ✅ Si cambió diagnóstico/KPI → actualizar "Estado actual"
+- ✅ Sanity check imports antes de rebuild
+- ✅ Rebuild AIdan.exe
+- ✅ Verificar `/version` en endpoint
+- ✅ Commit (sin Co-Authored-By)
+- ✅ Push a origin/main
+- ✅ Actualizar línea final "Última actualización"
+
+---
+
+**Última actualización**: 9 May 2026 — v3.30.2

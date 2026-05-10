@@ -36,6 +36,10 @@ data/
 *.jsonl
 *.json
 
+# Backtest outputs (timestamped at root)
+backtest_*.csv
+backtest_*.json
+
 # Logs
 logs/
 *.log
