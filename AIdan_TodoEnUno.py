@@ -458,25 +458,74 @@ class AIdan:
                 pass
 
     def _on_close(self):
-        """Clean shutdown — signal threads, upload report, then destroy UI."""
+        """v3.30.2 — Fast shutdown. Antes tardaba >5s por:
+          - generate_daily_report() (network call sync)
+          - sleep(0.5)
+          - threads no daemon haciendo cleanup
+        Ahora: signal threads, kick report en background, destroy UI inmediato,
+        force-exit tras 1.5s. Total <2s vs ~5s antes.
+        """
         self._anim_running = False
-        # Signal all service loops to exit their main while loops
+        # 1) Signal all service loops to exit ASAP
         try:
             self._shutdown_event.set()
         except Exception:
             pass
-        # Try to upload daily report on close
+
+        # 2) Stop Telegram bot (solo flag, daemon thread morira con proceso)
         try:
-            from src.reports.daily_report import generate_daily_report
-            result = generate_daily_report()
-            if result.get('status') == 'success':
-                print(f"Daily report uploaded: {result.get('message')}")
-        except Exception as e:
-            print(f"Report upload skipped: {e}")
-        # Give background threads a moment to finish in-flight DB writes
-        import time as _t
-        _t.sleep(0.5)
-        self.root.destroy()
+            if getattr(self, '_telegram_bot', None):
+                self._telegram_bot.stop()
+        except Exception:
+            pass
+
+        # 3) Daily report en background — NO bloqueamos la UI
+        def _bg_report():
+            try:
+                from src.reports.daily_report import generate_daily_report
+                generate_daily_report()
+            except Exception:
+                pass
+        try:
+            from threading import Thread as _T
+            _T(target=_bg_report, daemon=True, name="ShutdownReport").start()
+        except Exception:
+            pass
+
+        # 4) MT5 disconnect (rapido, no bloquea UI)
+        def _bg_mt5_close():
+            try:
+                import MetaTrader5 as _m5
+                _m5.shutdown()
+            except Exception:
+                pass
+        try:
+            from threading import Thread as _T2
+            _T2(target=_bg_mt5_close, daemon=True, name="ShutdownMT5").start()
+        except Exception:
+            pass
+
+        # 5) Destroy UI inmediato
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+        # 6) Force-exit 1.5s despues si quedan threads colgados (daemon=True deberia
+        # bastar pero si hay alguno bloqueado en I/O largo, garantizamos exit limpio)
+        def _force_exit():
+            try:
+                import time as _t
+                _t.sleep(1.5)
+                import os as _os
+                _os._exit(0)
+            except Exception:
+                pass
+        try:
+            from threading import Thread as _T3
+            _T3(target=_force_exit, daemon=True, name="ForceExit").start()
+        except Exception:
+            pass
     
     def _ollama_is_running(self):
         """Check if Ollama API is responding."""

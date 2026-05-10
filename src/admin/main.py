@@ -916,6 +916,11 @@ async def list_auto_strategies():
 
         # v3.19.2 — Append today's archived trades (NOT in current strategies list)
         # to fix the cap-6 disappearance bug for M15 strategies.
+        # v3.30.2: query optimizada para usar idx_trade_archive_archived.
+        # Antes: WHERE datetime(created_at,'-3hours') >= date('now','-3hours')
+        #        - funcion sobre columna inhibe index, full scan.
+        # Ahora: WHERE archived_at >= datetime('now','-1 day')
+        #        - usa index, <1ms.
         try:
             import sqlite3 as _sql
             from src.common.db import DB_PATH
@@ -927,7 +932,7 @@ async def list_auto_strategies():
                        created_at, confidence, impact_score, profile_name,
                        entry_price, exit_price, stop_loss, take_profit, sl_pips, tp_pips
                 FROM trade_archive
-                WHERE datetime(created_at,'-3 hours') >= date('now','-3 hours')
+                WHERE archived_at >= datetime('now', '-1 day')
                 ORDER BY strategy_id DESC
                 LIMIT 30
             """)

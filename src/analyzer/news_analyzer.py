@@ -4,6 +4,30 @@ import os
 from datetime import datetime
 
 class NewsAnalyzer:
+    # v3.30.2 — LRU cache de analysis por title hash. Evita re-analizar same news
+    # que aparece de varios feeds o se duplica. Cache size 256 (suficiente para 1 dia).
+    _ANALYSIS_CACHE = {}  # {title_hash: result_dict}
+    _ANALYSIS_CACHE_ORDER = []  # FIFO order para eviction
+    _ANALYSIS_CACHE_MAX = 256
+
+    @classmethod
+    def _cache_get(cls, title):
+        if not title: return None
+        key = hash(title.strip().lower())
+        return cls._ANALYSIS_CACHE.get(key)
+
+    @classmethod
+    def _cache_set(cls, title, result):
+        if not title or not result: return
+        key = hash(title.strip().lower())
+        if key not in cls._ANALYSIS_CACHE:
+            cls._ANALYSIS_CACHE_ORDER.append(key)
+        cls._ANALYSIS_CACHE[key] = result
+        # Evict oldest if over limit
+        while len(cls._ANALYSIS_CACHE_ORDER) > cls._ANALYSIS_CACHE_MAX:
+            old = cls._ANALYSIS_CACHE_ORDER.pop(0)
+            cls._ANALYSIS_CACHE.pop(old, None)
+
     def __init__(self, logger):
         self.logger = logger
         self.ai_mode = self._detect_ai_mode()
@@ -248,39 +272,55 @@ class NewsAnalyzer:
     def analyze(self, news_id, title, summary, entities, tags):
         """Analyze news and calculate impact score with EUR/USD analysis - REQUIRES AI"""
         try:
+            # v3.30.2 — Cache check: si ya analizamos este title (mismo o duplicado feed),
+            # devolvemos copia del result con news_id actualizado. Ahorra LLM call (~3-7s).
+            cached = self.__class__._cache_get(title)
+            if cached:
+                self.logger.debug(f"News cache HIT: '{title[:50]}' (saved LLM call)")
+                _r = dict(cached)
+                _r['news_id'] = news_id
+                _r['_cache_hit'] = True
+                return _r
+
             # Layer 0: Junk/clickbait filter
             if self._is_junk_news(title):
                 self.logger.info(f"Junk filter: skipping '{title[:60]}' (non-actionable content)")
-                return {
+                _r = {
                     'news_id': news_id, 'impact_score': 0, 'level': 'BAJA',
                     'explanation': 'Contenido no operativo (educativo/clickbait)',
                     'eur_usd_impact': 'NINGUNA', 'market_implications': '',
                     'should_operate': False, 'direction': 'NEUTRAL', 'confidence': 0,
                 }
+                self.__class__._cache_set(title, _r)
+                return _r
 
             # Layer 1: Fast keyword pre-filter (0 tokens)
             kw_result = self._keyword_prefilter(title, summary)
             if kw_result == 'skip':
                 self.logger.info(f"Keyword filter: skipping '{title[:60]}' (irrelevant topic)")
-                return {
+                _r = {
                     'news_id': news_id, 'impact_score': 5, 'level': 'BAJA',
                     'explanation': 'Tema no relacionado a EUR/USD (pre-filtro)',
                     'eur_usd_impact': 'NINGUNA', 'market_implications': '',
                     'should_operate': False, 'direction': 'NEUTRAL', 'confidence': 0,
                     'analysis_method': 'keyword_filter',
                 }
+                self.__class__._cache_set(title, _r)
+                return _r
 
             # Layer 2: Gemma quick relevance check (~50 tokens, local, free)
             # Skip this for always-relevant news (kw_result == 'force')
             if kw_result == 'pass':
                 if not self._gemma_quick_relevance(news_id, title):
-                    return {
+                    _r = {
                         'news_id': news_id, 'impact_score': 10, 'level': 'BAJA',
                         'explanation': 'No relevante para EUR/USD (Gemma pre-filtro)',
                         'eur_usd_impact': 'NINGUNA', 'market_implications': '',
                         'should_operate': False, 'direction': 'NEUTRAL', 'confidence': 0,
                         'analysis_method': 'gemma_prefilter',
                     }
+                    self.__class__._cache_set(title, _r)
+                    return _r
 
             # Layer 3: Full AI analysis (Groq tokens only for relevant news)
             if self.ai_mode not in ['groq', 'ollama', 'claude']:
@@ -289,9 +329,12 @@ class NewsAnalyzer:
 
             result = self._analyze_with_ai(news_id, title, summary, entities, tags)
             if result:
+                # Cache full AI result — siguiente vez que aparezca este title evitamos
+                # 3-7s de LLM call. Es safe: news con mismo title tienen mismo impact.
+                self.__class__._cache_set(title, result)
                 return result
-            
-            # Si falla la IA, NO analizar
+
+            # Si falla la IA, NO analizar (NO cachear errores)
             self.logger.error(f"AI analysis failed for news {news_id} - Noticia NO procesada")
             return None
             
