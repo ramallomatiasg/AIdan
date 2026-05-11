@@ -131,6 +131,8 @@ GET /structure-status         # Scanner state + watching levels
 GET /smc-state                # SMC multi-TF + zones
 GET /auto-strategies?limit=10 # Last strategies
 GET /performance              # WR, PnL, PF
+GET /theme-editor             # Editor visual de paleta CSS (Thariq-style)
+GET /backtest-report          # Ultimo HTML interactivo del backtest H1+M15
 ```
 
 ### Query DB rápido
@@ -186,7 +188,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.30.0 | Performance: 15 DB indexes + cache TTL + polling redundante eliminado | activo |
 | v3.30.1 | MTF candle fetch paralelo + news LLM analysis paralelo | activo |
 | v3.30.2 | Shutdown rapido <2s + LRU cache news + query optimization /auto-strategies | activo |
-| **v3.30.3** | **Fix /recent Markdown (escape `_`) + drawdown alert daily-basis (no spam lifetime)** | **actual** |
+| v3.30.3 | Fix /recent Markdown (escape `_`) + drawdown alert daily-basis (no spam lifetime) | activo |
+| **v3.30.4** | **HTML interactive tools: theme editor + backtest report (inspired by Thariq/Anthropic)** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -349,6 +352,8 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | Script | Propósito |
 |---|---|
 | `backtest_h1_m15.py` | Backtest estructural-only sobre candles MT5 históricas. Re-corre `detect_structure_signals()` y simula SL/TP/expiry hit. Solo trigger `structure`, sin news/calendar/pre_planned/smc-live. |
+| `backtest_html_report.py` | Convierte el JSON+CSV del backtest en HTML interactivo single-file con sliders (min_conf, setup_type, direction), charts equity-curve, breakdown table. Inspirado en approach de Thariq (Anthropic). Endpoint: `/backtest-report`. |
+| `dashboard_theme_editor.html` | Editor visual standalone con color pickers + sliders para todos los CSS vars del dashboard. Live preview de cards/charts/tables. Presets (Dark/Light/Midnight/Terminal/Sunset). Botón export CSS al clipboard. Endpoint: `/theme-editor`. |
 | `backtest_parallel.py` | Backtest paralelo de combinaciones de filtros sobre `trade_archive` (trades ya ejecutados). |
 | `backtest_weekly.py` | Wrapper semanal de `backtest_parallel.py` con notificación Telegram. |
 | `test_m15_feed.py` | Test standalone del feed M15 (verificar candles + indicators). |
@@ -451,4 +456,4 @@ cat F:/AIdan/CLAUDE.md
 
 ---
 
-**Última actualización**: 9 May 2026 — v3.30.3
+**Última actualización**: 11 May 2026 — v3.30.4

@@ -277,6 +277,54 @@ async def about():
         return FileResponse(about_path, media_type="text/html")
     return {"message": "About page not found"}
 
+
+# v3.30.4 — Theme editor: standalone HTML con color pickers + sliders.
+# Live preview del dashboard. Inspirado en approach Thariq (Anthropic):
+# HTML interactivo como output format en lugar de Markdown estatico.
+@app.get("/theme-editor")
+async def theme_editor():
+    """Editor visual de paleta de colores y tokens CSS del dashboard."""
+    # Buscar en tools/ (dev) o base_path (frozen exe)
+    candidates = [
+        os.path.join(base_path, 'tools', 'dashboard_theme_editor.html'),
+        os.path.join(base_path, 'dashboard_theme_editor.html'),
+        os.path.join(os.path.dirname(base_path), 'tools', 'dashboard_theme_editor.html'),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return FileResponse(p, media_type="text/html", headers=NO_CACHE_HEADERS)
+    return {"message": "Theme editor no encontrado", "tried": candidates}
+
+
+# v3.30.4 — Backtest HTML reports: sirve el ultimo HTML generado por
+# tools/backtest_html_report.py si existe. Sino, instrucciones.
+@app.get("/backtest-report")
+async def backtest_report():
+    """Sirve el HTML report mas reciente del backtest H1+M15."""
+    import glob
+    # Buscar en multiples ubicaciones (dev vs frozen exe vs cwd)
+    search_dirs = [
+        os.getcwd(),
+        base_path,
+        os.path.dirname(base_path),
+        # Si frozen exe, base_path es temp dir; el .exe corre desde F:\AIdan\dist
+        os.path.dirname(getattr(__import__('sys'), 'executable', '')) if getattr(__import__('sys'), 'frozen', False) else None,
+        # Project root (F:\AIdan) si exe vive en dist/
+        os.path.dirname(os.path.dirname(getattr(__import__('sys'), 'executable', ''))) if getattr(__import__('sys'), 'frozen', False) else None,
+    ]
+    htmls = []
+    for d in search_dirs:
+        if d and os.path.isdir(d):
+            htmls += glob.glob(os.path.join(d, 'backtest_h1_m15_*.html'))
+    htmls = sorted(set(htmls))
+    if htmls:
+        return FileResponse(htmls[-1], media_type="text/html", headers=NO_CACHE_HEADERS)
+    return JSONResponse({
+        'message': 'Sin HTML report. Generar con: python tools/backtest_html_report.py',
+        'note': 'Requiere haber corrido antes: python tools/backtest_h1_m15.py',
+        'searched': [str(d) for d in search_dirs if d],
+    })
+
 @app.on_event("startup")
 async def startup():
     """Initialize on startup"""

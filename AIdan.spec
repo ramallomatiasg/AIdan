@@ -8,6 +8,7 @@ a = Analysis(
     datas=[
         ('dashboard_multi_theme.html', '.'),
         ('static', 'static'),
+        ('tools/dashboard_theme_editor.html', '.'),
     ],
     hiddenimports=['numpy', 'MetaTrader5'],
     hookspath=[],
