@@ -155,9 +155,11 @@ body {
   padding: 28px;
   overflow-y: auto;
   max-height: 100vh;
+  /* v3.30.5 — preview usa font-size-base directo asi children con em escalan */
+  font-size: var(--font-size-base);
 }
 .preview-title {
-  font-size: 11px;
+  font-size: 0.78em;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -166,7 +168,7 @@ body {
 .dash-header {
   background: var(--bg-card);
   border-radius: var(--radius);
-  padding: 16px 20px;
+  padding: var(--card-padding) calc(var(--card-padding) * 1.25);
   margin-bottom: 16px;
   display: flex;
   align-items: center;
@@ -175,7 +177,7 @@ body {
 }
 .brand {
   font-weight: 700;
-  font-size: 16px;
+  font-size: 1.15em;
   background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -185,7 +187,7 @@ body {
   border: 1px solid var(--border);
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 0.86em;
 }
 .chip-green { color: var(--accent-green); border-color: var(--accent-green); background: rgba(0,245,160,0.06); }
 .chip-red { color: var(--accent-red); border-color: var(--accent-red); background: rgba(255,68,102,0.06); }
@@ -211,13 +213,13 @@ body {
   border-color: var(--border-light);
 }
 .card-label {
-  font-size: 11px;
+  font-size: 0.78em;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 .card-value {
-  font-size: 22px;
+  font-size: 1.6em;
   font-weight: 600;
   margin-top: 4px;
   font-variant-numeric: tabular-nums;
@@ -226,7 +228,7 @@ body {
 .card-value.red { color: var(--accent-red); }
 .card-value.blue { color: var(--accent-blue); }
 .card-sub {
-  font-size: 12px;
+  font-size: 0.86em;
   color: var(--text-secondary);
   margin-top: 4px;
 }
@@ -234,7 +236,7 @@ body {
 .strategy {
   background: var(--bg-card);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: var(--card-padding);
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent-blue);
   margin-bottom: 10px;
@@ -249,19 +251,19 @@ body {
 }
 .strategy-head .id {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 1em;
 }
 .strategy-head .badge {
   background: var(--accent-yellow);
   color: #000;
-  font-size: 10px;
+  font-size: 0.72em;
   padding: 2px 8px;
   border-radius: 4px;
   font-weight: 600;
   letter-spacing: 0.5px;
 }
 .strategy .meta {
-  font-size: 12px;
+  font-size: 0.86em;
   color: var(--text-secondary);
 }
 
@@ -269,7 +271,7 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px;
+  padding: var(--card-padding);
   margin-bottom: 14px;
   height: 200px;
   position: relative;
@@ -289,7 +291,7 @@ body {
   opacity: 0.08;
 }
 .fake-chart .title {
-  font-size: 13px;
+  font-size: 0.93em;
   color: var(--text-secondary);
   position: relative;
   z-index: 1;
@@ -302,7 +304,7 @@ body {
   padding: 8px 14px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 0.93em;
 }
 .btn-ghost {
   background: transparent;
@@ -318,12 +320,12 @@ body {
 }
 .tab {
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   border: 1px solid var(--border);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.86em;
 }
 .tab.active {
   background: var(--accent-blue);
@@ -334,7 +336,7 @@ body {
 table.preview-tbl {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 0.93em;
 }
 table.preview-tbl th, table.preview-tbl td {
   padding: 8px 12px;
@@ -343,7 +345,7 @@ table.preview-tbl th, table.preview-tbl td {
 }
 table.preview-tbl th {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.78em;
   text-transform: uppercase;
 }
 .win-pill { color: var(--accent-green); }
@@ -481,7 +483,7 @@ table.preview-tbl th {
     <div class="meta">Entry 1.17801 · conf 75 · "ECB Lagarde hawkish"</div>
   </div>
 
-  <h3 style="font-size: 14px; color: var(--text-secondary); margin: 20px 0 10px;">Tabla últimos trades</h3>
+  <h3 style="font-size: 1em; color: var(--text-secondary); margin: 20px 0 10px;">Tabla últimos trades</h3>
   <table class="preview-tbl">
     <thead><tr><th>ID</th><th>Dir</th><th>Trigger</th><th>Conf</th><th>PnL</th></tr></thead>
     <tbody>
@@ -527,8 +529,8 @@ const VARS = {
 const SLIDERS = [
   { name: '--radius', label: 'radius', min: 0, max: 30, step: 1, unit: 'px' },
   { name: '--radius-sm', label: 'radius-sm', min: 0, max: 20, step: 1, unit: 'px' },
-  { name: '--font-size-base', label: 'font-size', min: 11, max: 18, step: 1, unit: 'px' },
-  { name: '--card-padding', label: 'card-padding', min: 8, max: 32, step: 2, unit: 'px' },
+  { name: '--font-size-base', label: 'font-size', min: 10, max: 22, step: 1, unit: 'px' },
+  { name: '--card-padding', label: 'card-padding', min: 6, max: 40, step: 2, unit: 'px' },
 ];
 
 const PRESETS = {

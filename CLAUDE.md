@@ -189,7 +189,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.30.1 | MTF candle fetch paralelo + news LLM analysis paralelo | activo |
 | v3.30.2 | Shutdown rapido <2s + LRU cache news + query optimization /auto-strategies | activo |
 | v3.30.3 | Fix /recent Markdown (escape `_`) + drawdown alert daily-basis (no spam lifetime) | activo |
-| **v3.30.4** | **HTML interactive tools: theme editor + backtest report (inspired by Thariq/Anthropic)** | **actual** |
+| v3.30.4 | HTML interactive tools: theme editor + backtest report (inspired by Thariq/Anthropic) | activo |
+| **v3.30.5** | **Theme editor: font-size + card-padding sliders ahora cascadean visualmente (em units)** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -456,4 +457,4 @@ cat F:/AIdan/CLAUDE.md
 
 ---
 
-**Última actualización**: 11 May 2026 — v3.30.4
+**Última actualización**: 11 May 2026 — v3.30.5
