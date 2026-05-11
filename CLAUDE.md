@@ -220,29 +220,103 @@ Anti-contradiction pre_planned (no PUT+CALL simultáneos)
 
 ---
 
-## Estado actual del proyecto (7 May 2026)
+## Estado actual del proyecto (11 May 2026)
 
 ### KPIs
 
-- Balance demo: ~$908 (de $1000 inicial = -9% en ~3 semanas)
-- WR histórico (142 trades archivo): 35%
-- PnL histórico: -$168
+- Balance demo: ~$899 (de $1000 inicial = -10.1% en ~4 semanas)
+- WR histórico (165 trades archivo): 37.0%
+- PnL histórico: **-$167.59**
+- PF histórico: **0.55** (target >1.3)
 - Frecuencia objetivo: 5-10 trades/día
-- Frecuencia reciente: 3-5 trades/día (post-filtros)
+- Frecuencia REAL reciente: **8 trades/día promedio** (11 May: 8 trades, 1 win = WR 12.5%)
 
 ### Diagnóstico estructural
 
-3 problemas conocidos NO resueltos por filtros:
+4 problemas conocidos NO resueltos por filtros:
 1. **Comisión = 87% pérdida neta**. Para break-even al WR 41% necesitamos avg win 6p (actualmente 4p).
 2. **15-min expiry mata trades direccionalmente correctos**. Patrón observado múltiples veces.
 3. **Groq mis-interpreta news con frecuencia**. Negaciones de central bank action.
+4. **Confidence MAL CALIBRADA** (descubierto 11 May 2026 via what-if simulator). Ver sección dedicada abajo.
+
+### Análisis 11 May 2026 — Calibración de confidence
+
+**Descubrimiento via what-if simulator**: la confidence score (0-100) NO es predictor monotónico del win rate. Subir `min_confidence` empeora resultados porque elimina ganadores chiquitos sin filtrar perdedores.
+
+**Tabla WR por bucket de confidence (165 trades histórico)**:
+
+| Conf | Trades | WR | PnL |
+|---|---|---|---|
+| 30-39 | 5 | 40% | -$2.70 |
+| **40-49** | **7** | **43%** | **+$8.60** ✓ |
+| 50-59 | 22 | 36% | -$32.21 |
+| 60-64 | 37 | 38% | -$12.56 |
+| 65-69 | 17 | 35% | -$36.06 |
+| **70-74** | **32** | **34%** | **-$60.12** ✗ |
+| 75-79 | 16 | 44% | +$1.00 |
+| 80-84 | 11 | 36% | -$1.50 |
+| 85-89 | 8 | 50% | -$11.96 |
+| **90-94** | **6** | **0%** | **-$23.38** ✗✗ |
+| 95-100 | 4 | 50% | +$3.30 |
+
+**Hallazgos clave**:
+- Conf **90-94: 0% WR** → las más "confiadas" son las peores
+- Conf **40-49: 43% WR** → mejor que muchos buckets altos
+- Conf **70-74: -$60.12** (32 trades) → el bucket más perdedor en absoluto
+- **NO existe correlación monotónica conf→WR**
+
+**Cumulative "si filtro min_conf >= X"**:
+
+| min_conf | n | WR | PnL |
+|---|---|---|---|
+| ≥0 | 165 | 37.0% | -$167.59 (baseline) |
+| ≥50 | 153 | 36.6% | -$173.49 (peor) |
+| ≥60 | 131 | 36.6% | -$141.28 |
+| ≥70 | 77 | 36.4% | -$92.66 |
+| ≥75 | 45 | 37.8% | -$32.54 |
+| ≥85 | 18 | 33.3% | -$32.04 |
+
+**Subir el piso no ayuda**. AIdan ya tiene `conf_ceiling 80` desde v3.11 (anti-predictive) — esto valida que el TECHO sí aporta, no el piso.
+
+**Root cause (hipótesis)**: la fórmula `dynamic_conf` (technical.py:451) suma puntos de factores redundantes (MA trend + HTF + RSI + momentum miden lo mismo). Cuando todos alinean = conf 90+ = **exhaustion entry** (mercado ya se movió, por revertir). Es por eso que existe SIM A (block fully-aligned).
+
+**Análisis por session (165 trades)**:
+
+| Session | Trades | WR | PnL |
+|---|---|---|---|
+| **london** | 7 | 28.6% | +$2.40 ✓ (muestra inútil) |
+| late_ny | 55 | 36.4% | -$50.89 |
+| ny | 68 | 38.2% | -$61.40 |
+| overlap | 33 | 39.4% | -$44.70 |
+| off | 2 | 0% | -$13.00 |
+
+**Lectura**: TODAS las sessions pierden plata (excepto London con 7 trades = ruido). El problema no es de session específica — es estructural.
+
+### Opciones para corregir confidence (post-Fase 1)
+
+1. **Opción A — Bucket-based blocking (rápido, riesgo bajo)**. Block conf 70-74 y 85-94 explícitamente en `blocked_setups`. Allow conf 40-49. Tiempo: 1-2h. Riesgo: overfitting muestra chica.
+
+2. **Opción B — Empirical confidence (medio plazo)**. Reemplazar fórmula por WR real histórico del setup_type. Ya existe `setup_win_rates` cached parcialmente. Tiempo: 2-3 días.
+
+3. **Opción C — Logistic regression / ML proper (largo plazo)**. Entrenar modelo con features del trade_archive → P(win) calibrada. Requiere muestra 500+. Tiempo: 2-3 días + data.
+
+4. **Opción D — A/B test paralelo (validación)**. M5 actual + M5-bucket-filter en paralelo 30 días. Decisión empírica.
+
+### Restricción real: frecuencia de trades vs target
+
+**Target original (CLAUDE.md viejo)**: 200-300 trades para validación robusta.
+
+**Realidad observada (11 May)**: ~8 trades/día. Para 200-300 trades necesitamos **25-37 días más** (final de mayo / mediados de junio). NO vamos a tener muestra robusta antes de eso. Decisiones intermedias serán siempre **provisorias**.
+
+**Implicancia**: cualquier cambio estructural (Opciones A-D arriba) debe esperar a ese horizonte. Fixes surgical (block bucket específico con muestra >20) son aceptables con caveats documentados.
 
 ### Próximo checkpoint
 
-**Viernes 8 May 2026**. Decisión sobre:
-- Continuar M5 con surgical fixes
-- **Migrar a M15** (recomendación open: cambia la math de comisiones + da tiempo al setup)
-- Quitarle a news el rol de trigger directional
+**Viernes 15 May 2026** — review semanal:
+- Trades acumulados por track (M5 vs M15 vs H1)
+- ¿Patrón conf no-monotónica persiste con data nueva?
+- Heatmap horas: ¿16h UTC y 19h UTC siguen siendo 0% WR?
+- Decisión: surgical fix bucket 70-74 vs seguir esperando
 
 ---
 
@@ -348,6 +422,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 - **Counter-both**: dirección contraria a M5 trend Y HTF bias. Bloqueado.
 - **SIM A**: trade fully-aligned (M5+HTF+regime todos en una dirección). Bloqueado por exhaustion entry.
 - **Bypass**: news con impact ≥55 puede pasar conf threshold de 30 si NO es counter-HTF.
+- **Confidence inversion** (11 May 2026): patrón observado donde conf alta (90+) tiene WR inferior a conf media (40-49). Causa: factores redundantes en `dynamic_conf` se suman → alineación total = exhaustion. Mismo principio que SIM A pero medido numericamente.
 
 ---
 
@@ -408,6 +483,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 8. ❌ Ejecutar simulaciones que escriban a la DB de producción.
 9. ❌ Cambiar el modelo de LLM por uno pago sin permiso.
 10. ❌ Hacer deploys (rebuild + commit) sin test previo de imports.
+11. ❌ **NO tocar `dynamic_conf` formula con muestra <300 trades** (11 May 2026). Confidence está mal calibrada pero arreglarla con muestra chica = overfitting garantizado. Esperar Fase 1 completa.
 
 ## Cosas que SÍ son apropiadas hacer proactivamente
 
@@ -460,4 +536,4 @@ cat F:/AIdan/CLAUDE.md
 
 ---
 
-**Última actualización**: 11 May 2026 — v3.30.7
+**Última actualización**: 11 May 2026 — v3.30.7 (doc-only: análisis confidence calibration + KPIs Estado actual)
