@@ -9,6 +9,7 @@ a = Analysis(
         ('dashboard_multi_theme.html', '.'),
         ('static', 'static'),
         ('tools/dashboard_theme_editor.html', '.'),
+        ('tools/what_if_simulator.html', '.'),
     ],
     hiddenimports=['numpy', 'MetaTrader5'],
     hookspath=[],

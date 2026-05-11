@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>AIdan What-If Simulator</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0a0a0a; --panel: #111; --panel2: #161616; --border: #1a1a1a;
+  --text: #e8ecf2; --muted: #999; --dim: #555;
+  --accent: #4f8ff7; --green: #00f5a0; --red: #ff4466;
+  --yellow: #ffcc00; --purple: #a78bfa; --cyan: #00f5d4;
+  --radius: 12px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 20px;
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px; line-height: 1.5;
+}
+h1 { font-size: 22px; margin: 0 0 4px 0; letter-spacing: -0.3px; }
+.sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+.sub strong { color: var(--accent); }
+
+.layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+/* ─── Panel filtros ─── */
+.filters {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+}
+.filters h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin: 18px 0 10px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.filters h2:first-of-type { margin-top: 0; }
+.slider-row {
+  margin-bottom: 12px;
+}
+.slider-row label {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.slider-row label .val {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.slider-row input[type=range] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.slider-row.range {
+  display: flex;
+  flex-direction: column;
+}
+.slider-row.range .duo {
+  display: flex;
+  gap: 6px;
+}
+.slider-row.range .duo input { flex: 1; }
+.chip-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip-tog {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  user-select: none;
+  transition: all 0.15s;
+}
+.chip-tog:hover { border-color: var(--accent); }
+.chip-tog.off { opacity: 0.3; }
+.chip-tog.green-on { border-color: var(--green); color: var(--green); }
+.chip-tog.red-on { border-color: var(--red); color: var(--red); }
+.chip-tog.blue-on { border-color: var(--accent); color: var(--accent); }
+.actions {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.actions button {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+.actions button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.actions button:hover { filter: brightness(1.1); }
+
+/* ─── Results panel ─── */
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.stat-card .label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stat-card .value {
+  font-size: 22px;
+  font-weight: 600;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.stat-card .value.green { color: var(--green); }
+.stat-card .value.red { color: var(--red); }
+.stat-card .value.blue { color: var(--accent); }
+.stat-card .delta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.stat-card .delta.green { color: var(--green); }
+.stat-card .delta.red { color: var(--red); }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.panel h3 {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel h3 .pill {
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--panel2);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: normal;
+}
+
+.dual {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.chart-wrap { position: relative; height: 240px; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+th, td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+th { color: var(--muted); font-size: 10px; text-transform: uppercase; font-weight: 500; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.green { color: var(--green); }
+td.red { color: var(--red); }
+
+.banner {
+  background: rgba(255,204,0,0.04);
+  border-left: 3px solid var(--yellow);
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.banner.green {
+  background: rgba(0,245,160,0.04);
+  border-color: var(--green);
+}
+.banner strong { color: var(--text); }
+
+.heatmap {
+  display: grid;
+  grid-template-columns: 30px repeat(24, 1fr);
+  gap: 2px;
+  font-size: 10px;
+}
+.heatmap .h-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  font-weight: 600;
+  border-radius: 3px;
+  cursor: default;
+}
+.heatmap .h-lbl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+.heatmap .h-cell.empty { background: var(--panel2); color: var(--dim); font-weight: normal; }
+
+.loading {
+  text-align: center;
+  padding: 60px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.toast {
+  position: fixed; bottom: 20px; right: 20px;
+  background: var(--green); color: #000;
+  padding: 10px 16px; border-radius: 8px;
+  font-size: 13px; font-weight: 600;
+  opacity: 0; transform: translateY(20px);
+  transition: all 0.3s; pointer-events: none;
+  z-index: 9999;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<h1>What-If Simulator <span style="font-size:13px;color:var(--muted);">— retroactive sobre trade_archive REAL</span></h1>
+<div class="sub" id="metaSub">Cargando trades del histórico...</div>
+
+<div id="content" class="layout" style="display: none;">
+
+  <!-- ───────── Filtros ───────── -->
+  <div class="filters">
+    <h2>Confianza</h2>
+    <div class="slider-row">
+      <label>min confidence <span class="val" id="vMinConf">0</span></label>
+      <input type="range" id="minConf" min="0" max="100" step="1" value="0">
+    </div>
+    <div class="slider-row">
+      <label>conf ceiling <span class="val" id="vConfCeil">100</span></label>
+      <input type="range" id="confCeil" min="50" max="100" step="1" value="100">
+    </div>
+
+    <h2>ATR (avg range pips)</h2>
+    <div class="slider-row">
+      <label>atr floor <span class="val" id="vAtrFloor">0.0</span>p</label>
+      <input type="range" id="atrFloor" min="0" max="15" step="0.5" value="0">
+    </div>
+    <div class="slider-row">
+      <label>atr ceiling <span class="val" id="vAtrCeil">20.0</span>p</label>
+      <input type="range" id="atrCeil" min="3" max="20" step="0.5" value="20">
+    </div>
+
+    <h2>Filtros estructurales</h2>
+    <div class="slider-row">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="blockCounterHTF"> bloquear counter-HTF
+      </label>
+    </div>
+    <div class="slider-row">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="blockSLhitOnly"> excluir trades cerrados solo por SL
+      </label>
+    </div>
+
+    <h2>Trigger type</h2>
+    <div class="chip-toggles" id="triggerToggles"></div>
+
+    <h2>Direccion</h2>
+    <div class="chip-toggles" id="dirToggles"></div>
+
+    <h2>Session</h2>
+    <div class="chip-toggles" id="sessionToggles"></div>
+
+    <h2>Day of week</h2>
+    <div class="chip-toggles" id="dowToggles"></div>
+
+    <h2>Hour UTC</h2>
+    <div class="chip-toggles" id="hourToggles" style="font-size: 9px; gap: 2px;"></div>
+
+    <h2>HTF bias</h2>
+    <div class="chip-toggles" id="htfToggles"></div>
+
+    <div class="actions">
+      <button id="resetBtn" class="secondary">↺ Reset filtros</button>
+      <button id="copyBtn">📋 Copiar config para .env</button>
+    </div>
+  </div>
+
+  <!-- ───────── Resultados ───────── -->
+  <div class="results">
+    <div class="stats-grid">
+      <div class="stat-card"><div class="label">Trades</div><div class="value" id="kTrades">--</div><div class="delta" id="dTrades"></div></div>
+      <div class="stat-card"><div class="label">Win Rate</div><div class="value" id="kWR">--</div><div class="delta" id="dWR"></div></div>
+      <div class="stat-card"><div class="label">Profit Factor</div><div class="value" id="kPF">--</div><div class="delta" id="dPF"></div></div>
+      <div class="stat-card"><div class="label">Total PnL</div><div class="value" id="kPnL">--</div><div class="delta" id="dPnL"></div></div>
+      <div class="stat-card"><div class="label">Avg/trade</div><div class="value" id="kAvg">--</div><div class="delta"></div></div>
+      <div class="stat-card"><div class="label">Best / Worst</div><div class="value" id="kBest" style="font-size:14px;">--</div><div class="delta" id="kWorst"></div></div>
+    </div>
+
+    <div class="banner" id="verdict">
+      Ajustá filtros para ver el impacto retroactivo sobre <strong id="totalAvail">--</strong> trades del archivo.
+    </div>
+
+    <div class="dual">
+      <div class="panel">
+        <h3>📈 Equity curve (acumulado $)</h3>
+        <div class="chart-wrap"><canvas id="equityChart"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3>📊 PnL por trigger</h3>
+        <div class="chart-wrap"><canvas id="triggerChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>🕐 Heatmap WR% por hour_utc <span class="pill">verde=WR alto, rojo=WR bajo</span></h3>
+      <div class="heatmap" id="heatmap"></div>
+    </div>
+
+    <div class="panel">
+      <h3>🧩 Breakdown por trigger_type</h3>
+      <table id="triggerTable"></table>
+    </div>
+  </div>
+
+</div>
+
+<div id="loadingMsg" class="loading">Cargando data de /trade-archive-data...</div>
+<div class="toast" id="toast">Copiado al clipboard</div>
+
+<script>
+let ALL_TRADES = [];
+let BASELINE_STATS = null;
+let charts = {};
+let state = {
+  minConf: 0,
+  confCeil: 100,
+  atrFloor: 0,
+  atrCeil: 20,
+  blockCounterHTF: false,
+  blockSLhitOnly: false,
+  triggers: new Set(),
+  dirs: new Set(['CALL', 'PUT']),
+  sessions: new Set(),
+  dows: new Set([0,1,2,3,4,5,6]),
+  hours: new Set(),
+  htfBias: new Set(),
+};
+
+async function loadData() {
+  try {
+    const r = await fetch('/trade-archive-data');
+    const data = await r.json();
+    ALL_TRADES = data.trades || [];
+    if (ALL_TRADES.length === 0) {
+      document.getElementById('loadingMsg').textContent = 'No hay trades en el archive.';
+      return;
+    }
+    initFilters();
+    BASELINE_STATS = computeStats(ALL_TRADES);
+    document.getElementById('loadingMsg').style.display = 'none';
+    document.getElementById('content').style.display = 'grid';
+    document.getElementById('metaSub').innerHTML = `<strong>${ALL_TRADES.length}</strong> trades cargados. Baseline real: <strong>WR ${BASELINE_STATS.wr.toFixed(1)}%</strong> · <strong>PF ${BASELINE_STATS.pf === Infinity ? '∞' : BASELINE_STATS.pf.toFixed(2)}</strong> · <strong style="color: ${BASELINE_STATS.totalPnl >= 0 ? 'var(--green)' : 'var(--red)'}">${formatMoney(BASELINE_STATS.totalPnl)}</strong>`;
+    document.getElementById('totalAvail').textContent = ALL_TRADES.length;
+    recompute();
+  } catch (e) {
+    document.getElementById('loadingMsg').textContent = 'Error: ' + e.message;
+  }
+}
+
+function initFilters() {
+  // Unique values
+  const triggers = new Set(ALL_TRADES.map(t => t.trigger_type || 'unknown'));
+  const dirs = new Set(ALL_TRADES.map(t => t.direction));
+  const sessions = new Set(ALL_TRADES.map(t => t.session || 'unknown'));
+  const dows = new Set(ALL_TRADES.map(t => t.day_of_week).filter(d => d != null));
+  const hours = new Set(ALL_TRADES.map(t => t.hour_utc).filter(h => h != null));
+  const htf = new Set(ALL_TRADES.map(t => t.htf_bias || 'unknown'));
+
+  state.triggers = new Set(triggers);
+  state.dirs = new Set(dirs);
+  state.sessions = new Set(sessions);
+  state.dows = new Set(dows);
+  state.hours = new Set(hours);
+  state.htfBias = new Set(htf);
+
+  buildToggle('triggerToggles', [...triggers].sort(), state.triggers, 'blue-on');
+  buildToggle('dirToggles', [...dirs].sort(), state.dirs, 'blue-on');
+  buildToggle('sessionToggles', [...sessions].sort(), state.sessions, 'blue-on');
+  buildToggle('dowToggles', [...dows].sort((a,b) => a-b), state.dows, 'blue-on', dowLabel);
+  buildToggle('hourToggles', [...hours].sort((a,b) => a-b), state.hours, 'blue-on', h => h + 'h');
+  buildToggle('htfToggles', [...htf].sort(), state.htfBias, 'blue-on');
+
+  // Sliders
+  bindSlider('minConf', 'vMinConf', v => v);
+  bindSlider('confCeil', 'vConfCeil', v => v);
+  bindSlider('atrFloor', 'vAtrFloor', v => parseFloat(v).toFixed(1));
+  bindSlider('atrCeil', 'vAtrCeil', v => parseFloat(v).toFixed(1));
+
+  // Checkboxes
+  document.getElementById('blockCounterHTF').addEventListener('change', e => { state.blockCounterHTF = e.target.checked; recompute(); });
+  document.getElementById('blockSLhitOnly').addEventListener('change', e => { state.blockSLhitOnly = e.target.checked; recompute(); });
+
+  // Reset
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    location.reload();
+  });
+
+  // Copy config
+  document.getElementById('copyBtn').addEventListener('click', async () => {
+    const cfg = `# AIdan filter config (what-if)\n` +
+      `MIN_CONFIDENCE=${state.minConf}\n` +
+      `CONF_CEILING=${state.confCeil}\n` +
+      `ATR_FLOOR=${state.atrFloor}\n` +
+      `ATR_CEILING=${state.atrCeil}\n` +
+      `BLOCK_COUNTER_HTF=${state.blockCounterHTF}\n` +
+      `BLOCK_SL_HIT_ONLY=${state.blockSLhitOnly}\n` +
+      `ALLOWED_TRIGGERS=${[...state.triggers].join(',')}\n` +
+      `ALLOWED_DIRS=${[...state.dirs].join(',')}\n` +
+      `ALLOWED_SESSIONS=${[...state.sessions].join(',')}\n` +
+      `ALLOWED_HOURS_UTC=${[...state.hours].sort((a,b)=>a-b).join(',')}\n` +
+      `ALLOWED_DOW=${[...state.dows].sort((a,b)=>a-b).join(',')}\n` +
+      `ALLOWED_HTF_BIAS=${[...state.htfBias].join(',')}\n`;
+    try {
+      await navigator.clipboard.writeText(cfg);
+      showToast('✓ Config copiado');
+    } catch (e) {
+      showToast('Error: ' + e.message, 'var(--red)');
+    }
+  });
+}
+
+function dowLabel(d) {
+  return ['Lu','Ma','Mi','Ju','Vi','Sa','Do'][d] || d;
+}
+
+function buildToggle(elId, values, stateSet, colorClass, fmt) {
+  const wrap = document.getElementById(elId);
+  wrap.innerHTML = '';
+  values.forEach(v => {
+    const btn = document.createElement('span');
+    btn.className = 'chip-tog ' + colorClass;
+    btn.textContent = fmt ? fmt(v) : v;
+    btn.dataset.value = v;
+    btn.addEventListener('click', () => {
+      if (stateSet.has(v)) { stateSet.delete(v); btn.classList.add('off'); }
+      else { stateSet.add(v); btn.classList.remove('off'); }
+      recompute();
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+function bindSlider(id, valId, fmt) {
+  const sl = document.getElementById(id);
+  const v = document.getElementById(valId);
+  v.textContent = fmt(sl.value);
+  sl.addEventListener('input', e => {
+    const val = parseFloat(e.target.value);
+    state[id] = val;
+    v.textContent = fmt(val);
+    recompute();
+  });
+  state[id] = parseFloat(sl.value);
+}
+
+function passesFilters(t) {
+  if (t.confidence != null && (t.confidence < state.minConf || t.confidence > state.confCeil)) return false;
+  if (t.avg_range_pips != null && (t.avg_range_pips < state.atrFloor || t.avg_range_pips > state.atrCeil)) return false;
+  if (!state.triggers.has(t.trigger_type || 'unknown')) return false;
+  if (!state.dirs.has(t.direction)) return false;
+  if (!state.sessions.has(t.session || 'unknown')) return false;
+  if (t.day_of_week != null && !state.dows.has(t.day_of_week)) return false;
+  if (t.hour_utc != null && !state.hours.has(t.hour_utc)) return false;
+  if (!state.htfBias.has(t.htf_bias || 'unknown')) return false;
+
+  // Counter-HTF blocking
+  if (state.blockCounterHTF) {
+    if (t.htf_bias === 'bullish' && t.direction === 'PUT') return false;
+    if (t.htf_bias === 'bearish' && t.direction === 'CALL') return false;
+  }
+
+  // SL-hit-only exclusion
+  if (state.blockSLhitOnly && t.sl_hit === 1) return false;
+
+  return true;
+}
+
+function computeStats(trades) {
+  const n = trades.length;
+  if (n === 0) return { n: 0, wins: 0, losses: 0, wr: 0, pf: 0, totalPnl: 0, avgPnl: 0, gw: 0, gl: 0, best: 0, worst: 0, byTrigger: {}, byHour: {} };
+  let wins = 0, losses = 0, totalPnl = 0, gw = 0, gl = 0, best = -Infinity, worst = Infinity;
+  const byTrigger = {};
+  const byHour = {};
+  trades.forEach(t => {
+    const pnl = t.mt5_pnl || 0;
+    totalPnl += pnl;
+    if (pnl > 0) { wins++; gw += pnl; } else { losses++; gl += Math.abs(pnl); }
+    if (pnl > best) best = pnl;
+    if (pnl < worst) worst = pnl;
+    const tk = t.trigger_type || 'unknown';
+    if (!byTrigger[tk]) byTrigger[tk] = { n: 0, wins: 0, pnl: 0 };
+    byTrigger[tk].n++;
+    byTrigger[tk].pnl += pnl;
+    if (pnl > 0) byTrigger[tk].wins++;
+    const h = t.hour_utc;
+    if (h != null) {
+      if (!byHour[h]) byHour[h] = { n: 0, wins: 0 };
+      byHour[h].n++;
+      if (pnl > 0) byHour[h].wins++;
+    }
+  });
+  const pf = gl > 0 ? gw / gl : Infinity;
+  return {
+    n, wins, losses,
+    wr: (wins / n * 100),
+    pf,
+    totalPnl,
+    avgPnl: totalPnl / n,
+    gw, gl,
+    best, worst,
+    byTrigger, byHour,
+  };
+}
+
+function recompute() {
+  const filtered = ALL_TRADES.filter(passesFilters);
+  const st = computeStats(filtered);
+  renderStats(st);
+  renderVerdict(st);
+  renderEquityChart(filtered);
+  renderTriggerChart(st);
+  renderTriggerTable(st);
+  renderHeatmap(st);
+}
+
+function formatMoney(v) {
+  return (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2);
+}
+
+function renderStats(st) {
+  document.getElementById('kTrades').textContent = st.n;
+  document.getElementById('kWR').textContent = st.n ? st.wr.toFixed(1) + '%' : '--';
+  document.getElementById('kPF').textContent = st.n ? (st.pf === Infinity ? '∞' : st.pf.toFixed(2)) : '--';
+  document.getElementById('kPnL').textContent = st.n ? formatMoney(st.totalPnl) : '--';
+  document.getElementById('kAvg').textContent = st.n ? formatMoney(st.avgPnl) : '--';
+  document.getElementById('kBest').textContent = st.n ? formatMoney(st.best) : '--';
+  document.getElementById('kWorst').textContent = st.n ? 'min ' + formatMoney(st.worst) : '';
+
+  // Color WR
+  const wrEl = document.getElementById('kWR');
+  wrEl.className = 'value ' + (st.wr >= 50 ? 'green' : st.wr >= 40 ? '' : 'red');
+  // Color PF
+  const pfEl = document.getElementById('kPF');
+  pfEl.className = 'value ' + (st.pf >= 1.2 ? 'green' : st.pf >= 1 ? '' : 'red');
+  // Color PnL
+  const pnlEl = document.getElementById('kPnL');
+  pnlEl.className = 'value ' + (st.totalPnl > 0 ? 'green' : st.totalPnl < 0 ? 'red' : '');
+
+  // Deltas vs baseline
+  if (BASELINE_STATS && st.n > 0) {
+    setDelta('dTrades', st.n - BASELINE_STATS.n, false);
+    setDelta('dWR', st.wr - BASELINE_STATS.wr, true, '%');
+    setDelta('dPF', isFinite(st.pf) && isFinite(BASELINE_STATS.pf) ? st.pf - BASELINE_STATS.pf : null, true, '', 2);
+    setDelta('dPnL', st.totalPnl - BASELINE_STATS.totalPnl, true, '$');
+  }
+}
+
+function setDelta(elId, delta, colored, unit, decimals) {
+  const el = document.getElementById(elId);
+  if (delta == null) { el.textContent = ''; el.className = 'delta'; return; }
+  const d = decimals != null ? delta.toFixed(decimals) : delta.toFixed(1);
+  const sign = delta > 0 ? '+' : '';
+  el.textContent = `Δ ${sign}${d}${unit || ''} vs baseline`;
+  if (colored) {
+    el.className = 'delta ' + (delta > 0 ? 'green' : delta < 0 ? 'red' : '');
+  } else {
+    el.className = 'delta';
+  }
+}
+
+function renderVerdict(st) {
+  const v = document.getElementById('verdict');
+  if (st.n === 0) {
+    v.className = 'banner';
+    v.innerHTML = '<strong>0 trades</strong> con estos filtros. Aflojá criterios.';
+    return;
+  }
+  if (st.n < 10) {
+    v.className = 'banner';
+    v.innerHTML = `<strong>${st.n} trades</strong> — muestra muy chica, NO decidir con esta data.`;
+    return;
+  }
+  const deltaPnl = st.totalPnl - BASELINE_STATS.totalPnl;
+  const deltaPf = isFinite(st.pf) ? st.pf - BASELINE_STATS.pf : 0;
+  if (deltaPnl > 20 && deltaPf > 0.1) {
+    v.className = 'banner green';
+    v.innerHTML = `✓ <strong>Mejora significativa</strong>: ${formatMoney(deltaPnl)} sobre baseline y PF +${deltaPf.toFixed(2)}. Considera implementar estos filtros.`;
+  } else if (deltaPnl < -20) {
+    v.className = 'banner';
+    v.innerHTML = `✗ Estos filtros empeorarian: ${formatMoney(deltaPnl)} vs baseline.`;
+  } else {
+    v.className = 'banner';
+    v.innerHTML = `→ Diferencia marginal vs baseline (${formatMoney(deltaPnl)}, ΔPF ${deltaPf > 0 ? '+' : ''}${deltaPf.toFixed(2)}). No vale la pena cambiar.`;
+  }
+}
+
+function renderEquityChart(trades) {
+  const sorted = [...trades].sort((a, b) => new Date(a.archived_at) - new Date(b.archived_at));
+  let cum = 0;
+  const equity = sorted.map(t => { cum += t.mt5_pnl || 0; return cum; });
+  const baseSorted = [...ALL_TRADES].sort((a, b) => new Date(a.archived_at) - new Date(b.archived_at));
+  let bcum = 0;
+  const bequity = baseSorted.map(t => { bcum += t.mt5_pnl || 0; return bcum; });
+
+  const ctx = document.getElementById('equityChart').getContext('2d');
+  if (charts.equity) charts.equity.destroy();
+  charts.equity = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [
+        { label: 'Baseline (todos)', data: bequity.map((y, i) => ({ x: i, y })), borderColor: '#555', borderWidth: 1, borderDash: [4, 4], fill: false, pointRadius: 0, tension: 0.1 },
+        { label: 'Con filtros', data: equity.map((y, i) => ({ x: i, y })), borderColor: '#4f8ff7', backgroundColor: '#4f8ff720', borderWidth: 2, fill: true, pointRadius: 0, tension: 0.1 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#e8ecf2', font: { size: 11 } } } },
+      scales: {
+        x: { type: 'linear', ticks: { color: '#999' }, grid: { color: '#1a1a1a' }, title: { display: true, text: 'Trade #', color: '#999' } },
+        y: { ticks: { color: '#999', callback: v => '$' + v }, grid: { color: '#1a1a1a' } },
+      },
+    }
+  });
+}
+
+function renderTriggerChart(st) {
+  const entries = Object.entries(st.byTrigger).sort((a, b) => b[1].pnl - a[1].pnl);
+  const labels = entries.map(e => e[0]);
+  const pnls = entries.map(e => e[1].pnl);
+  const colors = pnls.map(p => p > 0 ? '#00f5a0' : '#ff4466');
+
+  const ctx = document.getElementById('triggerChart').getContext('2d');
+  if (charts.trigger) charts.trigger.destroy();
+  charts.trigger = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'PnL $', data: pnls, backgroundColor: colors }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#999', callback: v => '$' + v }, grid: { color: '#1a1a1a' } },
+        y: { ticks: { color: '#e8ecf2', font: { size: 11 } }, grid: { color: '#1a1a1a' } },
+      },
+    }
+  });
+}
+
+function renderTriggerTable(st) {
+  const entries = Object.entries(st.byTrigger).sort((a, b) => b[1].n - a[1].n);
+  const rows = entries.map(([tk, d]) => {
+    const wr = d.n > 0 ? (d.wins / d.n * 100) : 0;
+    const wrC = wr >= 50 ? 'green' : wr >= 40 ? '' : 'red';
+    const pC = d.pnl > 0 ? 'green' : d.pnl < 0 ? 'red' : '';
+    return `<tr>
+      <td>${tk}</td>
+      <td class="num">${d.n}</td>
+      <td class="num ${wrC}">${wr.toFixed(0)}%</td>
+      <td class="num ${pC}">${formatMoney(d.pnl)}</td>
+      <td class="num">${d.n > 0 ? formatMoney(d.pnl / d.n) : '--'}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('triggerTable').innerHTML = `<thead><tr><th>Trigger</th><th class="num">Trades</th><th class="num">WR%</th><th class="num">PnL</th><th class="num">Avg/trade</th></tr></thead><tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:var(--muted)">Sin trades</td></tr>'}</tbody>`;
+}
+
+function renderHeatmap(st) {
+  const wrap = document.getElementById('heatmap');
+  wrap.innerHTML = '<div class="h-lbl"></div>';
+  // Header row: hours 0-23
+  for (let h = 0; h < 24; h++) {
+    const lbl = document.createElement('div');
+    lbl.className = 'h-lbl';
+    lbl.textContent = h;
+    wrap.appendChild(lbl);
+  }
+  // Single row of WR per hour
+  const lbl = document.createElement('div');
+  lbl.className = 'h-lbl';
+  lbl.textContent = 'WR';
+  wrap.appendChild(lbl);
+  for (let h = 0; h < 24; h++) {
+    const cell = document.createElement('div');
+    cell.className = 'h-cell';
+    const d = st.byHour[h];
+    if (!d || d.n === 0) {
+      cell.classList.add('empty');
+      cell.textContent = '·';
+    } else {
+      const wr = d.wins / d.n * 100;
+      // Color: rojo (0%) -> amarillo (50%) -> verde (100%)
+      let bg;
+      if (wr >= 50) {
+        const t = (wr - 50) / 50;
+        bg = `rgba(0, 245, 160, ${0.3 + t * 0.5})`;
+      } else {
+        const t = (50 - wr) / 50;
+        bg = `rgba(255, 68, 102, ${0.3 + t * 0.5})`;
+      }
+      cell.style.background = bg;
+      cell.textContent = wr.toFixed(0);
+      cell.title = `${h}h UTC — ${d.wins}/${d.n} (${wr.toFixed(1)}%)`;
+    }
+    wrap.appendChild(cell);
+  }
+}
+
+function showToast(text, color) {
+  const t = document.getElementById('toast');
+  t.textContent = text;
+  if (color) t.style.background = color;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+loadData();
+</script>
+
+</body>
+</html>

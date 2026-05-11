@@ -296,6 +296,50 @@ async def theme_editor():
     return {"message": "Theme editor no encontrado", "tried": candidates}
 
 
+# v3.30.6 — What-if simulator: HTML interactivo sobre trade_archive REAL.
+# Sliders/checkboxes para filtros que recomputan WR/PF/PnL al instante sobre
+# 165+ trades historicos. Inspirado en Thariq/Anthropic — HTML interactivo
+# en lugar de Markdown estatico. Permite responder: "que hubiera pasado si
+# hubiera tenido X filtro activo?"
+@app.get("/what-if")
+async def what_if():
+    """Sirve el HTML del what-if simulator."""
+    candidates = [
+        os.path.join(base_path, 'what_if_simulator.html'),
+        os.path.join(base_path, 'tools', 'what_if_simulator.html'),
+        os.path.join(os.path.dirname(base_path), 'tools', 'what_if_simulator.html'),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return FileResponse(p, media_type="text/html", headers=NO_CACHE_HEADERS)
+    return JSONResponse({"message": "What-if simulator no encontrado", "tried": candidates})
+
+
+@app.get("/trade-archive-data")
+async def trade_archive_data():
+    """Returns trade_archive data como JSON para consumir client-side
+    desde el what-if simulator. Filtra trades con mt5_pnl NULL (no completados)."""
+    import sqlite3
+    from src.common.db import DB_PATH
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, direction, result, pips, sl_pips, tp_pips,
+               confidence, impact_score, trigger_type, setup_type, htf_bias,
+               rsi_at_entry, avg_range_pips, session, hour_utc, day_of_week,
+               mt5_pnl, market_trend, trend_strength, volatility,
+               sl_hit, tp_hit, profile_name, archived_at
+        FROM trade_archive
+        WHERE result IN ('win', 'loss') AND mt5_pnl IS NOT NULL
+        ORDER BY archived_at DESC
+    """)
+    cols = [d[0] for d in cur.description]
+    trades = [dict(zip(cols, r)) for r in cur.fetchall()]
+    conn.close()
+    return JSONResponse({'trades': trades, 'count': len(trades)},
+                        headers=NO_CACHE_HEADERS)
+
+
 # v3.30.4 — Backtest HTML reports: sirve el ultimo HTML generado por
 # tools/backtest_html_report.py si existe. Sino, instrucciones.
 @app.get("/backtest-report")
