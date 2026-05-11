@@ -340,34 +340,8 @@ async def trade_archive_data():
                         headers=NO_CACHE_HEADERS)
 
 
-# v3.30.4 — Backtest HTML reports: sirve el ultimo HTML generado por
-# tools/backtest_html_report.py si existe. Sino, instrucciones.
-@app.get("/backtest-report")
-async def backtest_report():
-    """Sirve el HTML report mas reciente del backtest H1+M15."""
-    import glob
-    # Buscar en multiples ubicaciones (dev vs frozen exe vs cwd)
-    search_dirs = [
-        os.getcwd(),
-        base_path,
-        os.path.dirname(base_path),
-        # Si frozen exe, base_path es temp dir; el .exe corre desde F:\AIdan\dist
-        os.path.dirname(getattr(__import__('sys'), 'executable', '')) if getattr(__import__('sys'), 'frozen', False) else None,
-        # Project root (F:\AIdan) si exe vive en dist/
-        os.path.dirname(os.path.dirname(getattr(__import__('sys'), 'executable', ''))) if getattr(__import__('sys'), 'frozen', False) else None,
-    ]
-    htmls = []
-    for d in search_dirs:
-        if d and os.path.isdir(d):
-            htmls += glob.glob(os.path.join(d, 'backtest_h1_m15_*.html'))
-    htmls = sorted(set(htmls))
-    if htmls:
-        return FileResponse(htmls[-1], media_type="text/html", headers=NO_CACHE_HEADERS)
-    return JSONResponse({
-        'message': 'Sin HTML report. Generar con: python tools/backtest_html_report.py',
-        'note': 'Requiere haber corrido antes: python tools/backtest_h1_m15.py',
-        'searched': [str(d) for d in search_dirs if d],
-    })
+# v3.30.7 — /backtest-report removido (reemplazado por /what-if que usa
+# data REAL de trade_archive en vez de backtest sintetico).
 
 @app.on_event("startup")
 async def startup():

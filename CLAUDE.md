@@ -132,7 +132,6 @@ GET /smc-state                # SMC multi-TF + zones
 GET /auto-strategies?limit=10 # Last strategies
 GET /performance              # WR, PnL, PF
 GET /theme-editor             # Editor visual de paleta CSS (Thariq-style)
-GET /backtest-report          # Ultimo HTML interactivo del backtest H1+M15
 GET /what-if                  # What-if simulator sobre trade_archive REAL
 GET /trade-archive-data       # JSON con todos los trades archivados (data del what-if)
 ```
@@ -193,7 +192,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.30.3 | Fix /recent Markdown (escape `_`) + drawdown alert daily-basis (no spam lifetime) | activo |
 | v3.30.4 | HTML interactive tools: theme editor + backtest report (inspired by Thariq/Anthropic) | activo |
 | v3.30.5 | Theme editor: font-size + card-padding sliders ahora cascadean visualmente (em units) | activo |
-| **v3.30.6** | **What-if simulator: filtros retroactivos sobre trade_archive REAL (164 trades, no backtest sintetico)** | **actual** |
+| v3.30.6 | What-if simulator: filtros retroactivos sobre trade_archive REAL (164 trades) | activo |
+| **v3.30.7** | **Remove backtest HTML report + tutorial inline en what-if simulator** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -356,7 +356,6 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | Script | Propósito |
 |---|---|
 | `backtest_h1_m15.py` | Backtest estructural-only sobre candles MT5 históricas. Re-corre `detect_structure_signals()` y simula SL/TP/expiry hit. Solo trigger `structure`, sin news/calendar/pre_planned/smc-live. |
-| `backtest_html_report.py` | Convierte el JSON+CSV del backtest en HTML interactivo single-file con sliders (min_conf, setup_type, direction), charts equity-curve, breakdown table. Inspirado en approach de Thariq (Anthropic). Endpoint: `/backtest-report`. |
 | `dashboard_theme_editor.html` | Editor visual standalone con color pickers + sliders para todos los CSS vars del dashboard. Live preview de cards/charts/tables. Presets (Dark/Light/Midnight/Terminal/Sunset). Botón export CSS al clipboard. Endpoint: `/theme-editor`. |
 | `what_if_simulator.html` | Simulador retroactivo sobre `trade_archive` REAL (164+ trades). Sliders min_conf/conf_ceil/atr_floor/atr_ceil + checkboxes trigger/dir/session/dow/hour/htf_bias + bloqueo counter-HTF + exclude SL-hit-only. Recomputa WR/PF/PnL al instante, delta vs baseline real. Equity curve, heatmap por hora, breakdown trigger. Endpoint: `/what-if`. Data via `/trade-archive-data`. |
 | `backtest_parallel.py` | Backtest paralelo de combinaciones de filtros sobre `trade_archive` (trades ya ejecutados). |
@@ -461,4 +460,4 @@ cat F:/AIdan/CLAUDE.md
 
 ---
 
-**Última actualización**: 11 May 2026 — v3.30.6
+**Última actualización**: 11 May 2026 — v3.30.7
