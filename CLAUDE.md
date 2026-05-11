@@ -185,7 +185,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.29.x | Dashboard equity curve + heatmap + trade modal + slippage stats + filter contrib | activo |
 | v3.30.0 | Performance: 15 DB indexes + cache TTL + polling redundante eliminado | activo |
 | v3.30.1 | MTF candle fetch paralelo + news LLM analysis paralelo | activo |
-| **v3.30.2** | **Shutdown rapido <2s + LRU cache news + query optimization /auto-strategies** | **actual** |
+| v3.30.2 | Shutdown rapido <2s + LRU cache news + query optimization /auto-strategies | activo |
+| **v3.30.3** | **Fix /recent Markdown (escape `_`) + drawdown alert daily-basis (no spam lifetime)** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -450,4 +451,4 @@ cat F:/AIdan/CLAUDE.md
 
 ---
 
-**Última actualización**: 9 May 2026 — v3.30.2
+**Última actualización**: 9 May 2026 — v3.30.3

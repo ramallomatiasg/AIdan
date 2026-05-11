@@ -203,11 +203,16 @@ class TelegramBot:
             if not rows:
                 self._send("Sin estrategias recientes.")
                 return
+            # v3.30.3 — Telegram Markdown parser interpreta '_' como italic delim.
+            # status='auto_win'/'auto_loss' rompia parsing (HTTP 400). Escapamos.
+            def esc(s):
+                return str(s or '').replace('_', '\\_').replace('*', '\\*')
             lines = ["*Ultimas 5 estrategias:*"]
             for r in rows:
                 rid, direction, status, pnl, trigger, created = r
-                pnl_str = f"${pnl:+.2f}" if pnl else "..."
-                lines.append(f"#{rid} `{trigger[:14]}` {direction} {status} {pnl_str}")
+                pnl_str = f"${pnl:+.2f}" if pnl is not None else "..."
+                trig_short = esc((trigger or '?')[:14])
+                lines.append(f"#{rid} `{trig_short}` {esc(direction)} {esc(status)} {pnl_str}")
             self._send("\n".join(lines))
         except Exception as e:
             self._send(f"Error: {e}")

@@ -10,7 +10,7 @@ Setup (1 vez):
 4. Restart AIdan. Test con: curl http://localhost:8000/telegram/test
 
 Niveles:
-  CRITICAL — drawdown >$50, AIdan caído, balance <$880
+  CRITICAL — daily drawdown >=2% del balance, AIdan caído, kill switch ON
   WIN     — trade ganador
   LOSS    — trade perdedor
   INFO    — eventos generales (start, stop, milestones)
@@ -123,12 +123,17 @@ def send_trade_result(strategy_id, direction, trigger_type, pnl, conf, balance=N
 
 
 def send_drawdown_alert(daily_pnl, balance, baseline=1000):
-    """Alert si drawdown serio. Solo dispara con drawdown >=5%."""
-    drawdown = baseline - balance
-    pct = drawdown / baseline * 100
-    if pct >= 5:
-        msg = f"Drawdown: ${drawdown:.2f} ({pct:.1f}% del capital)\n"
-        msg += f"Daily PnL: ${daily_pnl:+.2f}\n"
+    """v3.30.3 — Alert solo si DAILY drawdown >= 2% del balance actual.
+    Antes: comparaba balance vs baseline=$1000 fijo. Bug: si balance llevaba
+    semanas debajo de $1000 (caso real $907 = -9.2%) el alert disparaba CADA
+    30min indefinidamente (spam). Ahora la metrica es daily PnL en % del
+    balance corriente — un dia malo real, no la suma historica.
+    """
+    if balance <= 0:
+        return False
+    pct = abs(daily_pnl) / balance * 100 if daily_pnl < 0 else 0
+    if daily_pnl < 0 and pct >= 2:
+        msg = f"Daily drawdown: ${daily_pnl:+.2f} ({pct:.1f}% del balance)\n"
         msg += f"Balance: ${balance:.2f}"
         return send_alert(msg, level='CRITICAL')
     return False
@@ -163,12 +168,17 @@ _MILESTONE_SENT = set()  # set de "{track}_{trade_count_milestone}" para no repe
 
 
 def check_and_send_drawdown(balance, daily_pnl, baseline=1000):
-    """Throttled drawdown alert: max 1 cada 30min, escala thresholds."""
+    """v3.30.3 — Throttled DAILY drawdown alert.
+    Trigger: daily_pnl < 0 AND |daily_pnl|/balance >= 2%
+    Throttle: 6h (vs 30min antes — evita spam si dia malo persiste).
+    Antes: comparaba balance vs baseline=$1000 (lifetime). Bug spam si balance<baseline.
+    """
     global _DRAWDOWN_LAST_SENT
-    drawdown = baseline - balance
-    pct = drawdown / baseline * 100
+    if balance <= 0 or daily_pnl >= 0:
+        return False
+    pct = abs(daily_pnl) / balance * 100
     now = time.time()
-    if pct >= 5 and (now - _DRAWDOWN_LAST_SENT) > 1800:  # 30min throttle
+    if pct >= 2 and (now - _DRAWDOWN_LAST_SENT) > 21600:  # 6h throttle
         if send_drawdown_alert(daily_pnl, balance, baseline):
             _DRAWDOWN_LAST_SENT = now
             return True
