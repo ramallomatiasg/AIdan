@@ -190,10 +190,29 @@ def _parse_plan_response(result):
     }
 
     # Sanity check: reasoning vs direction contradiction
+    # v3.31.4 — expandida lista por bug observado: 'movimiento a la baja' /
+    # 'impacto negativo' NO se detectaban con la lista anterior, causaba que
+    # CALL se ejecutara cuando LLM razono bearish.
     if plan['should_trade']:
         reasoning_lower = plan['reasoning'].lower()
-        bearish_words = ('seguir cayendo', 'caer', 'bearish', 'bajista', 'bajar', 'debilitar')
-        bullish_words = ('subir', 'alcista', 'bullish', 'rally', 'fortalecer', 'alza')
+        bearish_words = (
+            # Originales
+            'seguir cayendo', 'caer', 'bearish', 'bajista', 'bajar', 'debilitar',
+            # v3.31.4: agregadas
+            'a la baja', 'movimiento a la baja', 'impacto negativo', 'negativo en el eur',
+            'caída', 'caida', 'descenso', 'declive', 'baja del', 'baja de',
+            'corrección', 'correccion', 'venta', 'sell', 'short', 'bear ',
+            'cae', 'baja en', 'presión bajista', 'presion bajista',
+        )
+        bullish_words = (
+            # Originales
+            'subir', 'alcista', 'bullish', 'rally', 'fortalecer', 'alza',
+            # v3.31.4: agregadas
+            'a la alza', 'al alza', 'impacto positivo', 'positivo en el eur',
+            'subida', 'ascenso', 'avance', 'sube', 'sube del', 'sube de',
+            'compra', 'buy', 'long', 'bull ', 'presión alcista', 'presion alcista',
+            'fortalece', 'apreciación', 'apreciacion',
+        )
         is_bearish_reasoning = any(w in reasoning_lower for w in bearish_words)
         is_bullish_reasoning = any(w in reasoning_lower for w in bullish_words)
 

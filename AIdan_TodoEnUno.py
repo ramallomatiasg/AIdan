@@ -943,9 +943,10 @@ class AIdan:
                 except Exception as e:
                     logger.error(f"MT5 init error: {e}")
 
-            def _try_mt5_execute(sid, direction, entry_price, sl, tp, confidence, track='m5'):
+            def _try_mt5_execute(sid, direction, entry_price, sl, tp, confidence, track='m5', trigger_type=None):
                 """v3.28.0: track param para consensus boost + spread guardian.
-                track: 'm5'|'m15'|'h1'."""
+                track: 'm5'|'m15'|'h1'.
+                v3.31.4: trigger_type='pre_planned' -> lot cap 0.05 (news event safety)."""
                 if mt5_exec and mt5_exec.is_ready():
                     # Block new trades 10min before market close (Friday 20:50+ UTC)
                     try:
@@ -984,7 +985,7 @@ class AIdan:
                     except Exception as _ce:
                         logger.debug(f"Consensus check: {_ce}")
                     try:
-                        ticket = mt5_exec.open_position(sid, direction, entry_price, sl, tp, confidence, lot_multiplier=lot_mult)
+                        ticket = mt5_exec.open_position(sid, direction, entry_price, sl, tp, confidence, lot_multiplier=lot_mult, trigger_type=trigger_type)
                         if ticket:
                             logger.info(f"MT5 executed: ticket #{ticket} for strategy #{sid} (track={track}, lot_mult={lot_mult})")
                         return ticket
@@ -1277,6 +1278,10 @@ class AIdan:
                         logger.warning(f"Pre-planner error: {_pe}", exc_info=True)
 
                     # ── Activate planned strategies close to event time ──
+                    # v3.31.4 — Bug fix: pre-plans usaban SL/TP del profile M5 (5p/15p)
+                    # que es absurdo para news events. Ahora usa planned_sl_pips/planned_tp_pips
+                    # del LLM. Fallback: SL 20p / TP 40p (wider para acomodar volatility
+                    # de news release). Tambien skip si confidence < 60 (bug: conf 50 entraba).
                     try:
                         from src.common.db import activate_due_planned_strategies
                         activated = activate_due_planned_strategies(minutes_before=5)
@@ -1288,16 +1293,27 @@ class AIdan:
                                     import sqlite3 as _sq3
                                     _act_price = tech.get_market_state().get('price', 0)
                                     if _act_price > 0:
-                                        _profile = get_active_profile()
-                                        _sl_p = _profile.get('sl_pips', 5)
-                                        _tp_p = _profile.get('tp_pips', 15)
                                         _pip = 0.0001
                                         _conn = _sq3.connect(DB_PATH)
                                         _cur = _conn.cursor()
-                                        _cur.execute("SELECT direction, confidence FROM auto_strategies WHERE id = ?", (_act_id,))
+                                        # v3.31.4: leer SL/TP planificados por el LLM + confidence
+                                        _cur.execute("""SELECT direction, confidence, planned_sl_pips, planned_tp_pips
+                                                        FROM auto_strategies WHERE id = ?""", (_act_id,))
                                         _row = _cur.fetchone()
                                         if _row:
-                                            _dir = _row[0]
+                                            _dir, _conf, _planned_sl, _planned_tp = _row
+                                            # v3.31.4 — Min conf 60 para pre-plans (era 50 sin check)
+                                            if _conf is not None and _conf < 60:
+                                                logger.warning(f"Pre-plan #{_act_id}: conf {_conf} < 60, marcando skipped")
+                                                _cur.execute("UPDATE auto_strategies SET status='auto_skipped' WHERE id=?", (_act_id,))
+                                                _conn.commit()
+                                                _conn.close()
+                                                continue
+                                            # v3.31.4: usar planned_sl/tp del LLM con piso minimo
+                                            # para evitar SL pegado (lot escala a max_lot 0.10).
+                                            # News events necesitan volatility buffer: SL >=15p / TP >=30p
+                                            _sl_p = max(float(_planned_sl or 20), 15.0)
+                                            _tp_p = max(float(_planned_tp or 40), 25.0)
                                             if _dir == 'CALL':
                                                 _sl = _act_price - _sl_p * _pip
                                                 _tp = _act_price + _tp_p * _pip
@@ -1309,6 +1325,7 @@ class AIdan:
                                                     expires_at = ? WHERE id = ?
                                             """, (_act_price, _sl, _tp, now_ar() + timedelta(minutes=30), _act_id))
                                             _conn.commit()
+                                            logger.info(f"Pre-plan #{_act_id} activated: {_dir} entry={_act_price:.5f} SL={_sl_p:.1f}p TP={_tp_p:.1f}p conf={_conf}")
                                         _conn.close()
                                 except Exception as e:
                                     logger.debug(f"Planned activation DB: {e}")
@@ -2841,9 +2858,12 @@ class AIdan:
                             unexecuted = get_active_unexecuted_strategies()
                             for strat in unexecuted:
                                 sid = strat['id']
+                                # v3.31.4: pasar trigger_type para aplicar lot cap pre-plan
+                                _trig = strat.get('trigger_type') if isinstance(strat, dict) else None
                                 ticket = _try_mt5_execute(
                                     sid, strat['direction'], strat['entry_price'],
-                                    strat['stop_loss'], strat['take_profit'], strat['confidence']
+                                    strat['stop_loss'], strat['take_profit'], strat['confidence'],
+                                    trigger_type=_trig
                                 )
                                 if ticket:
                                     logger.info(f"MT5 retry SUCCESS: ticket #{ticket} for strategy #{sid}")

@@ -150,9 +150,12 @@ class MT5Executor:
         lots = max(0.01, min(lots, max_lot))
         return round(lots, 2)
 
-    def open_position(self, strategy_id, direction, entry_price, sl, tp, confidence, lot_multiplier=1.0):
+    def open_position(self, strategy_id, direction, entry_price, sl, tp, confidence, lot_multiplier=1.0, trigger_type=None):
         """Open position: tries limit order first (better price), falls back to market.
-        v3.28.0: lot_multiplier permite consensus boost (M5+M15+H1 coinciden)."""
+        v3.28.0: lot_multiplier permite consensus boost (M5+M15+H1 coinciden).
+        v3.31.4: trigger_type='pre_planned' -> cap lot a 0.05 max (news events
+        tienen volatility alta y lot grande amplifica perdidas).
+        """
         if not self.is_ready() or not self._mt5:
             return None
 
@@ -187,6 +190,13 @@ class MT5Executor:
             max_lot = config.get('max_lot', 0.1)
             lot = min(boosted, max_lot)
             self.logger.info(f"Lot multiplier {lot_multiplier} applied: {lot:.2f} (capped at {max_lot})")
+
+        # v3.31.4 — Pre-planned (news events) lot cap = 0.05
+        # News tienen volatility alta. Lot 0.10 con SL pegado amplifica perdidas
+        # ($5.70 loss observado en #454). Cap a 0.05 limita downside.
+        if trigger_type == 'pre_planned' and lot > 0.05:
+            self.logger.info(f"Pre-planned lot cap: {lot:.2f} -> 0.05 (news event safety)")
+            lot = 0.05
 
         # Pre-flight: retry up to 3 times if spread > SL distance (news event spikes)
         current_spread = abs(tick.ask - tick.bid)
