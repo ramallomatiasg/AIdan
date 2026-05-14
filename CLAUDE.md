@@ -202,7 +202,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.30.5 | Theme editor: font-size + card-padding sliders ahora cascadean visualmente (em units) | activo |
 | v3.30.6 | What-if simulator: filtros retroactivos sobre trade_archive REAL (164 trades) | activo |
 | v3.30.7 | Remove backtest HTML report + tutorial inline en what-if simulator | activo |
-| **v3.31.0** | **Meta-Optimization: shadow mode + LLM nightly analyst (19h AR) + auto-applier + monitor con rollback** | **actual** |
+| v3.31.0 | Meta-Optimization: shadow mode + LLM nightly analyst (19h AR) + auto-applier + monitor con rollback | activo |
+| **v3.31.1** | **Full autopilot: auto_start_shadow_for_proposed() — proposed→shadow_validating automatico, max 3 simultaneos, dedup** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -646,4 +647,4 @@ schtasks /Run /TN "AIdan_NightlyAnalyst"
 
 ---
 
-**Última actualización**: 14 May 2026 — v3.31.0 (Meta-Optimization: shadow mode + LLM nightly analyst + auto-applier + monitor)
+**Última actualización**: 14 May 2026 — v3.31.1 (Full autopilot: proposed → shadow_validating automatico)

@@ -268,14 +268,67 @@ def _send_telegram_validated(change, stats, baseline):
         logger.debug(f"telegram validated: {e}")
 
 
+def auto_start_shadow_for_proposed():
+    """v3.31.1 — Full autopilot: cambios proposed pasan automaticamente a
+    shadow_validating sin intervencion manual.
+
+    Filtros antes de promover:
+    - No promover cambios del mismo change_type ya en shadow/validated/applied
+      (evita duplicar testing del mismo experimento)
+    - Max 3 cambios en shadow_validating simultaneos (evita overload del
+      shadow runner)
+    """
+    from src.common.db import get_pending_changes, update_pending_change_status
+    proposed = get_pending_changes(status='proposed', limit=10)
+    if not proposed:
+        return
+
+    # Limit max 3 en shadow_validating activos
+    current_shadow = get_pending_changes(status='shadow_validating', limit=10)
+    slots = max(0, 3 - len(current_shadow))
+    if slots == 0:
+        return
+
+    # Get types ya en pipeline para no duplicar (excluding rejected/reverted)
+    active_types = set()
+    for s in ['shadow_validating', 'validated', 'applied']:
+        for c in get_pending_changes(status=s, limit=20):
+            try:
+                import json as _json
+                key = c['change_type'] + ':' + _json.dumps(_json.loads(c['params_json']), sort_keys=True)
+                active_types.add(key)
+            except Exception:
+                pass
+
+    promoted = 0
+    for c in proposed:
+        if promoted >= slots:
+            break
+        try:
+            import json as _json
+            key = c['change_type'] + ':' + _json.dumps(_json.loads(c['params_json']), sort_keys=True)
+            if key in active_types:
+                # Dup: marca rejected para no re-procesar
+                update_pending_change_status(c['id'], 'rejected',
+                                              rejected_reason='duplicate_of_active_change')
+                continue
+            update_pending_change_status(c['id'], 'shadow_validating')
+            logger.info(f"Auto-started shadow for change #{c['id']} ({c['change_type']})")
+            promoted += 1
+            active_types.add(key)
+        except Exception as e:
+            logger.warning(f"auto_start_shadow #{c.get('id')}: {e}")
+
+
 def auto_applier_loop(stop_event, interval_sec=600):
-    """Daemon loop: cada `interval_sec` corre los 3 pasos del worker.
+    """Daemon loop: cada `interval_sec` corre los 4 pasos del worker.
 
     Default 600s (10 min) — balance entre responsiveness y carga DB.
     """
     logger.info(f"Auto-applier daemon started (interval {interval_sec}s)")
     while not stop_event.is_set():
         try:
+            auto_start_shadow_for_proposed()  # v3.31.1: proposed -> shadow_validating
             promote_shadow_validating_to_validated()
             auto_apply_validated_changes(max_active=1)
             monitor_applied_changes()
