@@ -317,7 +317,9 @@ def _load_prompt(kind, model_name):
 
 
 def invoke_claude_cli(stats_json, prompt_template):
-    """Invoca Claude CLI con prompt + stats. Returns LLM response as text."""
+    """Invoca Claude CLI con prompt + stats. Returns LLM response as text.
+    v3.31.6: fix '--input-file' (no existe en CLI). Usar stdin para prompts largos
+    + --bare para evitar inicializacion de hooks/skills/CLAUDE.md auto-load."""
     claude_exe = shutil.which('claude')
     if not claude_exe:
         raise RuntimeError("claude CLI not found")
@@ -325,26 +327,21 @@ def invoke_claude_cli(stats_json, prompt_template):
     # Concat prompt + stats data inline
     full_prompt = prompt_template + "\n\n## DATA INPUT (JSON):\n```json\n" + json.dumps(stats_json, indent=2) + "\n```\n"
 
-    # Save to temp file (CLI puede tener limits de stdin size)
-    tmp_input = os.path.join(os.environ.get('APPDATA', '/tmp'), 'AIdan', 'state', 'nightly_input_tmp.txt')
-    with open(tmp_input, 'w', encoding='utf-8') as f:
-        f.write(full_prompt)
-
-    # Invoke. claude CLI con --print mode + opus model
-    cmd = [claude_exe, '--print', '--model', 'claude-opus-4-5', '--input-file', tmp_input]
+    # claude --print recibe prompt via stdin (mas robusto que arg para prompts largos)
+    # Sin --bare: usa OAuth/keychain del user logueado (igual que claude interactivo).
+    # --dangerously-skip-permissions: evita prompt de aprobacion (no edita archivos,
+    # solo response text del LLM).
+    cmd = [claude_exe, '--print', '--dangerously-skip-permissions',
+           '--model', 'claude-opus-4-5']
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
-                          encoding='utf-8', errors='replace')
+        r = subprocess.run(cmd, input=full_prompt, capture_output=True, text=True,
+                          timeout=600, encoding='utf-8', errors='replace')
         if r.returncode != 0:
-            raise RuntimeError(f"claude CLI exit {r.returncode}: {r.stderr[:500]}")
+            err = (r.stderr or r.stdout or '')[:500]
+            raise RuntimeError(f"claude CLI exit {r.returncode}: {err}")
         return r.stdout
     except subprocess.TimeoutExpired:
         raise RuntimeError("claude CLI timeout (10 min)")
-    finally:
-        try:
-            os.remove(tmp_input)
-        except Exception:
-            pass
 
 
 def invoke_groq(stats_json, prompt_template, model_name='llama-3.3-70b-versatile'):
