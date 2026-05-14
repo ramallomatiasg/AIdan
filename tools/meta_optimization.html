@@ -202,13 +202,29 @@ td.red { color: var(--red); }
 </head>
 <body>
 
-<h1>🤖 Meta-Optimization</h1>
+<h1 style="display: flex; align-items: center; gap: 12px;">
+  🤖 Meta-Optimization
+  <button id="runAnalystBtn" style="background:var(--green);color:#000;border:0;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;margin-left:auto;">▶ Run analyst</button>
+  <select id="analystModel" style="background:var(--panel2);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px;font-size:12px;">
+    <option value="">Auto-detect</option>
+    <option value="opus">Force Opus 4.7</option>
+    <option value="groq">Force Groq 70B</option>
+    <option value="ollama:deepseek-r1:14b">Force deepseek-r1:14b</option>
+    <option value="ollama:deepseek-r1:7b">Force deepseek-r1:7b</option>
+    <option value="ollama:qwen2.5:7b">Force qwen2.5:7b</option>
+  </select>
+</h1>
 <div class="sub" id="metaSub">Cargando estado del meta-optimizer...</div>
 
 <div class="info-box" id="loopStatus">
-  Cambios propuestos por <strong>nightly_analyst</strong> (LLM 19:00 AR) →
-  validados vía <strong>shadow mode</strong> (1-2 semanas) →
-  aplicados al live → monitoreados (auto-revert si PF cae >10%).
+  Manual trigger: tocá <strong>▶ Run analyst</strong>. LLM analiza stats 24h/7d/30d →
+  propone cambios → auto-shadow validation (7-14 días) → auto-apply al live → monitor con
+  auto-revert si PF cae >10%.
+</div>
+
+<div id="analystStatusBox" class="panel" style="display:none;margin-bottom:14px;">
+  <h3 id="analystStatusTitle">🌙 Analyst status</h3>
+  <div id="analystStatusBody" style="font-size:12px;color:var(--text);"></div>
 </div>
 
 <div class="stats-grid" id="statsGrid"></div>
@@ -444,6 +460,102 @@ function showToast(msg, isError) {
   t.className = 'toast' + (isError ? ' error show' : ' show');
   setTimeout(() => t.classList.remove('show'), 2400);
 }
+
+// ─── Manual nightly analyst trigger ───
+const runBtn = document.getElementById('runAnalystBtn');
+const modelSel = document.getElementById('analystModel');
+const statusBox = document.getElementById('analystStatusBox');
+const statusBody = document.getElementById('analystStatusBody');
+let analystPolling = null;
+
+async function pollAnalystStatus() {
+  try {
+    const r = await fetch('/nightly-analyst/status').then(r => r.json());
+    renderAnalystStatus(r);
+    if (!r.running && analystPolling) {
+      clearInterval(analystPolling);
+      analystPolling = null;
+      runBtn.disabled = false;
+      runBtn.textContent = '▶ Run analyst';
+      runBtn.style.background = 'var(--green)';
+      // Auto-refresh main data al terminar (nuevos pending_changes)
+      setTimeout(fetchData, 500);
+    }
+  } catch (e) {
+    statusBody.innerHTML = '<span style="color:var(--red);">Status fetch error: ' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+function renderAnalystStatus(s) {
+  if (!s.started_at && !s.last_result) {
+    statusBox.style.display = 'none';
+    return;
+  }
+  statusBox.style.display = 'block';
+  const running = s.running;
+  const title = running ? '🌙 Analyst running...' : (s.last_result || 'idle').startsWith('success')
+    ? '✓ Analyst finished'
+    : '⚠ Analyst result';
+  document.getElementById('analystStatusTitle').textContent = title;
+
+  let body = '';
+  if (s.started_at) body += `<div><strong>Started:</strong> ${escapeHtml(s.started_at.substring(0,19))}</div>`;
+  if (s.finished_at) body += `<div><strong>Finished:</strong> ${escapeHtml(s.finished_at.substring(0,19))}</div>`;
+  if (s.last_result) {
+    const color = s.last_result.startsWith('success') ? 'var(--green)' : 'var(--red)';
+    body += `<div><strong>Result:</strong> <span style="color:${color}">${escapeHtml(s.last_result)}</span></div>`;
+  }
+  const newChanges = s.last_changes_created || [];
+  if (newChanges.length > 0) {
+    body += `<div style="margin-top:8px;"><strong>${newChanges.length} cambio(s) propuesto(s):</strong></div>`;
+    body += '<ul style="margin:6px 0 0 0;padding-left:20px;line-height:1.7;">';
+    for (const c of newChanges) {
+      body += `<li>#${c.id} <code>${escapeHtml(c.change_type)}</code> ${escapeHtml(c.params_json)}<br>
+               <span style="color:var(--muted);">${escapeHtml((c.reasoning||'').substring(0,200))}</span></li>`;
+    }
+    body += '</ul>';
+  } else if (!running && s.last_result && s.last_result.startsWith('success')) {
+    body += '<div style="color:var(--muted);margin-top:6px;">No se propusieron cambios (insuficiente data o sin patrones claros).</div>';
+  }
+  if (s.last_log_tail && !running) {
+    body += `<details style="margin-top:8px;"><summary style="cursor:pointer;color:var(--muted);font-size:11px;">Ver log tail</summary>
+             <pre style="background:var(--bg);padding:8px 10px;border-radius:4px;border:1px solid var(--border);font-size:10px;max-height:200px;overflow-y:auto;margin-top:6px;">${escapeHtml(s.last_log_tail)}</pre>
+             </details>`;
+  }
+  statusBody.innerHTML = body;
+}
+
+runBtn.addEventListener('click', async () => {
+  if (!confirm('Disparar análisis manual del nightly analyst?')) return;
+  runBtn.disabled = true;
+  runBtn.textContent = '⏳ Running...';
+  runBtn.style.background = 'var(--accent)';
+  try {
+    const model = modelSel.value;
+    const url = '/nightly-analyst/run' + (model ? `?model=${encodeURIComponent(model)}` : '');
+    const r = await fetch(url, { method: 'POST' });
+    const j = await r.json();
+    if (j.ok) {
+      showToast('✓ Analyst iniciado, esperando resultado...');
+      // Start polling
+      pollAnalystStatus();
+      analystPolling = setInterval(pollAnalystStatus, 3000);
+    } else {
+      runBtn.disabled = false;
+      runBtn.textContent = '▶ Run analyst';
+      runBtn.style.background = 'var(--green)';
+      showToast(`Error: ${j.error || 'desconocido'}`, true);
+    }
+  } catch (e) {
+    runBtn.disabled = false;
+    runBtn.textContent = '▶ Run analyst';
+    runBtn.style.background = 'var(--green)';
+    showToast('Error: ' + e.message, true);
+  }
+});
+
+// On load: render persistente del ultimo run
+pollAnalystStatus();
 
 // Auto-refresh cada 60s
 fetchData();

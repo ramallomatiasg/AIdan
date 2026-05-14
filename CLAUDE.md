@@ -203,7 +203,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.30.6 | What-if simulator: filtros retroactivos sobre trade_archive REAL (164 trades) | activo |
 | v3.30.7 | Remove backtest HTML report + tutorial inline en what-if simulator | activo |
 | v3.31.0 | Meta-Optimization: shadow mode + LLM nightly analyst (19h AR) + auto-applier + monitor con rollback | activo |
-| **v3.31.1** | **Full autopilot: auto_start_shadow_for_proposed() — proposed→shadow_validating automatico, max 3 simultaneos, dedup** | **actual** |
+| v3.31.1 | Full autopilot: auto_start_shadow_for_proposed() — proposed→shadow_validating automatico, max 3 simultaneos, dedup | activo |
+| **v3.31.2** | **Manual trigger: boton ▶ Run analyst en dashboard reemplaza Task Scheduler (user puede correr cuando quiera)** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -444,7 +445,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `dashboard_theme_editor.html` | Editor visual standalone con color pickers + sliders para todos los CSS vars del dashboard. Live preview de cards/charts/tables. Presets (Dark/Light/Midnight/Terminal/Sunset). Botón export CSS al clipboard. Endpoint: `/theme-editor`. |
 | `what_if_simulator.html` | Simulador retroactivo sobre `trade_archive` REAL (164+ trades). Sliders min_conf/conf_ceil/atr_floor/atr_ceil + checkboxes trigger/dir/session/dow/hour/htf_bias + bloqueo counter-HTF + exclude SL-hit-only. Recomputa WR/PF/PnL al instante, delta vs baseline real. Equity curve, heatmap por hora, breakdown trigger. Endpoint: `/what-if`. Data via `/trade-archive-data`. |
 | `meta_optimization.html` | Dashboard del meta-optimizer v3.31.0. Muestra pending_changes por status, baseline vs shadow PF, audit trail por cambio, action buttons (approve/revert/reject/start-shadow). Endpoint: `/meta-optimization`. |
-| `nightly_analyst.py` | Cron 19:00 AR. LLM analyst (Opus → Groq → Ollama fallback chain) analiza stats 24h/7d/30d y propone cambios JSON estructurados. Min sample thresholds + guard-rails hard-coded. Inicia shadow validation automaticamente. Setup: `setup_nightly_task.bat`. |
+| `nightly_analyst.py` | Manual trigger desde dashboard (botón ▶ Run analyst). LLM analyst (Opus → Groq → Ollama fallback chain) analiza stats 24h/7d/30d y propone cambios JSON estructurados. Min sample thresholds + guard-rails hard-coded. Inicia shadow validation automaticamente vía auto_applier. v3.31.2: removida la Task Scheduler. |
 | `backtest_parallel.py` | Backtest paralelo de combinaciones de filtros sobre `trade_archive` (trades ya ejecutados). |
 | `backtest_weekly.py` | Wrapper semanal de `backtest_parallel.py` con notificación Telegram. |
 | `test_m15_feed.py` | Test standalone del feed M15 (verificar candles + indicators). |
@@ -548,7 +549,7 @@ Monitor (cada 50 trades)     →  Auto-revert si PF cae >10%
 
 ### Componentes
 
-- **`tools/nightly_analyst.py`**: cron 19:00 AR. LLM fallback chain: Opus 4.7 → Groq llama-3.3-70b → deepseek-r1:14b → deepseek-r1:7b → qwen2.5:7b. Genera input JSON (stats 24h/7d/30d por buckets conf/trigger/hora/session/htf), invoca LLM, parsea output JSON, persiste como pending_changes con `source='nightly_<kind>_<model>'`.
+- **`tools/nightly_analyst.py`**: ejecutable manualmente desde dashboard (botón ▶ Run analyst). LLM fallback chain: Opus 4.7 → Groq llama-3.3-70b → deepseek-r1:14b → deepseek-r1:7b → qwen2.5:7b. Genera input JSON (stats 24h/7d/30d por buckets conf/trigger/hora/session/htf), invoca LLM, parsea output JSON, persiste como pending_changes con `source='nightly_<kind>_<model>'`. v3.31.2: removida la Task Scheduler diaria — ahora 100% on-demand.
 - **`src/optimizer/shadow_runner.py`**: cuando se crea auto_strategy, evalua signal contra todos los pending_changes con status='shadow_validating'. Crea shadow_strategies con decision=taken/skipped. Daemon paralelo simula outcomes con sim_engine.py usando candles posteriores.
 - **`src/optimizer/sim_engine.py`**: motor de simulacion SL/TP/expiry compartido (refactor de backtest_h1_m15.py).
 - **`src/optimizer/change_manager.py`**: apply/revert engine con guard-rails. Funciones: `apply_change()`, `revert_change()`, `is_signal_blocked_by_meta_filters()`, `get_confidence_adjustment_for_signal()`.
@@ -597,18 +598,21 @@ PF cayó -12% en 50 trades post-apply
 
 NO se reporta costo de tokens en Telegram (solo log local).
 
-### Setup operacional (1 vez)
+### Setup operacional
 
-```cmd
-REM Registrar nightly analyst en Task Scheduler (como admin)
-F:\AIdan\tools\setup_nightly_task.bat
+**v3.31.2**: removida la Task Scheduler. Ahora se ejecuta **manualmente** desde el dashboard:
 
-REM Verificar
-schtasks /Query /TN "AIdan_NightlyAnalyst"
+1. Abrir `http://localhost:8000/meta-optimization` (botón 🤖 en header del dashboard)
+2. Seleccionar modelo (Auto-detect / Force Opus / Force Groq / Force Ollama)
+3. Click **▶ Run analyst** — corre en background, status polling cada 3s
+4. Al terminar (1-5 min típico) muestra:
+   - Cambios propuestos (lista con reasoning)
+   - Log tail expandible
+   - Resultado: success / timeout / error
 
-REM Test manual
-schtasks /Run /TN "AIdan_NightlyAnalyst"
-```
+**Endpoints**:
+- `POST /nightly-analyst/run?model=X` — dispara análisis manual
+- `GET /nightly-analyst/status` — estado actual (running, last_result, last_changes)
 
 ### Riesgos documentados
 
@@ -647,4 +651,4 @@ schtasks /Run /TN "AIdan_NightlyAnalyst"
 
 ---
 
-**Última actualización**: 14 May 2026 — v3.31.1 (Full autopilot: proposed → shadow_validating automatico)
+**Última actualización**: 14 May 2026 — v3.31.2 (Manual trigger desde dashboard reemplaza Task Scheduler)

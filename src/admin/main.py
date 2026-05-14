@@ -475,6 +475,192 @@ async def meta_optimization_dashboard():
             return FileResponse(p, media_type="text/html", headers=NO_CACHE_HEADERS)
     return JSONResponse({"message": "Meta-optimization dashboard no encontrado", "tried": candidates})
 
+
+# v3.31.2 — Manual nightly analyst trigger (replacement for scheduled task)
+import threading as _threading
+
+_NIGHTLY_STATE = {
+    'running': False,
+    'started_at': None,
+    'finished_at': None,
+    'last_result': None,
+    'last_log_tail': None,
+    'last_changes_created': [],
+    'lock': _threading.Lock(),
+}
+
+
+def _find_nightly_script():
+    """Find nightly_analyst.py absolute path (dev vs frozen exe).
+    Frozen mode: .exe lives in F:\\AIdan\\dist\\, source en F:\\AIdan\\tools\\."""
+    import sys as _sys
+    candidates = [
+        os.path.join(base_path, 'tools', 'nightly_analyst.py'),
+        os.path.join(os.path.dirname(base_path), 'tools', 'nightly_analyst.py'),
+        os.path.join(os.getcwd(), 'tools', 'nightly_analyst.py'),
+    ]
+    # Frozen exe: .exe en dist/ → project root es os.path.dirname(dist)
+    if getattr(_sys, 'frozen', False):
+        exe_dir = os.path.dirname(_sys.executable)
+        candidates.extend([
+            os.path.join(exe_dir, 'tools', 'nightly_analyst.py'),
+            os.path.join(os.path.dirname(exe_dir), 'tools', 'nightly_analyst.py'),
+        ])
+    # Hardcoded fallback: F:\AIdan\tools\nightly_analyst.py (instalacion default)
+    candidates.append(r'F:\AIdan\tools\nightly_analyst.py')
+
+    for p in candidates:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def _find_python_exe():
+    """Find a real Python interpreter. In frozen mode, sys.executable es AIdan.exe,
+    asi que necesitamos buscar python.exe por separado."""
+    import sys as _sys
+    import shutil as _shutil
+    if not getattr(_sys, 'frozen', False):
+        # Dev mode: sys.executable es python.exe directo
+        return _sys.executable
+    # Frozen: buscar python.exe en PATH o ubicaciones tipicas
+    py = _shutil.which('python') or _shutil.which('python.exe')
+    if py:
+        return py
+    py = _shutil.which('python3') or _shutil.which('python3.exe')
+    if py:
+        return py
+    # Hardcoded fallbacks (typical Windows installs)
+    for p in [
+        r'C:\Program Files\Python311\python.exe',
+        r'C:\Program Files\Python312\python.exe',
+        r'C:\Program Files\Python310\python.exe',
+        r'C:\Python311\python.exe',
+        os.path.expandvars(r'%LOCALAPPDATA%\Programs\Python\Python311\python.exe'),
+        os.path.expandvars(r'%LOCALAPPDATA%\Programs\Python\Python312\python.exe'),
+    ]:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _run_nightly_in_thread(force_close_aidan=True, model=None):
+    """Background thread: ejecuta nightly_analyst.py, captura output, actualiza estado."""
+    import subprocess as _sub
+    from datetime import datetime as _dt
+    state = _NIGHTLY_STATE
+    state['running'] = True
+    state['started_at'] = _dt.now().isoformat()
+    state['finished_at'] = None
+    state['last_result'] = None
+    state['last_log_tail'] = None
+    state['last_changes_created'] = []
+
+    script = _find_nightly_script()
+    if not script:
+        state['running'] = False
+        state['finished_at'] = _dt.now().isoformat()
+        state['last_result'] = 'error: nightly_analyst.py not found'
+        return
+
+    python_exe = _find_python_exe()
+    if not python_exe:
+        state['running'] = False
+        state['finished_at'] = _dt.now().isoformat()
+        state['last_result'] = 'error: no se encontro python.exe (instalar Python 3.10+)'
+        return
+
+    cmd = [python_exe, script]
+    if force_close_aidan:
+        cmd.append('--force')
+    if model:
+        cmd.extend(['--model', model])
+
+    try:
+        # Capturar pending_changes pre-run para detectar nuevos
+        from src.common.db import get_pending_changes as _gpc
+        before = set(c['id'] for c in _gpc(limit=500))
+
+        r = _sub.run(cmd, capture_output=True, text=True, timeout=900, encoding='utf-8', errors='replace')
+
+        # Detectar pending_changes nuevos
+        after = _gpc(limit=500)
+        new_changes = [c for c in after if c['id'] not in before]
+
+        state['last_changes_created'] = [
+            {'id': c['id'], 'change_type': c['change_type'],
+             'params_json': c.get('params_json', ''),
+             'reasoning': (c.get('reasoning', '') or '')[:200],
+             'source': c.get('source', ''), 'status': c.get('status', '')}
+            for c in new_changes
+        ]
+
+        # Leer log tail (ultimas 30 lineas)
+        try:
+            log_path = os.path.join(os.environ.get('APPDATA', ''), 'AIdan', 'state', 'nightly_analyst.log')
+            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+                state['last_log_tail'] = ''.join(lines[-30:])
+        except Exception:
+            state['last_log_tail'] = '(log file not accessible)'
+
+        if r.returncode == 0:
+            state['last_result'] = f'success ({len(new_changes)} changes created)'
+        else:
+            state['last_result'] = f'exit {r.returncode}: {(r.stderr or r.stdout)[-300:]}'
+    except _sub.TimeoutExpired:
+        state['last_result'] = 'timeout (>15 min)'
+    except Exception as e:
+        state['last_result'] = f'error: {e}'
+    finally:
+        state['running'] = False
+        from datetime import datetime as _dt
+        state['finished_at'] = _dt.now().isoformat()
+
+
+@app.post("/nightly-analyst/run")
+async def trigger_nightly_analyst(model: str = None):
+    """Manualmente dispara una sesion del nightly analyst. Corre en background;
+    cliente debe hacer polling a /nightly-analyst/status para ver progreso.
+
+    Query params:
+        model: opus | groq | ollama:MODEL_NAME (force specific model, default auto)
+    """
+    with _NIGHTLY_STATE['lock']:
+        if _NIGHTLY_STATE['running']:
+            return JSONResponse({
+                'ok': False,
+                'error': 'Analyst already running',
+                'started_at': _NIGHTLY_STATE['started_at'],
+            }, status_code=409)
+
+        # Validate model param (if provided)
+        if model and model not in ('opus', 'groq') and not model.startswith('ollama:'):
+            return JSONResponse({'ok': False, 'error': f'Invalid model: {model}'}, status_code=400)
+
+        # Spawn thread
+        t = _threading.Thread(target=_run_nightly_in_thread,
+                              kwargs={'force_close_aidan': True, 'model': model},
+                              daemon=True, name='NightlyAnalystManual')
+        t.start()
+
+    return JSONResponse({'ok': True, 'started': True, 'message': 'Analyst running in background, poll /nightly-analyst/status'},
+                        headers=NO_CACHE_HEADERS)
+
+
+@app.get("/nightly-analyst/status")
+async def nightly_analyst_status():
+    """Returns current state of nightly analyst (running, last result, last changes)."""
+    s = _NIGHTLY_STATE
+    return JSONResponse({
+        'running': s['running'],
+        'started_at': s['started_at'],
+        'finished_at': s['finished_at'],
+        'last_result': s['last_result'],
+        'last_log_tail': s['last_log_tail'],
+        'last_changes_created': s['last_changes_created'],
+    }, headers=NO_CACHE_HEADERS)
+
 @app.on_event("startup")
 async def startup():
     """Initialize on startup"""
