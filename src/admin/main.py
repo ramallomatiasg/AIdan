@@ -343,6 +343,138 @@ async def trade_archive_data():
 # v3.30.7 — /backtest-report removido (reemplazado por /what-if que usa
 # data REAL de trade_archive en vez de backtest sintetico).
 
+
+# v3.31.0 — Meta-optimization endpoints
+@app.get("/pending-changes")
+async def list_pending_changes(status: str = None, limit: int = 50):
+    """Lista pending_changes filtrados por status (proposed/shadow_validating/validated/applied/reverted/rejected)."""
+    try:
+        from src.common.db import get_pending_changes
+        changes = get_pending_changes(status=status, limit=limit)
+        return JSONResponse({'count': len(changes), 'changes': changes}, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.get("/pending-changes/{change_id}")
+async def get_pending_change_detail(change_id: int):
+    """Detalle de un pending_change + audit trail + shadow stats."""
+    try:
+        from src.common.db import (
+            get_pending_change as _get,
+            get_change_history,
+            evaluate_shadow_trades_for_change,
+        )
+        change = _get(change_id)
+        if not change:
+            return JSONResponse({'error': 'not found'}, status_code=404)
+        history = get_change_history(change_id)
+        shadow_stats = evaluate_shadow_trades_for_change(change_id)
+        return JSONResponse({
+            'change': change,
+            'history': history,
+            'shadow_stats': shadow_stats,
+        }, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.post("/pending-changes/{change_id}/approve")
+async def approve_pending_change(change_id: int):
+    """Manualmente aprueba un cambio (skip shadow validation). Lo aplica al live.
+    Solo para uso del user via dashboard. Use sparingly.
+    """
+    try:
+        from src.optimizer.change_manager import apply_change, ChangeManagerError
+        result = apply_change(change_id, force=True)
+        return JSONResponse({'ok': result.get('applied', False), **result}, headers=NO_CACHE_HEADERS)
+    except ChangeManagerError as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=500)
+
+
+@app.post("/pending-changes/{change_id}/revert")
+async def revert_pending_change(change_id: int):
+    """Manualmente revierte un cambio aplicado."""
+    try:
+        from src.optimizer.change_manager import revert_change, ChangeManagerError
+        result = revert_change(change_id, reason='manual_revert_via_api')
+        return JSONResponse({'ok': result.get('reverted', False), **result}, headers=NO_CACHE_HEADERS)
+    except ChangeManagerError as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=500)
+
+
+@app.post("/pending-changes/{change_id}/reject")
+async def reject_pending_change(change_id: int, reason: str = "manual_reject"):
+    """Marca un pending_change como rechazado (no se aplicara)."""
+    try:
+        from src.common.db import update_pending_change_status, get_pending_change
+        change = get_pending_change(change_id)
+        if not change:
+            return JSONResponse({'error': 'not found'}, status_code=404)
+        if change.get('status') in ('applied', 'reverted'):
+            return JSONResponse({'error': f"cannot reject from status={change.get('status')}"}, status_code=400)
+        update_pending_change_status(change_id, 'rejected', rejected_reason=reason)
+        return JSONResponse({'ok': True}, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=500)
+
+
+@app.post("/pending-changes/{change_id}/start-shadow")
+async def start_shadow(change_id: int):
+    """Promover proposed -> shadow_validating. Inicia el ciclo de validacion."""
+    try:
+        from src.common.db import update_pending_change_status, get_pending_change
+        change = get_pending_change(change_id)
+        if not change:
+            return JSONResponse({'error': 'not found'}, status_code=404)
+        if change.get('status') != 'proposed':
+            return JSONResponse({'error': f"can only start shadow from proposed (current={change.get('status')})"}, status_code=400)
+        update_pending_change_status(change_id, 'shadow_validating')
+        return JSONResponse({'ok': True}, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'ok': False, 'error': str(e)}, status_code=500)
+
+
+@app.get("/meta-optimization-status")
+async def meta_optimization_status():
+    """Resumen del estado del meta-optimizer: contadores por status + baseline + active filters."""
+    try:
+        from src.common.db import (
+            get_pending_changes,
+            get_active_meta_filters,
+            get_baseline_stats,
+        )
+        statuses = ['proposed', 'shadow_validating', 'validated', 'applied', 'reverted', 'rejected']
+        counts = {s: len(get_pending_changes(status=s, limit=500)) for s in statuses}
+        active = get_active_meta_filters()
+        baseline = get_baseline_stats(lookback_trades=50)
+        return JSONResponse({
+            'counts_by_status': counts,
+            'active_filters_count': len(active),
+            'active_filters': active,
+            'baseline_last_50': baseline,
+        }, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.get("/meta-optimization")
+async def meta_optimization_dashboard():
+    """Sirve el HTML del dashboard de meta-optimization."""
+    candidates = [
+        os.path.join(base_path, 'meta_optimization.html'),
+        os.path.join(base_path, 'tools', 'meta_optimization.html'),
+        os.path.join(os.path.dirname(base_path), 'tools', 'meta_optimization.html'),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return FileResponse(p, media_type="text/html", headers=NO_CACHE_HEADERS)
+    return JSONResponse({"message": "Meta-optimization dashboard no encontrado", "tried": candidates})
+
 @app.on_event("startup")
 async def startup():
     """Initialize on startup"""

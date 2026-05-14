@@ -3351,6 +3351,20 @@ class AIdan:
         trailing_thread.start()
         self.threads.append(trailing_thread)
 
+        # v3.31.0 — Meta-optimization daemons
+        # Shadow simulator: cada 2 min evalua shadow_strategies pending de simulacion
+        # Auto-applier: cada 10 min promueve/aplica/monitorea pending_changes
+        try:
+            from src.optimizer.shadow_runner import start_shadow_simulator_daemon
+            from src.optimizer.auto_applier import start_auto_applier_daemon
+            shadow_t = start_shadow_simulator_daemon(self._shutdown_event, interval_sec=120)
+            self.threads.append(shadow_t)
+            applier_t = start_auto_applier_daemon(self._shutdown_event, interval_sec=600)
+            self.threads.append(applier_t)
+            logger.info("Meta-optimization daemons started (shadow_simulator 2min, auto_applier 10min)")
+        except Exception as e:
+            logger.warning(f"Meta-optimization daemons failed to start: {e}")
+
         return True
     
     def open_dashboard(self):

@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>AIdan Meta-Optimization</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root {
+  --bg: #0a0a0a; --panel: #111; --panel2: #161616; --border: #1a1a1a;
+  --text: #e8ecf2; --muted: #999; --dim: #555;
+  --accent: #4f8ff7; --green: #00f5a0; --red: #ff4466;
+  --yellow: #ffcc00; --purple: #a78bfa;
+  --radius: 12px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 20px;
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px; line-height: 1.5;
+}
+h1 { font-size: 22px; margin: 0 0 4px 0; }
+.sub { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.stat-card .label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stat-card .value {
+  font-size: 22px;
+  font-weight: 600;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.stat-card .value.green { color: var(--green); }
+.stat-card .value.red { color: var(--red); }
+.stat-card .value.blue { color: var(--accent); }
+.stat-card .value.purple { color: var(--purple); }
+.stat-card .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.filters {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+.filter-chip {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+.filter-chip:hover { border-color: var(--accent); }
+.filter-chip.active { background: var(--accent); border-color: var(--accent); }
+.filter-chip .count {
+  display: inline-block;
+  font-size: 10px;
+  background: rgba(0,0,0,0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+  font-weight: 600;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.panel h3 {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+th, td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.green { color: var(--green); }
+td.red { color: var(--red); }
+
+.status-pill {
+  display: inline-block;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.status-proposed { background: rgba(167,139,250,0.15); color: var(--purple); }
+.status-shadow_validating { background: rgba(79,143,247,0.15); color: var(--accent); }
+.status-validated { background: rgba(0,245,160,0.15); color: var(--green); }
+.status-applied { background: rgba(0,245,160,0.25); color: var(--green); font-weight: 700; }
+.status-reverted { background: rgba(255,68,102,0.15); color: var(--red); }
+.status-rejected { background: rgba(85,85,85,0.25); color: var(--dim); }
+
+.action-btn {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  margin-right: 4px;
+}
+.action-btn.green { background: var(--green); color: #000; }
+.action-btn.red { background: var(--red); }
+.action-btn.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.action-btn:hover { filter: brightness(1.1); }
+
+.expand-row { background: var(--panel2); }
+.expand-row td { padding: 14px 18px; font-size: 12px; }
+.expand-row pre {
+  margin: 0;
+  background: var(--bg);
+  padding: 10px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.expand-toggle {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.toast {
+  position: fixed; bottom: 20px; right: 20px;
+  background: var(--green); color: #000;
+  padding: 10px 16px; border-radius: 8px;
+  font-size: 13px; font-weight: 600;
+  opacity: 0; transform: translateY(20px);
+  transition: all 0.3s; pointer-events: none;
+  z-index: 9999;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.error { background: var(--red); color: #fff; }
+
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.info-box {
+  background: rgba(255,204,0,0.05);
+  border-left: 3px solid var(--yellow);
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+.info-box strong { color: var(--yellow); }
+</style>
+</head>
+<body>
+
+<h1>🤖 Meta-Optimization</h1>
+<div class="sub" id="metaSub">Cargando estado del meta-optimizer...</div>
+
+<div class="info-box" id="loopStatus">
+  Cambios propuestos por <strong>nightly_analyst</strong> (LLM 19:00 AR) →
+  validados vía <strong>shadow mode</strong> (1-2 semanas) →
+  aplicados al live → monitoreados (auto-revert si PF cae >10%).
+</div>
+
+<div class="stats-grid" id="statsGrid"></div>
+
+<div class="filters" id="filterBar"></div>
+
+<div class="panel">
+  <h3>Pending changes <span class="sub" id="filterLabel"></span></h3>
+  <div id="changesContainer">
+    <div class="empty-state">Cargando...</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let allChanges = [];
+let activeFilter = 'all';
+let expandedRows = new Set();
+let statsData = null;
+
+async function fetchData() {
+  try {
+    const [statusR, changesR] = await Promise.all([
+      fetch('/meta-optimization-status').then(r => r.json()),
+      fetch('/pending-changes?limit=200').then(r => r.json()),
+    ]);
+    statsData = statusR;
+    allChanges = changesR.changes || [];
+    renderAll();
+  } catch (e) {
+    showToast('Error fetching: ' + e.message, true);
+  }
+}
+
+function renderAll() {
+  renderHeader();
+  renderStats();
+  renderFilters();
+  renderTable();
+}
+
+function renderHeader() {
+  const baseline = statsData?.baseline_last_50 || {};
+  const baselinePf = baseline.pf != null ? baseline.pf : '--';
+  const baselineWr = baseline.wr != null ? baseline.wr : '--';
+  const baselinePnl = baseline.total_pnl != null ? baseline.total_pnl : 0;
+  const pnlStr = (baselinePnl >= 0 ? '+$' : '-$') + Math.abs(baselinePnl).toFixed(2);
+  document.getElementById('metaSub').innerHTML =
+    `Baseline real (últimos 50 trades): <strong>PF ${baselinePf}</strong> · <strong>WR ${baselineWr}%</strong> · <strong style="color: ${baselinePnl >= 0 ? 'var(--green)' : 'var(--red)'}">${pnlStr}</strong>`;
+}
+
+function renderStats() {
+  const c = statsData?.counts_by_status || {};
+  const activeF = statsData?.active_filters_count || 0;
+  const grid = document.getElementById('statsGrid');
+  grid.innerHTML = `
+    <div class="stat-card"><div class="label">Propuestos</div><div class="value purple">${c.proposed || 0}</div><div class="sub">en cola</div></div>
+    <div class="stat-card"><div class="label">Shadow validando</div><div class="value blue">${c.shadow_validating || 0}</div><div class="sub">en evaluación</div></div>
+    <div class="stat-card"><div class="label">Validados</div><div class="value green">${c.validated || 0}</div><div class="sub">listos p/ aplicar</div></div>
+    <div class="stat-card"><div class="label">Aplicados activos</div><div class="value green">${activeF}</div><div class="sub">live ahora</div></div>
+    <div class="stat-card"><div class="label">Revertidos</div><div class="value red">${c.reverted || 0}</div><div class="sub">empeoraron</div></div>
+    <div class="stat-card"><div class="label">Rechazados</div><div class="value">${c.rejected || 0}</div><div class="sub">no pasaron</div></div>
+  `;
+}
+
+function renderFilters() {
+  const c = statsData?.counts_by_status || {};
+  const filters = [
+    { key: 'all', label: 'Todos', count: allChanges.length },
+    { key: 'proposed', label: 'Propuestos', count: c.proposed || 0 },
+    { key: 'shadow_validating', label: 'En shadow', count: c.shadow_validating || 0 },
+    { key: 'validated', label: 'Validados', count: c.validated || 0 },
+    { key: 'applied', label: 'Aplicados', count: c.applied || 0 },
+    { key: 'reverted', label: 'Revertidos', count: c.reverted || 0 },
+    { key: 'rejected', label: 'Rechazados', count: c.rejected || 0 },
+  ];
+  const bar = document.getElementById('filterBar');
+  bar.innerHTML = filters.map(f =>
+    `<button class="filter-chip ${activeFilter === f.key ? 'active' : ''}" data-filter="${f.key}">
+       ${f.label} <span class="count">${f.count}</span>
+     </button>`
+  ).join('');
+  bar.querySelectorAll('.filter-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      activeFilter = b.dataset.filter;
+      renderFilters();
+      renderTable();
+    });
+  });
+}
+
+function renderTable() {
+  const container = document.getElementById('changesContainer');
+  const filtered = activeFilter === 'all'
+    ? allChanges
+    : allChanges.filter(c => c.status === activeFilter);
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="empty-state">Sin cambios con filtro "${activeFilter}".</div>`;
+    return;
+  }
+
+  const rows = filtered.map(c => {
+    const expanded = expandedRows.has(c.id);
+    const params = parseJson(c.params_json);
+    const paramsShort = JSON.stringify(params).substring(0, 60);
+    const actions = renderActions(c);
+    const shadowPf = c.shadow_pf != null ? c.shadow_pf.toFixed(2) : '-';
+    const shadowN = c.shadow_trades_count || 0;
+    const dt = (c.proposed_at || '').substring(0, 16);
+
+    let mainRow = `
+      <tr>
+        <td>
+          <button class="expand-toggle" data-toggle="${c.id}">${expanded ? '▼' : '▶'}</button>
+          #${c.id}
+        </td>
+        <td>${escapeHtml(c.change_type)}</td>
+        <td><code style="font-size:10px;">${escapeHtml(paramsShort)}</code></td>
+        <td><span class="status-pill status-${c.status}">${c.status}</span></td>
+        <td class="num">${shadowPf}</td>
+        <td class="num">${shadowN}</td>
+        <td>${escapeHtml(c.source || '-')}</td>
+        <td>${dt}</td>
+        <td>${actions}</td>
+      </tr>
+    `;
+
+    if (expanded) {
+      mainRow += `
+        <tr class="expand-row">
+          <td colspan="9">
+            <div style="margin-bottom: 8px;"><strong>Reasoning:</strong> ${escapeHtml(c.reasoning || '(sin justificación)')}</div>
+            <div style="margin-bottom: 8px;"><strong>Params completos:</strong></div>
+            <pre>${escapeHtml(JSON.stringify(params, null, 2))}</pre>
+            ${renderTimeline(c)}
+          </td>
+        </tr>
+      `;
+    }
+    return mainRow;
+  }).join('');
+
+  container.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Tipo</th><th>Params</th><th>Status</th>
+          <th class="num">Shadow PF</th><th class="num">Shadow N</th>
+          <th>Source</th><th>Propuesto</th><th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  // Wire toggle + actions
+  container.querySelectorAll('[data-toggle]').forEach(b => {
+    b.addEventListener('click', () => {
+      const id = parseInt(b.dataset.toggle);
+      if (expandedRows.has(id)) expandedRows.delete(id);
+      else expandedRows.add(id);
+      renderTable();
+    });
+  });
+  container.querySelectorAll('[data-action]').forEach(b => {
+    b.addEventListener('click', () => doAction(parseInt(b.dataset.id), b.dataset.action));
+  });
+}
+
+function renderActions(c) {
+  const buttons = [];
+  if (c.status === 'proposed') {
+    buttons.push(`<button class="action-btn" data-id="${c.id}" data-action="start-shadow">Iniciar shadow</button>`);
+    buttons.push(`<button class="action-btn green" data-id="${c.id}" data-action="approve">Aplicar ya</button>`);
+    buttons.push(`<button class="action-btn ghost" data-id="${c.id}" data-action="reject">Rechazar</button>`);
+  } else if (c.status === 'shadow_validating') {
+    buttons.push(`<button class="action-btn green" data-id="${c.id}" data-action="approve">Aplicar ya</button>`);
+    buttons.push(`<button class="action-btn ghost" data-id="${c.id}" data-action="reject">Rechazar</button>`);
+  } else if (c.status === 'validated') {
+    buttons.push(`<button class="action-btn green" data-id="${c.id}" data-action="approve">Aplicar al live</button>`);
+    buttons.push(`<button class="action-btn ghost" data-id="${c.id}" data-action="reject">Rechazar</button>`);
+  } else if (c.status === 'applied') {
+    buttons.push(`<button class="action-btn red" data-id="${c.id}" data-action="revert">Revertir</button>`);
+  }
+  return buttons.join('');
+}
+
+function renderTimeline(c) {
+  const events = [
+    { ts: c.proposed_at, label: 'Propuesto', icon: '🌙' },
+    { ts: c.shadow_started_at, label: 'Shadow iniciado', icon: '🔬' },
+    { ts: c.validated_at, label: 'Validado', icon: '✓' },
+    { ts: c.applied_at, label: 'Aplicado al live', icon: '🚀' },
+    { ts: c.reverted_at, label: 'Revertido — ' + (c.reverted_reason || ''), icon: '⏮' },
+  ].filter(e => e.ts);
+  if (events.length === 0) return '';
+  return '<div style="margin-top:10px;"><strong>Timeline:</strong><ul style="margin:6px 0;padding-left:20px;line-height:1.7;">' +
+    events.map(e => `<li>${e.icon} ${escapeHtml(e.ts.substring(0,19))} — ${escapeHtml(e.label)}</li>`).join('') +
+    '</ul></div>';
+}
+
+async function doAction(id, action) {
+  if (!confirm(`¿Confirmar acción '${action}' sobre cambio #${id}?`)) return;
+  try {
+    const r = await fetch(`/pending-changes/${id}/${action}`, { method: 'POST' });
+    const j = await r.json();
+    if (j.ok || j.applied || j.reverted) {
+      showToast(`✓ Acción ${action} OK`);
+      await fetchData();
+    } else {
+      showToast(`Error: ${j.error || 'desconocido'}`, true);
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, true);
+  }
+}
+
+function parseJson(s) {
+  try { return JSON.parse(s); }
+  catch { return {}; }
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[<>&"]/g, c =>
+    ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+}
+
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (isError ? ' error show' : ' show');
+  setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+// Auto-refresh cada 60s
+fetchData();
+setInterval(fetchData, 60000);
+</script>
+
+</body>
+</html>

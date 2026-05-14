@@ -383,6 +383,118 @@ def init_db():
         )
     """)
 
+    # v3.31.0 — META-OPTIMIZATION INFRASTRUCTURE
+    # Tabla pending_changes: cola de cambios propuestos por el nightly analyst
+    # (LLM cualitativo) o por reglas stats-driven. Workflow:
+    #   proposed -> shadow_validating -> validated -> applied -> [reverted]
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pending_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            change_type TEXT NOT NULL,         -- block_setup_type | block_conf_bucket | block_hour_utc |
+                                                -- block_session | block_pattern | tune_optimizer_param |
+                                                -- adjust_setup_confidence | adjust_min_confidence_per_track
+            params_json TEXT NOT NULL,         -- params del cambio (depende de change_type)
+            reasoning TEXT,                    -- justificacion del LLM/sistema
+            source TEXT NOT NULL,              -- nightly_opus | nightly_groq | nightly_ollama_<model> |
+                                                -- manual_fallback | manual_user
+            status TEXT NOT NULL DEFAULT 'proposed',
+                                                -- proposed | shadow_validating | validated | rejected |
+                                                -- applied | reverted | superseded
+            proposed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            shadow_started_at TIMESTAMP,
+            shadow_trades_count INTEGER DEFAULT 0,
+            shadow_pf REAL,                    -- PF del shadow vs baseline
+            shadow_wr REAL,                    -- WR del shadow
+            validated_at TIMESTAMP,
+            rejected_reason TEXT,              -- por que se rechazo (insufficient_sample, no_improvement, guardrail)
+            applied_at TIMESTAMP,
+            applied_baseline_pf REAL,          -- PF baseline pre-cambio (para rollback)
+            applied_baseline_pnl REAL,
+            reverted_at TIMESTAMP,
+            reverted_reason TEXT
+        )
+    """)
+
+    # Tabla shadow_strategies: signals que se "habrian tomado" con config alterada.
+    # Vive en paralelo a auto_strategies sin tocar MT5.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shadow_strategies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pending_change_id INTEGER,         -- FK a pending_changes (que config se uso)
+            base_strategy_id INTEGER,          -- FK a auto_strategies (signal original)
+            config_overrides_json TEXT,        -- config aplicada (snapshot)
+            -- Mirror de campos de auto_strategies relevantes:
+            direction TEXT NOT NULL,
+            entry_price REAL,
+            stop_loss REAL,
+            take_profit REAL,
+            sl_pips REAL,
+            tp_pips REAL,
+            confidence REAL,
+            trigger_type TEXT,
+            setup_type TEXT,
+            session TEXT,
+            hour_utc INTEGER,
+            day_of_week INTEGER,
+            htf_bias TEXT,
+            avg_range_pips REAL,
+            -- Decision: taken (passes filters) | skipped (filtered out by config)
+            shadow_decision TEXT NOT NULL,     -- taken | skipped
+            skip_reason TEXT,                  -- si skipped: por que (block_conf_bucket, etc)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (pending_change_id) REFERENCES pending_changes(id),
+            FOREIGN KEY (base_strategy_id) REFERENCES auto_strategies(id)
+        )
+    """)
+
+    # Tabla shadow_trades: outcome simulado de cada shadow_strategy con decision=taken.
+    # Se evalua cuando trade real cierra (mismo timeline temporal).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shadow_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shadow_strategy_id INTEGER NOT NULL,
+            simulated_exit_price REAL,
+            simulated_pnl REAL,                -- en USD asumiendo mismo lot que el real
+            simulated_pips REAL,
+            sl_hit INTEGER DEFAULT 0,
+            tp_hit INTEGER DEFAULT 0,
+            expiry_hit INTEGER DEFAULT 0,
+            exit_reason TEXT,                  -- sl | tp | expiry
+            exit_at TIMESTAMP,
+            FOREIGN KEY (shadow_strategy_id) REFERENCES shadow_strategies(id)
+        )
+    """)
+
+    # Tabla change_history: log inmutable de toda accion sobre pending_changes
+    # (proposed, validated, applied, reverted). Audit trail.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS change_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pending_change_id INTEGER NOT NULL,
+            action TEXT NOT NULL,              -- proposed | validated | rejected | applied | reverted
+            payload_json TEXT,                 -- snapshot del cambio + contexto
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (pending_change_id) REFERENCES pending_changes(id)
+        )
+    """)
+
+    # Tabla active_meta_filters: filtros activos aplicados al live por el meta-optimizer.
+    # El scanner consulta esta tabla para aplicar bloqueos/ajustes en cada signal.
+    # revert: NO elimina row, marca active=0 (audit trail).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS active_meta_filters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            change_id INTEGER UNIQUE,
+            filter_type TEXT NOT NULL,         -- block_setup_type | block_conf_bucket | etc.
+            params_json TEXT NOT NULL,
+            active INTEGER DEFAULT 1,          -- 1 = activo, 0 = revertido
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reverted_at TIMESTAMP,
+            previous_value_json TEXT,          -- para revert de tune_optimizer_param
+            FOREIGN KEY (change_id) REFERENCES pending_changes(id)
+        )
+    """)
+
     # Migration: add synced_to_cloud column to trade_archive
     try:
         cursor.execute("ALTER TABLE trade_archive ADD COLUMN synced_to_cloud INTEGER DEFAULT 0")
@@ -524,6 +636,14 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_trade_archive_strategy ON trade_archive(strategy_id)",
         "CREATE INDEX IF NOT EXISTS idx_post_trade_strategy ON post_trade_analysis(strategy_id)",
         "CREATE INDEX IF NOT EXISTS idx_learning_created ON learning_insights(created_at)",
+        # v3.31.0 — meta-optimization indexes
+        "CREATE INDEX IF NOT EXISTS idx_pending_changes_status ON pending_changes(status, proposed_at)",
+        "CREATE INDEX IF NOT EXISTS idx_pending_changes_source ON pending_changes(source, proposed_at)",
+        "CREATE INDEX IF NOT EXISTS idx_shadow_strategies_change ON shadow_strategies(pending_change_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_shadow_strategies_base ON shadow_strategies(base_strategy_id)",
+        "CREATE INDEX IF NOT EXISTS idx_shadow_trades_strategy ON shadow_trades(shadow_strategy_id)",
+        "CREATE INDEX IF NOT EXISTS idx_change_history_change ON change_history(pending_change_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_active_meta_filters_active ON active_meta_filters(active, filter_type)",
     ]
     for idx_sql in indexes:
         try:
@@ -811,6 +931,31 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
     """Add auto-generated strategy, enforcing max 6 cap and dedup.
     alert_id can be None for structure-triggered strategies.
     entry_context: dict with RSI/ATR/trend/htf_bias captured at signal creation (atomic with row insert)."""
+
+    # v3.31.0 — Meta-optimization filter check.
+    # Si hay active_meta_filters que bloquean este signal, no crear el trade.
+    try:
+        from src.optimizer.change_manager import is_signal_blocked_by_meta_filters
+        _ctx = entry_context or {}
+        _check_signal = {
+            'direction': direction,
+            'confidence': confidence,
+            'trigger_type': trigger_type,
+            'setup_type': _ctx.get('setup_type', ''),
+            'session': _ctx.get('session', ''),
+            'hour_utc': _ctx.get('hour_utc'),
+            'day_of_week': _ctx.get('day_of_week'),
+            'htf_bias': _ctx.get('htf_bias', ''),
+        }
+        blocked, reason = is_signal_blocked_by_meta_filters(_check_signal)
+        if blocked:
+            import logging
+            logging.getLogger('db').info(f"Meta-filter block: {direction} {trigger_type} conf={confidence} → {reason}")
+            return None
+    except Exception as _ex:
+        import logging
+        logging.getLogger('db').debug(f"meta-filter check err: {_ex}")
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -1009,6 +1154,39 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
             except Exception:
                 pass
         conn.commit()
+
+        # v3.31.0 — Meta-optimization shadow runner hook
+        # Tras crear el auto_strategy, evaluar contra pending_changes en shadow_validating.
+        # Crea shadow_strategies (decision=taken/skipped) para cada cambio en validacion.
+        try:
+            from src.optimizer.shadow_runner import evaluate_signal_for_shadow_changes
+            # Reconstruir signal dict desde args + entry_context para feature evaluation
+            pip = 0.0001
+            sl_pips_calc = abs(stop_loss - entry_price) / pip
+            tp_pips_calc = abs(take_profit - entry_price) / pip
+            ctx = entry_context or {}
+            signal_dict = {
+                'direction': direction,
+                'entry_price': entry_price,
+                'stop_loss': stop_loss,
+                'take_profit': take_profit,
+                'sl_pips': round(sl_pips_calc, 1),
+                'tp_pips': round(tp_pips_calc, 1),
+                'confidence': confidence,
+                'trigger_type': trigger_type,
+                'setup_type': ctx.get('setup_type', ''),
+                'session': ctx.get('session', ''),
+                'hour_utc': ctx.get('hour_utc'),
+                'day_of_week': ctx.get('day_of_week'),
+                'htf_bias': ctx.get('htf_bias', ''),
+                'avg_range_pips': ctx.get('avg_range_pips') or ctx.get('atr_pips') or 0,
+            }
+            evaluate_signal_for_shadow_changes(signal_dict, base_strategy_id=new_id)
+        except Exception as _ex:
+            # Best-effort hook, no fail el INSERT real
+            import logging as _logging
+            _logging.getLogger('db').debug(f"shadow_runner hook: {_ex}")
+
         return new_id
     except Exception as e:
         import traceback
@@ -2764,3 +2942,303 @@ def clear_last_session():
     conn.execute("UPDATE app_state SET last_username = NULL, last_password_hash = NULL, updated_at = datetime('now') WHERE id = 1")
     conn.commit()
     conn.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v3.31.0 — META-OPTIMIZATION helpers
+# Pending changes workflow + shadow strategies + audit trail
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Supported change types (closed list — anything else gets rejected)
+SUPPORTED_CHANGE_TYPES = {
+    'block_setup_type',           # params: {setup_type: str}
+    'block_conf_bucket',          # params: {bucket_lo: int, bucket_hi: int}
+    'block_hour_utc',             # params: {hours: [int]}
+    'block_session',              # params: {sessions: [str]}
+    'block_pattern',              # params: {pattern: "DIR|HTF|SESSION|TRIGGER"}
+    'tune_optimizer_param',       # params: {param: str, value: any}
+    'adjust_setup_confidence',    # params: {setup_type: str, delta: int}
+    'adjust_min_confidence_per_track',  # params: {track: 'M5'|'M15'|'H1', value: int}
+}
+
+# Guard-rails: cosas que NUNCA se pueden tocar (hardcoded)
+GUARDRAIL_FORBIDDEN_PARAMS = {
+    'risk_percent', 'max_lot', 'lot_size', 'daily_loss_limit',
+    'kill_switch', 'mt5_account', 'mt5_password', 'mt5_server',
+    'groq_api_key', 'groq_api_keys',
+}
+
+
+def create_pending_change(change_type, params_json, reasoning, source):
+    """Insert un cambio propuesto en la queue. Devuelve id del cambio."""
+    import json as _json
+    if change_type not in SUPPORTED_CHANGE_TYPES:
+        raise ValueError(f"Unsupported change_type: {change_type}. Allowed: {SUPPORTED_CHANGE_TYPES}")
+
+    # Guard-rail check sobre params
+    if isinstance(params_json, dict):
+        params_str = _json.dumps(params_json)
+    else:
+        params_str = params_json
+    params_lower = params_str.lower()
+    for forbidden in GUARDRAIL_FORBIDDEN_PARAMS:
+        if forbidden in params_lower:
+            raise ValueError(f"Guard-rail violation: param '{forbidden}' is read-only for meta-optimizer")
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO pending_changes (change_type, params_json, reasoning, source, status)
+        VALUES (?, ?, ?, ?, 'proposed')
+    """, (change_type, params_str, reasoning, source))
+    cid = cur.lastrowid
+    # Audit trail
+    cur.execute("""
+        INSERT INTO change_history (pending_change_id, action, payload_json)
+        VALUES (?, 'proposed', ?)
+    """, (cid, params_str))
+    conn.commit()
+    conn.close()
+    return cid
+
+
+def get_pending_changes(status=None, limit=50):
+    """Get pending_changes filtered by status (or all if None)."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    if status:
+        cur.execute("""
+            SELECT * FROM pending_changes WHERE status = ?
+            ORDER BY proposed_at DESC LIMIT ?
+        """, (status, limit))
+    else:
+        cur.execute("""
+            SELECT * FROM pending_changes ORDER BY proposed_at DESC LIMIT ?
+        """, (limit,))
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_pending_change(change_id):
+    """Get single pending_change by id."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM pending_changes WHERE id = ?", (change_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_pending_change_status(change_id, new_status, **extra_fields):
+    """Update status del cambio + audit trail. extra_fields: shadow_pf, shadow_wr, applied_baseline_pf, etc."""
+    import json as _json
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    # Build SET clause dinamica
+    set_parts = ['status = ?']
+    set_values = [new_status]
+    # Auto-stamp timestamps por status
+    ts_map = {
+        'shadow_validating': 'shadow_started_at',
+        'validated': 'validated_at',
+        'applied': 'applied_at',
+        'reverted': 'reverted_at',
+    }
+    if new_status in ts_map:
+        set_parts.append(f"{ts_map[new_status]} = CURRENT_TIMESTAMP")
+
+    for k, v in extra_fields.items():
+        set_parts.append(f"{k} = ?")
+        set_values.append(v)
+    set_values.append(change_id)
+
+    cur.execute(f"UPDATE pending_changes SET {', '.join(set_parts)} WHERE id = ?", set_values)
+
+    # Audit trail
+    cur.execute("""
+        INSERT INTO change_history (pending_change_id, action, payload_json)
+        VALUES (?, ?, ?)
+    """, (change_id, new_status, _json.dumps(extra_fields)))
+    conn.commit()
+    conn.close()
+
+
+def insert_shadow_strategy(pending_change_id, base_strategy_id, config_overrides_json,
+                            direction, entry_price, stop_loss, take_profit, sl_pips, tp_pips,
+                            confidence, trigger_type, setup_type, session, hour_utc,
+                            day_of_week, htf_bias, avg_range_pips,
+                            shadow_decision, skip_reason=None):
+    """Insert shadow strategy (signal evaluado con config alternativa)."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO shadow_strategies (
+            pending_change_id, base_strategy_id, config_overrides_json,
+            direction, entry_price, stop_loss, take_profit, sl_pips, tp_pips,
+            confidence, trigger_type, setup_type, session, hour_utc, day_of_week,
+            htf_bias, avg_range_pips, shadow_decision, skip_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (pending_change_id, base_strategy_id, config_overrides_json,
+          direction, entry_price, stop_loss, take_profit, sl_pips, tp_pips,
+          confidence, trigger_type, setup_type, session, hour_utc, day_of_week,
+          htf_bias, avg_range_pips, shadow_decision, skip_reason))
+    sid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return sid
+
+
+def insert_shadow_trade(shadow_strategy_id, simulated_exit_price, simulated_pnl,
+                         simulated_pips, sl_hit, tp_hit, expiry_hit, exit_reason):
+    """Insert shadow trade outcome simulado."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO shadow_trades (
+            shadow_strategy_id, simulated_exit_price, simulated_pnl, simulated_pips,
+            sl_hit, tp_hit, expiry_hit, exit_reason, exit_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    """, (shadow_strategy_id, simulated_exit_price, simulated_pnl, simulated_pips,
+          sl_hit, tp_hit, expiry_hit, exit_reason))
+    tid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return tid
+
+
+def evaluate_shadow_trades_for_change(change_id):
+    """Compute shadow stats (PF, WR, count) para un pending_change.
+    Returns dict: {count, wins, losses, pf, wr, total_pnl}."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT st.simulated_pnl FROM shadow_trades st
+        JOIN shadow_strategies ss ON st.shadow_strategy_id = ss.id
+        WHERE ss.pending_change_id = ? AND ss.shadow_decision = 'taken'
+    """, (change_id,))
+    pnls = [r[0] for r in cur.fetchall() if r[0] is not None]
+    conn.close()
+
+    n = len(pnls)
+    if n == 0:
+        return {'count': 0, 'wins': 0, 'losses': 0, 'pf': 0, 'wr': 0, 'total_pnl': 0}
+
+    wins = sum(1 for p in pnls if p > 0)
+    losses = sum(1 for p in pnls if p < 0)
+    gw = sum(p for p in pnls if p > 0)
+    gl = abs(sum(p for p in pnls if p < 0))
+    pf = (gw / gl) if gl > 0 else float('inf')
+    wr = (wins / n * 100) if n > 0 else 0
+    return {
+        'count': n,
+        'wins': wins,
+        'losses': losses,
+        'pf': round(pf, 2) if pf != float('inf') else 999,
+        'wr': round(wr, 1),
+        'total_pnl': round(sum(pnls), 2),
+    }
+
+
+def get_baseline_stats(lookback_trades=50):
+    """Compute baseline PF/WR/PnL del live (ultimos N trades cerrados)."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(f"""
+        SELECT mt5_pnl FROM auto_strategies
+        WHERE status IN ('auto_win', 'auto_loss') AND mt5_pnl IS NOT NULL
+        ORDER BY id DESC LIMIT ?
+    """, (lookback_trades,))
+    rec = [r[0] for r in cur.fetchall()]
+
+    # Si auto_strategies no tiene suficientes, completar con trade_archive
+    if len(rec) < lookback_trades:
+        needed = lookback_trades - len(rec)
+        cur.execute(f"""
+            SELECT mt5_pnl FROM trade_archive
+            WHERE result IN ('win', 'loss') AND mt5_pnl IS NOT NULL
+            ORDER BY id DESC LIMIT ?
+        """, (needed,))
+        rec.extend([r[0] for r in cur.fetchall()])
+
+    conn.close()
+
+    n = len(rec)
+    if n == 0:
+        return {'count': 0, 'pf': 0, 'wr': 0, 'total_pnl': 0}
+    wins = sum(1 for p in rec if p > 0)
+    gw = sum(p for p in rec if p > 0)
+    gl = abs(sum(p for p in rec if p < 0))
+    pf = (gw / gl) if gl > 0 else float('inf')
+    return {
+        'count': n,
+        'pf': round(pf, 2) if pf != float('inf') else 999,
+        'wr': round(wins / n * 100, 1),
+        'total_pnl': round(sum(rec), 2),
+    }
+
+
+def get_change_history(change_id):
+    """Get audit trail completo para un cambio."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT * FROM change_history WHERE pending_change_id = ?
+        ORDER BY created_at ASC
+    """, (change_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def insert_active_filter(change_id, filter_type, params_json, previous_value_json=None):
+    """Insert filtro activo (cambio aplicado). UNIQUE constraint en change_id."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT OR REPLACE INTO active_meta_filters
+        (change_id, filter_type, params_json, active, previous_value_json)
+        VALUES (?, ?, ?, 1, ?)
+    """, (change_id, filter_type, params_json, previous_value_json))
+    fid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return fid
+
+
+def deactivate_filter(change_id):
+    """Marcar filter como revertido (active=0, reverted_at=now)."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE active_meta_filters
+        SET active = 0, reverted_at = CURRENT_TIMESTAMP
+        WHERE change_id = ?
+    """, (change_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_active_meta_filters():
+    """Get todos los filtros activos. Devuelve lista de dicts con filter_type + params parsed.
+    Esta funcion la consume el scanner en cada signal para aplicar bloqueos/ajustes.
+    """
+    import json as _json
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, change_id, filter_type, params_json, applied_at
+        FROM active_meta_filters WHERE active = 1
+        ORDER BY applied_at DESC
+    """)
+    filters = []
+    for r in cur.fetchall():
+        d = dict(r)
+        try:
+            d['params'] = _json.loads(d['params_json'])
+        except Exception:
+            d['params'] = {}
+        filters.append(d)
+    conn.close()
+    return filters

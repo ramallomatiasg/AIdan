@@ -134,6 +134,14 @@ GET /performance              # WR, PnL, PF
 GET /theme-editor             # Editor visual de paleta CSS (Thariq-style)
 GET /what-if                  # What-if simulator sobre trade_archive REAL
 GET /trade-archive-data       # JSON con todos los trades archivados (data del what-if)
+GET /meta-optimization        # Dashboard meta-optimizer (pending_changes + audit trail)
+GET /pending-changes          # JSON lista pending_changes (con filter ?status=X)
+GET /pending-changes/{id}     # Detalle de un cambio + history + shadow stats
+POST /pending-changes/{id}/approve  # Aplicar al live (skip shadow validation)
+POST /pending-changes/{id}/revert   # Revertir cambio aplicado
+POST /pending-changes/{id}/reject   # Marcar rechazado
+POST /pending-changes/{id}/start-shadow  # Iniciar shadow validation
+GET /meta-optimization-status # Resumen counts por status + active filters + baseline
 ```
 
 ### Query DB rápido
@@ -193,7 +201,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.30.4 | HTML interactive tools: theme editor + backtest report (inspired by Thariq/Anthropic) | activo |
 | v3.30.5 | Theme editor: font-size + card-padding sliders ahora cascadean visualmente (em units) | activo |
 | v3.30.6 | What-if simulator: filtros retroactivos sobre trade_archive REAL (164 trades) | activo |
-| **v3.30.7** | **Remove backtest HTML report + tutorial inline en what-if simulator** | **actual** |
+| v3.30.7 | Remove backtest HTML report + tutorial inline en what-if simulator | activo |
+| **v3.31.0** | **Meta-Optimization: shadow mode + LLM nightly analyst (19h AR) + auto-applier + monitor con rollback** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -433,6 +442,8 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `backtest_h1_m15.py` | Backtest estructural-only sobre candles MT5 históricas. Re-corre `detect_structure_signals()` y simula SL/TP/expiry hit. Solo trigger `structure`, sin news/calendar/pre_planned/smc-live. |
 | `dashboard_theme_editor.html` | Editor visual standalone con color pickers + sliders para todos los CSS vars del dashboard. Live preview de cards/charts/tables. Presets (Dark/Light/Midnight/Terminal/Sunset). Botón export CSS al clipboard. Endpoint: `/theme-editor`. |
 | `what_if_simulator.html` | Simulador retroactivo sobre `trade_archive` REAL (164+ trades). Sliders min_conf/conf_ceil/atr_floor/atr_ceil + checkboxes trigger/dir/session/dow/hour/htf_bias + bloqueo counter-HTF + exclude SL-hit-only. Recomputa WR/PF/PnL al instante, delta vs baseline real. Equity curve, heatmap por hora, breakdown trigger. Endpoint: `/what-if`. Data via `/trade-archive-data`. |
+| `meta_optimization.html` | Dashboard del meta-optimizer v3.31.0. Muestra pending_changes por status, baseline vs shadow PF, audit trail por cambio, action buttons (approve/revert/reject/start-shadow). Endpoint: `/meta-optimization`. |
+| `nightly_analyst.py` | Cron 19:00 AR. LLM analyst (Opus → Groq → Ollama fallback chain) analiza stats 24h/7d/30d y propone cambios JSON estructurados. Min sample thresholds + guard-rails hard-coded. Inicia shadow validation automaticamente. Setup: `setup_nightly_task.bat`. |
 | `backtest_parallel.py` | Backtest paralelo de combinaciones de filtros sobre `trade_archive` (trades ya ejecutados). |
 | `backtest_weekly.py` | Wrapper semanal de `backtest_parallel.py` con notificación Telegram. |
 | `test_m15_feed.py` | Test standalone del feed M15 (verificar candles + indicators). |
@@ -518,6 +529,105 @@ cat F:/AIdan/CLAUDE.md
 
 ---
 
+## Meta-Optimization (v3.31.0)
+
+Sistema de mejora continua autonomo implementado 14 May 2026. Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`.
+
+### Arquitectura
+
+```
+LLM Analyst (19:00 AR cron)  →  pending_changes (proposed)
+        ↓                              ↓
+Shadow Runner (auto)         →  shadow_strategies + shadow_trades
+        ↓                              ↓
+Auto-Applier (cada 10min)    →  pending_changes (validated → applied)
+        ↓                              ↓
+Monitor (cada 50 trades)     →  Auto-revert si PF cae >10%
+```
+
+### Componentes
+
+- **`tools/nightly_analyst.py`**: cron 19:00 AR. LLM fallback chain: Opus 4.7 → Groq llama-3.3-70b → deepseek-r1:14b → deepseek-r1:7b → qwen2.5:7b. Genera input JSON (stats 24h/7d/30d por buckets conf/trigger/hora/session/htf), invoca LLM, parsea output JSON, persiste como pending_changes con `source='nightly_<kind>_<model>'`.
+- **`src/optimizer/shadow_runner.py`**: cuando se crea auto_strategy, evalua signal contra todos los pending_changes con status='shadow_validating'. Crea shadow_strategies con decision=taken/skipped. Daemon paralelo simula outcomes con sim_engine.py usando candles posteriores.
+- **`src/optimizer/sim_engine.py`**: motor de simulacion SL/TP/expiry compartido (refactor de backtest_h1_m15.py).
+- **`src/optimizer/change_manager.py`**: apply/revert engine con guard-rails. Funciones: `apply_change()`, `revert_change()`, `is_signal_blocked_by_meta_filters()`, `get_confidence_adjustment_for_signal()`.
+- **`src/optimizer/auto_applier.py`**: daemon. Promueve shadow_validating → validated (si shadow PF > baseline + 0.15 y muestra >= 30 trades). Aplica validated → applied (max 1 a la vez). Monitorea applied; auto-revert si PF live cae >10% en 50 trades.
+
+### Tablas nuevas en DB
+
+- `pending_changes`: cola de cambios. Status: proposed → shadow_validating → validated → applied → reverted | rejected.
+- `shadow_strategies`: signals simulados con config alternativa (decision=taken/skipped).
+- `shadow_trades`: outcomes simulados.
+- `change_history`: audit trail inmutable.
+- `active_meta_filters`: filtros activos consumidos por scanner en cada signal.
+
+### Change types soportados (lista cerrada)
+
+`block_setup_type`, `block_conf_bucket`, `block_hour_utc`, `block_session`, `block_pattern`, `tune_optimizer_param`, `adjust_setup_confidence`, `adjust_min_confidence_per_track`.
+
+### Guard-rails hardcoded (NO se pueden tocar)
+
+`mt5_config`, `risk_percent`, `max_lot`, `daily_loss_limit`, `kill_switch`, MT5 credentials, Groq API keys, `dynamic_conf` formula.
+
+### Thresholds del auto-applier
+
+- `SHADOW_MIN_TRADES=30`: minimo shadow trades antes de validar
+- `SHADOW_MIN_PF_DELTA=0.15`: shadow PF debe superar baseline + delta
+- `VALIDATION_DROP_PCT=0.10`: live PF cayendo >10% post-apply → auto-revert
+- `MONITOR_INTERVAL_TRADES=50`: chequeo cada N trades post-apply
+- `COOLDOWN_DAYS_AFTER_REVERT=7`: pausa tras revert
+
+### Telegram alerts (formato breve)
+
+```
+🌙 Analyst 19:00 — 14 May
+Modelo: opus / Trades 24h: 9 (WR 33%)
+Propuesta: block conf bucket 70-79
+Estado: shadow validation 7-14d
+
+✅ Cambio aplicado
+block_conf_bucket {"bucket_lo":70,"bucket_hi":79}
+Shadow PF +0.18 vs baseline 0.55
+
+⚠️ Cambio revertido
+block_hour_utc {"hours":[16,19]}
+PF cayó -12% en 50 trades post-apply
+```
+
+NO se reporta costo de tokens en Telegram (solo log local).
+
+### Setup operacional (1 vez)
+
+```cmd
+REM Registrar nightly analyst en Task Scheduler (como admin)
+F:\AIdan\tools\setup_nightly_task.bat
+
+REM Verificar
+schtasks /Query /TN "AIdan_NightlyAnalyst"
+
+REM Test manual
+schtasks /Run /TN "AIdan_NightlyAnalyst"
+```
+
+### Riesgos documentados
+
+1. **Muestra chica**: 12 trades/día → shadow 7-14d = 80-160 trades. Min sample per change tipo restringe over-claiming.
+2. **Concept drift**: cambios aplicados se re-evaluan implicitamente en monitor (PF live actual).
+3. **Cascade failure**: max 1 cambio applied a la vez + cooldown 7d post-revert.
+4. **LLM alucina**: schema validation + lista cerrada change_types + guard-rails + min_sample requirements.
+5. **Costo runaway Opus**: max 1 sesion/dia, fallback a Groq/local si no disponible.
+
+### Critério de éxito (4 semanas post-deploy)
+
+- ≥ 5 cambios propuestos por LLM
+- ≥ 2 validados via shadow
+- ≥ 1 aplicado al live
+- PF acumulado ≥ 0.70 (vs baseline 0.55)
+- 0 violaciones de guard-rails
+- ≤ 2 cambios revertidos (significaria que validation funciona)
+
+---
+
 ## Reglas de mantenimiento de este archivo
 
 **IMPORTANTE**: con cada cambio significativo (nueva versión, feature, herramienta, hallazgo de backtest), CLAUDE.md DEBE actualizarse. Antes de cada sesión nueva con asistentes IA, leer este archivo completo para mantener contexto. La última actualización siempre debe coincidir con la versión activa en `Config.APP_VERSION`.
@@ -536,4 +646,4 @@ cat F:/AIdan/CLAUDE.md
 
 ---
 
-**Última actualización**: 11 May 2026 — v3.30.7 (doc-only: análisis confidence calibration + KPIs Estado actual)
+**Última actualización**: 14 May 2026 — v3.31.0 (Meta-Optimization: shadow mode + LLM nightly analyst + auto-applier + monitor)
