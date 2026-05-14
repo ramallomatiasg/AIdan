@@ -2226,12 +2226,17 @@
                 const _safeDate = (str) => { try { const d = new Date(String(str).replace(' ', 'T')); return isNaN(d.getTime()) ? null : d; } catch { return null; } };
                 const _fmtTime = (d) => d ? d.toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
                 const isPlanned = s.status === 'planned';
+                const isPrePlan = s.trigger_type === 'pre_planned';
                 const createdDate = _safeDate(s.created_at);
                 const eventDate = s.event_time ? _safeDate(s.event_time) : null;
-                const timeStr = isPlanned && eventDate ? _fmtTime(eventDate) : _fmtTime(createdDate);
+                // v3.31.5 — Bug UI: pre-plans ejecutadas mostraban created_at (ayer 5pm)
+                // en vez de event_time (horario real del evento). Fix: priorizar event_time
+                // SIEMPRE que exista, independiente del status (planned/active/auto_*).
+                const timeStr = eventDate ? _fmtTime(eventDate) : _fmtTime(createdDate);
                 const expiresDate = _safeDate(s.expires_at);
                 const expiresStr = _fmtTime(expiresDate);
-                const eventTimeTag = isPlanned && eventDate ? `<span style="font-size:12px;color:#a78bfa;margin-left:4px;" title="Evento: ${eventDate.toLocaleString('es-AR')}">📅 Evento: ${eventDate.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})} ${_fmtTime(eventDate)}</span>` : '';
+                // Tag de evento + creación: mostrar fecha del evento si es pre-plan
+                const eventTimeTag = isPrePlan && eventDate ? `<span style="font-size:12px;color:#a78bfa;margin-left:4px;" title="Generado: ${createdDate ? createdDate.toLocaleString('es-AR') : '-'}\nEvento: ${eventDate.toLocaleString('es-AR')}">📅 ${eventDate.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})}</span>` : '';
                 const expiryTag = !s.result && !isPlanned && expiresStr ? `<span style="font-size:12px;color:var(--text-muted);margin-left:4px;" title="Expira a las ${expiresStr} (${s.expiry_minutes || '?'}min)">⏱ ${expiresStr}</span>` : '';
                 const opacity = isExpired && !s.result ? '0.6' : '1';
                 const chartId = 'strat-chart-' + s.id;

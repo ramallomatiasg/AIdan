@@ -206,7 +206,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.31.1 | Full autopilot: auto_start_shadow_for_proposed() — proposed→shadow_validating automatico, max 3 simultaneos, dedup | activo |
 | v3.31.2 | Manual trigger: boton ▶ Run analyst en dashboard reemplaza Task Scheduler (user puede correr cuando quiera) | activo |
 | v3.31.3 | Hotfix: NameError `logger` en start_services (splash quedaba colgado en "Iniciando Dashboard API") | activo |
-| **v3.31.4** | **Hotfix pre-plan: sanity check expandido + SL/TP del LLM (no profile M5) + min_conf 60 + lot cap 0.05** | **actual** |
+| v3.31.4 | Hotfix pre-plan: sanity check expandido + SL/TP del LLM (no profile M5) + min_conf 60 + lot cap 0.05 | activo |
+| **v3.31.5** | **UI fix: pre-plans ejecutadas mostraban created_at (ayer 5pm) en vez de event_time. Priorizar event_time siempre** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -653,4 +654,4 @@ NO se reporta costo de tokens en Telegram (solo log local).
 
 ---
 
-**Última actualización**: 14 May 2026 — v3.31.4 (Hotfix pre-plan: 4 bugs combinados que causaron loss -$5.70 en #454)
+**Última actualización**: 14 May 2026 — v3.31.5 (UI fix: pre-plans mostraban created_at en vez de event_time)
