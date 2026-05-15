@@ -208,12 +208,15 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.31.3 | Hotfix: NameError `logger` en start_services (splash quedaba colgado en "Iniciando Dashboard API") | activo |
 | v3.31.4 | Hotfix pre-plan: sanity check expandido + SL/TP del LLM (no profile M5) + min_conf 60 + lot cap 0.05 | activo |
 | v3.31.5 | UI fix: pre-plans ejecutadas mostraban created_at (ayer 5pm) en vez de event_time. Priorizar event_time siempre | activo |
-| **v3.31.6** | **Hotfix nightly_analyst: claude CLI `--input-file` no existe → usar stdin + `--dangerously-skip-permissions` (Opus funciona)** | **actual** |
+| v3.31.6 | Hotfix nightly_analyst: claude CLI `--input-file` no existe → usar stdin + `--dangerously-skip-permissions` (Opus funciona) | activo |
+| **v3.31.7** | **Warmup gate M15 (30min) + H1 (60min): bloquea trades en primeros minutos post-restart (sobre-operacion fix)** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
 ```
-Warmup gate (10 min tras arrancar)
+Warmup gate M5 (10 min tras arrancar)
+Warmup gate M15 (30 min — 2 velas frescas)  -- v3.31.7
+Warmup gate H1 (60 min — 1 vela fresca)      -- v3.31.7
 ATR floor 2.5p
 ATR ceiling 6p
 Counter-HTF (news regular path requiere conf≥65)
@@ -655,4 +658,4 @@ NO se reporta costo de tokens en Telegram (solo log local).
 
 ---
 
-**Última actualización**: 14 May 2026 — v3.31.6 (Hotfix nightly_analyst: claude CLI invocation correcta, Opus 4.5 funcional)
+**Última actualización**: 15 May 2026 — v3.31.7 (Warmup gate M15+H1 — fix sobre-operacion post-restart)

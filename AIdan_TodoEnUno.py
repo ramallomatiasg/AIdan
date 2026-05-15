@@ -833,10 +833,18 @@ class AIdan:
             tech_m15 = TechnicalAnalyzerM15(logger)
             _last_m15_scan = 0  # timestamp last scan M15
             M15_SCAN_INTERVAL = 60  # segundos entre scans M15 (M15 candles cambian cada 15min)
+            # v3.31.7 — Warmup gate M15: 30 min para que cierren 2 velas M15 frescas
+            # mientras AIdan observa en real-time (igual logica que M5 warmup 10min).
+            # Bug observado: M15 disparaba trades a los 20s post-restart sobre data stale.
+            M15_WARMUP_SECONDS = 1800  # 30 min (2 velas M15)
+            _last_m15_warmup_log = 0
             # v3.20.0 — Track C H1 experimental (paralelo a M5+M15)
             tech_h1 = TechnicalAnalyzerH1(logger)
             _last_h1_scan = 0  # timestamp last scan H1
             H1_SCAN_INTERVAL = 300  # 5 min — H1 candles cambian cada 60min
+            # v3.31.7 — Warmup gate H1: 60 min para que cierre al menos 1 vela H1 fresca.
+            H1_WARMUP_SECONDS = 3600  # 60 min (1 vela H1)
+            _last_h1_warmup_log = 0
 
             # SMC Engine initialization
             from src.analyzer.mtf_analyzer import MTFAnalyzer
@@ -2983,8 +2991,17 @@ class AIdan:
                     # Track separado del M5: trigger_type='m15_structure', profile M15.
                     # Filtros mínimos (counter-both + conf ceiling). Sin late breakout
                     # (M15 está en otra escala). Sin hour gate (ya removido v3.17).
+                    # v3.31.7 — Warmup gate: skip primeros 30min post-restart para que
+                    # cierren 2 velas M15 frescas mientras observamos en real-time.
+                    _m15_warmup_elapsed = time.time() - _analyzer_warmup_start
+                    _m15_in_warmup = _m15_warmup_elapsed < M15_WARMUP_SECONDS
+                    if _m15_in_warmup:
+                        # Log cada 5min para no spamear pero confirmar que el gate trabaja
+                        if time.time() - _last_m15_warmup_log > 300:
+                            logger.info(f"M15 warmup gate: scan skipped, {_m15_warmup_elapsed:.0f}s < {M15_WARMUP_SECONDS}s ({(M15_WARMUP_SECONDS - _m15_warmup_elapsed)/60:.1f}min restantes)")
+                            _last_m15_warmup_log = time.time()
                     try:
-                        if (time.time() - _last_m15_scan) >= M15_SCAN_INTERVAL:
+                        if not _m15_in_warmup and (time.time() - _last_m15_scan) >= M15_SCAN_INTERVAL:
                             _last_m15_scan = time.time()
                             _m15_state = tech_m15.get_market_state()
                             _m15_atr = _m15_state.get('avg_range_pips', 0)
@@ -3088,8 +3105,16 @@ class AIdan:
                     # v3.20.0 — Track C: H1 structure scan paralelo (cada 5 min)
                     # Track separado de M5+M15: trigger_type='h1_structure', profile H1.
                     # H1 candles cambian cada hora, no tiene sentido escanear más seguido.
+                    # v3.31.7 — Warmup gate: skip primeros 60min post-restart para que
+                    # cierre al menos 1 vela H1 fresca observada en real-time.
+                    _h1_warmup_elapsed = time.time() - _analyzer_warmup_start
+                    _h1_in_warmup = _h1_warmup_elapsed < H1_WARMUP_SECONDS
+                    if _h1_in_warmup:
+                        if time.time() - _last_h1_warmup_log > 300:
+                            logger.info(f"H1 warmup gate: scan skipped, {_h1_warmup_elapsed:.0f}s < {H1_WARMUP_SECONDS}s ({(H1_WARMUP_SECONDS - _h1_warmup_elapsed)/60:.1f}min restantes)")
+                            _last_h1_warmup_log = time.time()
                     try:
-                        if (time.time() - _last_h1_scan) >= H1_SCAN_INTERVAL:
+                        if not _h1_in_warmup and (time.time() - _last_h1_scan) >= H1_SCAN_INTERVAL:
                             _last_h1_scan = time.time()
                             _h1_state = tech_h1.get_market_state()
                             _h1_atr = _h1_state.get('avg_range_pips', 0)
