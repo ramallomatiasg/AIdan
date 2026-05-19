@@ -1160,11 +1160,37 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
         # Crea shadow_strategies (decision=taken/skipped) para cada cambio en validacion.
         try:
             from src.optimizer.shadow_runner import evaluate_signal_for_shadow_changes
+            from datetime import datetime as _dt, timezone as _tz
             # Reconstruir signal dict desde args + entry_context para feature evaluation
             pip = 0.0001
             sl_pips_calc = abs(stop_loss - entry_price) / pip
             tp_pips_calc = abs(take_profit - entry_price) / pip
             ctx = entry_context or {}
+
+            # v3.31.8 — BUG FIX: entry_context NO contiene hour_utc/session/day_of_week
+            # ni setup_type, asi que los filtros block_hour/block_session/block_setup_type
+            # nunca se disparaban en shadow runner. Derivamos hour_utc, day_of_week, session
+            # del timestamp actual UTC. setup_type: fallback a trigger_type.
+            _now_utc = _dt.now(_tz.utc)
+            _hour_utc_derived = ctx.get('hour_utc')
+            if _hour_utc_derived is None:
+                _hour_utc_derived = _now_utc.hour
+            _dow_derived = ctx.get('day_of_week')
+            if _dow_derived is None:
+                _dow_derived = _now_utc.weekday()  # 0=Mon..6=Sun
+
+            def _derive_session(h):
+                """Forex sessions UTC: asia 22-7, london 7-13, overlap 13-16, ny 16-21, late_ny 21-22"""
+                if h is None: return ''
+                if h < 7 or h >= 22: return 'asia'
+                if 7 <= h < 13: return 'london'
+                if 13 <= h < 16: return 'overlap'
+                if 16 <= h < 21: return 'ny'
+                return 'late_ny'  # 21h UTC
+
+            _session_derived = ctx.get('session') or _derive_session(_hour_utc_derived)
+            _setup_derived = ctx.get('setup_type') or trigger_type or ''
+
             signal_dict = {
                 'direction': direction,
                 'entry_price': entry_price,
@@ -1174,10 +1200,10 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
                 'tp_pips': round(tp_pips_calc, 1),
                 'confidence': confidence,
                 'trigger_type': trigger_type,
-                'setup_type': ctx.get('setup_type', ''),
-                'session': ctx.get('session', ''),
-                'hour_utc': ctx.get('hour_utc'),
-                'day_of_week': ctx.get('day_of_week'),
+                'setup_type': _setup_derived,
+                'session': _session_derived,
+                'hour_utc': _hour_utc_derived,
+                'day_of_week': _dow_derived,
                 'htf_bias': ctx.get('htf_bias', ''),
                 'avg_range_pips': ctx.get('avg_range_pips') or ctx.get('atr_pips') or 0,
             }

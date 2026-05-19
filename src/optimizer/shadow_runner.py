@@ -50,7 +50,9 @@ def _passes_change_filter(signal: dict, change_type: str, params: dict) -> tuple
     try:
         if change_type == 'block_setup_type':
             blocked = params.get('setup_type')
-            if signal.get('setup_type') == blocked:
+            # v3.31.8: fallback a trigger_type si setup_type vacio (compat con signals viejos)
+            sig_setup = signal.get('setup_type') or signal.get('trigger_type', '')
+            if sig_setup == blocked:
                 return False, f'blocked_setup_{blocked}'
 
         elif change_type == 'block_conf_bucket':
