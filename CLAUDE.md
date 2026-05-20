@@ -210,7 +210,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.31.5 | UI fix: pre-plans ejecutadas mostraban created_at (ayer 5pm) en vez de event_time. Priorizar event_time siempre | activo |
 | v3.31.6 | Hotfix nightly_analyst: claude CLI `--input-file` no existe → usar stdin + `--dangerously-skip-permissions` (Opus funciona) | activo |
 | v3.31.7 | Warmup gate M15 (30min) + H1 (60min): bloquea trades en primeros minutos post-restart (sobre-operacion fix) | activo |
-| **v3.31.8** | **CRITICO: shadow runner bugs — hour_utc/session/setup_type vacios → filtros block_hour/block_session/block_setup nunca disparaban** | **actual** |
+| v3.31.8 | CRITICO: shadow runner bugs — hour_utc/session/setup_type vacios → filtros block_hour/block_session/block_setup nunca disparaban | activo |
+| **v3.32.0** | **Math fixes: TP 15→20p + BE trigger 50% + trail 80% (atacar "gana poco/pierde mucho")** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -659,4 +660,4 @@ NO se reporta costo de tokens en Telegram (solo log local).
 
 ---
 
-**Última actualización**: 19 May 2026 — v3.31.8 (CRITICO: shadow runner bug fix — meta-optimizer estaba roto silenciosamente)
+**Última actualización**: 19 May 2026 — v3.32.0 (Math fixes: TP 20p + BE trigger 50% + trail 80% — atacar avg_win bajo)

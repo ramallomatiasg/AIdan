@@ -904,9 +904,12 @@ def get_active_profile():
     # to 50 to capture the conf<50 profitable bucket, but simulation revealed the change
     # captures bucket [50,60) (a NET LOSER, -$10.61) instead of unlocking conf<50 (still
     # blocked by 50 floor). Keeping 60 + adding conf >=80 ceiling is the correct combo.
+    # v3.32.0: TP subido de 15p a 20p (user observation: gana poco / pierde mucho).
+    # Avg TP-hit historico era 4.3p — TP de 15p apenas se llegaba. Con TP 20p,
+    # los TP-hits que SI lleguen seran mas grandes ($+4 en lugar de $+2.9 promedio).
     return {
         'min_impact': 50, 'min_confidence': 60, 'direction': 'any',
-        'stop_loss_pips': 3.5, 'take_profit_pips': 15, 'expiry_minutes': 15,
+        'stop_loss_pips': 3.5, 'take_profit_pips': 20, 'expiry_minutes': 15,
         'cooldown_minutes': 2, 'max_trades_per_hour': 3,
     }
 

@@ -3270,14 +3270,24 @@ class AIdan:
         _logger = logging.getLogger("analyzer")
         _logger.info("Trailing monitor started (1s interval)")
 
-        # Trailing DISABLED — SL/TP fijos.
-        # Analysis of 69 trades showed trailing destroys R:R (avg win $2.5 vs avg loss $3.2).
-        # Without trailing: 29% WR * 3.4:1 R:R = +$80 vs trailing's -$50.
-        # Thread still runs for: sync_pending_orders + HWM tracking for learning.
-        TRAILING_ENABLED = False
-        BE_TRIGGER = 0.35
-        TRAIL_PIPS = 4.0
+        # v3.32.0 — Re-enable trailing en modo CONSERVADOR (BE-first then trail).
+        # User insight (19 may, 250 trades data): avg_win $2.91 vs avg_loss $3.36.
+        # AIdan gana poco y pierde mucho. Math break-even WR=53.6%, actual 38%.
+        # El analisis viejo (TRAILING_ENABLED=False, 69 trades) sugeria empeoraba R:R,
+        # pero ahora con 250 trades y datos mas claros, vale la pena re-activar
+        # en modo BE_FIRST: mover SL a BE+0.5p cuando trade va +50% del TP a favor.
+        # Luego, si llega a +80% del TP, trail con stop 3p detras del HWM.
+        #
+        # Objetivo: reducir avg_loss (BE-out cuando se puede) sin sacrificar avg_win.
+        # Math esperado: si 30% de los SL se convierten en BE-out (-$0.35 comm vs -$3.36 SL),
+        # avg_loss baja de $3.36 a ~$2.45 → WR break-even baja de 53.6% a 47.4%.
+        TRAILING_ENABLED = True
+        BE_TRIGGER = 0.50       # Cuando price va +50% del TP -> mover SL a BE
+        BE_OFFSET_PIPS = 0.5    # SL queda en entry + 0.5p (cubrir comision)
+        TRAIL_START = 0.80      # Cuando price va +80% del TP -> empezar trail
+        TRAIL_PIPS = 3.0        # Trail SL queda 3p detras del HWM
         TRAIL_DIST = TRAIL_PIPS * 0.0001
+        BE_OFFSET = BE_OFFSET_PIPS * 0.0001
         MIN_SL_MOVE = 0.00003
 
         while True:
@@ -3324,26 +3334,38 @@ class AIdan:
                     # Update high-water mark (best price reached)
                     high_water = max(stored_hwm or 0, progress)
 
-                    # Continuous trailing: once price reaches BE_TRIGGER, SL follows HWM - TRAIL_DIST
+                    # v3.32.0 — Two-stage trailing:
+                    # Stage 1 (BE): cuando price reaches BE_TRIGGER del TP, mover SL a BE+offset.
+                    # Stage 2 (Trail): cuando price reaches TRAIL_START del TP, trail HWM - TRAIL_DIST.
                     be_threshold = tp_distance * BE_TRIGGER
-                    trailing_active = high_water >= be_threshold
+                    trail_threshold = tp_distance * TRAIL_START
+                    be_active = high_water >= be_threshold
+                    trail_active = high_water >= trail_threshold
 
                     new_sl = None
                     new_step = current_step or 0
 
-                    if TRAILING_ENABLED and trailing_active:
-                        new_step = max(new_step, 1)
-                        _spread_buf = 0.00015
+                    if TRAILING_ENABLED and be_active:
                         if direction == 'CALL':
-                            trail_sl = fill_price + high_water - TRAIL_DIST
-                            floor_sl = fill_price + _spread_buf
-                            candidate = max(trail_sl, floor_sl)
+                            if trail_active:
+                                # Stage 2: trail HWM - TRAIL_DIST
+                                trail_sl = fill_price + high_water - TRAIL_DIST
+                                candidate = max(trail_sl, fill_price + BE_OFFSET)
+                                new_step = 2
+                            else:
+                                # Stage 1: SL a BE + offset (lock pequeno profit)
+                                candidate = fill_price + BE_OFFSET
+                                new_step = 1
                             if candidate > sl + MIN_SL_MOVE:
                                 new_sl = round(candidate, 5)
-                        else:
-                            trail_sl = fill_price - high_water + TRAIL_DIST
-                            floor_sl = fill_price - _spread_buf
-                            candidate = min(trail_sl, floor_sl)
+                        else:  # PUT
+                            if trail_active:
+                                trail_sl = fill_price - high_water + TRAIL_DIST
+                                candidate = min(trail_sl, fill_price - BE_OFFSET)
+                                new_step = 2
+                            else:
+                                candidate = fill_price - BE_OFFSET
+                                new_step = 1
                             if candidate < sl - MIN_SL_MOVE:
                                 new_sl = round(candidate, 5)
 
@@ -3353,10 +3375,11 @@ class AIdan:
                         if success:
                             locked_pips = (new_sl - fill_price) / 0.0001 if direction == 'CALL' else (fill_price - new_sl) / 0.0001
                             update_mt5_trailing_data(sid, new_step, high_water)
+                            stage_label = "TRAIL" if new_step == 2 else "BE"
                             _logger.info(
-                                f"Trailing: #{ticket} strat#{sid} SL->{new_sl:.5f} "
+                                f"Trailing[{stage_label}]: #{ticket} strat#{sid} SL->{new_sl:.5f} "
                                 f"(lock={locked_pips:+.1f}p hwm={high_water/0.0001:+.1f}p "
-                                f"progress={progress/0.0001:+.1f}p trail={TRAIL_PIPS}p)")
+                                f"progress={progress/0.0001:+.1f}p)")
                     elif high_water != (stored_hwm or 0) and high_water > 0:
                         # Always track HWM for learning even with trailing disabled
                         update_mt5_trailing_data(sid, new_step, high_water)
