@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.32.0"
+APP_VERSION = "3.32.1"
 
 class Config:
     VERSION = APP_VERSION
@@ -96,6 +96,15 @@ class Config:
     # v3.28.0 — Spread guardian
     # Bloquea entries si spread actual > MAX_SPREAD_PIPS
     MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))
+
+    # v3.32.1 — User awake window: no abrir trades nuevos cerca del horario
+    # en que el user duerme. Asume horario AR (UTC-3, sin DST).
+    # Track-aware: H1 con expiry 180min necesita cutoff mas temprano.
+    # Override por env var en .env si querés horarios distintos.
+    TRADING_START_HOUR_AR = int(os.getenv("TRADING_START_HOUR_AR", "6"))   # 06:00 AR
+    TRADING_END_HOUR_AR = int(os.getenv("TRADING_END_HOUR_AR", "22"))     # 22:00 AR (default M5)
+    H1_LAST_OPEN_AR = int(os.getenv("H1_LAST_OPEN_AR", "19"))             # H1: 19:00 AR (expiry 180min)
+    M15_LAST_OPEN_AR = int(os.getenv("M15_LAST_OPEN_AR", "22"))           # M15: 22:00 AR
 
     @staticmethod
     def get_sources():

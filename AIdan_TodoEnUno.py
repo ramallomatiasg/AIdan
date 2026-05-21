@@ -958,13 +958,36 @@ class AIdan:
                 if mt5_exec and mt5_exec.is_ready():
                     # Block new trades 10min before market close (Friday 20:50+ UTC)
                     try:
-                        from datetime import datetime, timezone
+                        from datetime import datetime, timezone, timedelta
                         utc_now = datetime.now(timezone.utc)
                         if utc_now.weekday() == 4 and utc_now.hour == 20 and utc_now.minute >= 50:
                             logger.info(f"MT5 blocked: market closing soon, skipping #{sid}")
                             return None
                     except Exception as e:
                         logger.debug(f"MT5 market-close check: {e}")
+
+                    # v3.32.1 — User awake window: no abrir trades cerca del horario en que
+                    # el user duerme. Para H1 (expiry 180min) cerrar 22:00 AR garantiza
+                    # cierre antes de 01:00 AR. Para M15 (45min) cerrar 23:00 AR garantiza
+                    # cierre antes de 23:45. M5 (15min) sin restriccion practica.
+                    # Override via env vars TRADING_END_HOUR_AR / H1_LAST_OPEN_AR.
+                    try:
+                        import os as _os
+                        # Default: user opera entre 06:00 y 22:00 AR (UTC -3)
+                        # Pero queremos NO ABRIR trades nuevos cerca del cierre del usuario
+                        end_hour_ar = int(_os.getenv('TRADING_END_HOUR_AR', '22'))  # default 22:00 AR
+                        h1_last_open_ar = int(_os.getenv('H1_LAST_OPEN_AR', '19'))  # H1 mas estricto
+                        m15_last_open_ar = int(_os.getenv('M15_LAST_OPEN_AR', '22'))  # M15 hasta 22
+                        # AR es UTC-3 (sin DST). hora_ar = utc_hour - 3 (con mod 24)
+                        ar_hour = (utc_now.hour - 3) % 24
+                        # Track-aware cutoff
+                        cutoff = {'h1': h1_last_open_ar, 'm15': m15_last_open_ar, 'm5': end_hour_ar}.get(track, end_hour_ar)
+                        # Ventana operativa: 06:00 AR hasta cutoff_ar
+                        if ar_hour < 6 or ar_hour >= cutoff:
+                            logger.info(f"User-window block: skip #{sid} {track} at {ar_hour:02d}h AR (cutoff {cutoff}h)")
+                            return None
+                    except Exception as e:
+                        logger.debug(f"User-window check: {e}")
                     # v3.28.0 Spread guardian
                     try:
                         from src.common.slippage_tracker import is_spread_acceptable
