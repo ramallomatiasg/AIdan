@@ -212,7 +212,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.31.7 | Warmup gate M15 (30min) + H1 (60min): bloquea trades en primeros minutos post-restart (sobre-operacion fix) | activo |
 | v3.31.8 | CRITICO: shadow runner bugs — hour_utc/session/setup_type vacios → filtros block_hour/block_session/block_setup nunca disparaban | activo |
 | v3.32.0 | Math fixes: TP 15→20p + BE trigger 50% + trail 80% (atacar "gana poco/pierde mucho") | activo |
-| **v3.32.1** | **User awake window: no abrir H1 después de 19h AR (expiry 3h cae en madrugada). Configurable via env.** | **actual** |
+| v3.32.1 | User awake window: no abrir H1 después de 19h AR (expiry 3h cae en madrugada). Configurable via env. | activo |
+| **v3.33.0** | **REFACTOR Fase B: macro context (htf_bias + daily_ctx) ahora GARANTIZADO en M5/M15/H1 (antes None si M5 skipped). + tool train_confidence_model.py (Fase A preparatoria, Brier 0.28 vs 0.39)** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -661,4 +662,4 @@ NO se reporta costo de tokens en Telegram (solo log local).
 
 ---
 
-**Última actualización**: 21 May 2026 — v3.32.1 (User awake window: H1 cutoff 19h AR para evitar trades overnight)
+**Última actualización**: 22 May 2026 — v3.33.0 (REFACTOR Fase A+B inicio: confidence model entrenado, macro context conectado a todos los tracks)

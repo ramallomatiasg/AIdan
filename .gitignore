@@ -35,6 +35,7 @@ state/
 data/
 *.jsonl
 *.json
+!config/confidence_weights.json
 
 # Backtest outputs (timestamped at root)
 backtest_*.csv

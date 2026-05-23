@@ -1954,6 +1954,26 @@ class AIdan:
                     except Exception as e:
                         logger.error(f"Calendar pre-news error: {e}", exc_info=True)
 
+                    # v3.33.0 (Fase B) — Macro context disponible SIEMPRE para todos los tracks.
+                    # Antes htf_bias y daily_ctx se computaban DENTRO del bloque M5 (if not skip_session
+                    # and not skip_atr), lo que hacia que M15 y H1 los recibieran como None cuando M5
+                    # estaba skipped. Hallazgo del Explore agent: el scanner M5 ya los pasa OK,
+                    # pero M15/H1 leen del scope que puede no estar inicializado.
+                    # Fix: calcular ambos ANTES del bloque y mantener en scope para todos los tracks.
+                    htf_bias = None
+                    daily_ctx = None
+                    try:
+                        if smc:
+                            smc.update()
+                            smc_status = smc.get_status()
+                            htf_bias = smc_status.get('htf_bias', None)
+                    except Exception as _sue:
+                        logger.debug(f"Macro context smc/htf_bias: {_sue}")
+                    try:
+                        daily_ctx = mtf.get_daily_context()
+                    except Exception as _dce:
+                        logger.debug(f"Macro context daily_ctx: {_dce}")
+
                     # ── Structure scanner: generate strategies from market structure alone ──
                     try:
                         from src.common.db import get_active_profile
@@ -1989,32 +2009,8 @@ class AIdan:
                             logger.debug(f"ATR ceiling check: {_atr_e}")
 
                         if not skip_session and not skip_atr:
-                            # Ensure SMC has fresh HTF data BEFORE structure scanner reads it.
-                            # Bug fix: SMC.update() was only called below in SMC scanner section,
-                            # so structure scanner saw empty htf_bias in the first cycle of the day
-                            # (and whenever SMC state was stale). This made counter-HTF filter inert.
-                            try:
-                                if smc:
-                                    smc.update()
-                            except Exception as _sue:
-                                logger.debug(f"SMC update pre-structure: {_sue}")
-
-                            # Get HTF bias BEFORE signal generation so scanner can reason about it
-                            htf_bias = None
-                            try:
-                                if smc:
-                                    smc_status = smc.get_status()
-                                    htf_bias = smc_status.get('htf_bias', None)
-                            except Exception:
-                                htf_bias = None
-
-                            # Daily macro context: today's high/low, position in range, prev day close
-                            daily_ctx = None
-                            try:
-                                daily_ctx = mtf.get_daily_context()
-                            except Exception as _dce:
-                                logger.debug(f"Daily context: {_dce}")
-
+                            # v3.33.0: htf_bias y daily_ctx ya se calcularon ARRIBA (fuera del
+                            # bloque condicional) para que M15/H1 los reciban siempre.
                             structure_signals = tech.detect_structure_signals(
                                 min_confidence=min_conf, htf_bias=htf_bias, daily_context=daily_ctx)
                             _dc_info = f" day_pos={daily_ctx['today_pos']:.0%}" if daily_ctx and daily_ctx.get('today_pos') is not None else ''
@@ -3030,12 +3026,14 @@ class AIdan:
                             _m15_atr = _m15_state.get('avg_range_pips', 0)
                             # ATR floor M15: 5p (vs M5 2.5p — M15 atr es ~3x)
                             if _m15_atr >= 5.0:
-                                _htf_bias_now = htf_bias if 'htf_bias' in dir() else None
-                                _daily_ctx_now = daily_ctx if 'daily_ctx' in dir() else None
+                                # v3.33.0 (Fase B): htf_bias y daily_ctx GARANTIZADOS por scope
+                                # superior (se setean siempre, antes del structure scanner).
+                                # Antes usabamos 'in dir()' check que retornaba None cuando M5
+                                # scanner estaba skipped por session/ATR -> M15 sin contexto macro.
                                 _m15_signals = tech_m15.detect_structure_signals(
                                     min_confidence=M15_PROFILE['min_confidence'],
-                                    htf_bias=_htf_bias_now,
-                                    daily_context=_daily_ctx_now
+                                    htf_bias=htf_bias,
+                                    daily_context=daily_ctx
                                 )
                                 if _m15_signals:
                                     # Pick highest confidence signal
@@ -3143,12 +3141,11 @@ class AIdan:
                             _h1_atr = _h1_state.get('avg_range_pips', 0)
                             # ATR floor H1: 10p (vs M15 5p, M5 2.5p — escala ~2x cada step)
                             if _h1_atr >= 10.0:
-                                _htf_bias_h1 = htf_bias if 'htf_bias' in dir() else None
-                                _daily_ctx_h1 = daily_ctx if 'daily_ctx' in dir() else None
+                                # v3.33.0 (Fase B): scope superior garantiza htf_bias/daily_ctx
                                 _h1_signals = tech_h1.detect_structure_signals(
                                     min_confidence=H1_PROFILE['min_confidence'],
-                                    htf_bias=_htf_bias_h1,
-                                    daily_context=_daily_ctx_h1
+                                    htf_bias=htf_bias,
+                                    daily_context=daily_ctx
                                 )
                                 if _h1_signals:
                                     _h1_top = max(_h1_signals, key=lambda s: s['confidence'])
