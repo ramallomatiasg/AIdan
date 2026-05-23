@@ -993,6 +993,51 @@ class TechnicalAnalyzer:
                     filtered.append(sig)
             signals = filtered
 
+        # v3.34.0 (Fase C) — Entry Quality Gates basados en hallazgos del modelo ML.
+        # Training de 276 trades revelo features predictivos de LOSS:
+        #   - velocity_5c_aligned: coef -0.169 (momentum corto fuerte = exhaustion entry)
+        #   - body_atr_ratio: coef -0.174 (vela de entry MUY GRANDE = mean reversion proxima)
+        # AIdan identifica direccion bien pero entra DESPUES de moves explosivos.
+        # Gates bloquean los exhaustion entries que el modelo identifico como -EV.
+        if signals and candles and len(candles) >= 11:
+            atr_pips_now = avg_range
+            # Last closed candle (vela de "entry")
+            entry_candle = candles[-2] if len(candles) >= 2 else None
+            # Velocity 5 candles: close actual - close 5 atras
+            try:
+                vel_5c_raw = (candles[-1]['close'] - candles[-6]['close']) / pip
+            except Exception:
+                vel_5c_raw = 0
+
+            gates_pre = len(signals)
+            gates_filtered = []
+            for sig in signals:
+                # Aligned velocity: positivo si momentum favorece direction
+                if sig['direction'] == 'CALL':
+                    vel_aligned = vel_5c_raw
+                else:  # PUT
+                    vel_aligned = -vel_5c_raw
+
+                # Gate 1: Exhaustion velocity (entered too late after fast move)
+                if vel_aligned > 6.0:  # mercado YA se movio 6+ pips en favor en 5 candles
+                    self.logger.info(f"Entry gate (exhaustion velocity): blocked {sig['direction']} {sig['setup_type']} vel_5c={vel_aligned:.1f}p > 6p")
+                    continue
+
+                # Gate 2: Body dominante (vela MUY fuerte = mean reversion riesgo)
+                if entry_candle and atr_pips_now > 0:
+                    body_pips = abs(entry_candle['close'] - entry_candle['open']) / pip
+                    body_atr_ratio = body_pips / atr_pips_now
+                    if body_atr_ratio > 1.3:  # body > 130% del ATR = vela exagerada
+                        self.logger.info(f"Entry gate (body too dominant): blocked {sig['direction']} {sig['setup_type']} body/atr={body_atr_ratio:.2f} > 1.3")
+                        continue
+
+                gates_filtered.append(sig)
+
+            blocked = gates_pre - len(gates_filtered)
+            if blocked > 0:
+                self.logger.info(f"Entry quality gates: blocked {blocked}/{gates_pre} signal(s) (exhaustion/body)")
+            signals = gates_filtered
+
         if signals:
             self.logger.info(f"Structure scanner: {len(signals)} signals detected")
         return signals

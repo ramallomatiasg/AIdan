@@ -56,15 +56,26 @@ CATEGORICAL_FEATURES = {
 
 NUMERIC_FEATURES = ['rsi_at_entry', 'avg_range_pips', 'hour_utc', 'day_of_week']
 
+# v3.33.0 — Features predictivos adicionales (de enrich_archive_features.py)
+# Si el CSV existe, se cargan estos features adicionales (Fase B validation).
+ENRICHED_FEATURES = [
+    'velocity_5c_aligned', 'velocity_10c_aligned',  # momentum reciente alineado a direction
+    'body_atr_ratio',                                # fuerza de la vela de entry
+    'dist_prev_high_pips', 'dist_prev_low_pips',    # multi-day structure
+    'mins_since_high_impact_news',                   # tiempo desde news high-impact
+]
+ENRICHED_CSV = 'trade_archive_enriched.csv'
+
 # Confidence VIEJA (para benchmarking)
 OLD_CONF_FEATURE = 'confidence'
 
 
 def load_data():
-    """Load trade_archive con todos los features completos."""
+    """Load trade_archive con todos los features completos.
+    Si existe enriched CSV, hace merge con features adicionales."""
     conn = sqlite3.connect(DB_PATH)
     sql = """
-        SELECT direction, result, mt5_pnl,
+        SELECT id as trade_id, direction, result, mt5_pnl,
                confidence, trigger_type, setup_type,
                htf_bias, session, hour_utc, day_of_week,
                rsi_at_entry, avg_range_pips, market_trend,
@@ -77,6 +88,15 @@ def load_data():
     """
     df = pd.read_sql_query(sql, conn)
     conn.close()
+
+    # Merge enriched features if available
+    enriched_path = ROOT / ENRICHED_CSV
+    if enriched_path.exists():
+        enriched = pd.read_csv(enriched_path)
+        df = df.merge(enriched, on='trade_id', how='left')
+        print(f"  Merged enriched features from {enriched_path.name}")
+    else:
+        print(f"  (No enriched CSV found at {enriched_path}, training with base features only)")
     return df
 
 
@@ -93,6 +113,16 @@ def engineer_features(df):
     for col in NUMERIC_FEATURES:
         median = df[col].median()
         X[col] = df[col].fillna(median if pd.notna(median) else 0).astype(float)
+
+    # v3.33.0 — Enriched features (si disponibles)
+    enriched_added = []
+    for col in ENRICHED_FEATURES:
+        if col in df.columns:
+            median = df[col].median()
+            X[col] = df[col].fillna(median if pd.notna(median) else 0).astype(float)
+            enriched_added.append(col)
+    if enriched_added:
+        print(f"  Enriched features incluidos ({len(enriched_added)}): {', '.join(enriched_added)}")
 
     # Target
     y = (df['result'] == 'win').astype(int).values
