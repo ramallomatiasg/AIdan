@@ -1643,9 +1643,36 @@ class AIdan:
                                                                 entry_context=_news_entry_ctx)
                                                             if sid:
                                                                 strategies_created += 1
-                                                                cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': _news_conf})
-                                                                logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}] (audit pending)")
-                                                                _try_mt5_execute(sid, direction, price, sl, tp, _news_conf)
+                                                                # v3.35.0 — ML confidence predictor para news (AUC 0.75 en test).
+                                                                # Solo activa si USE_ML_CONFIDENCE=true. Fallback a _news_conf si modelo no aplicable.
+                                                                _exec_conf = _news_conf
+                                                                try:
+                                                                    from src.optimizer.confidence_predictor import predict_confidence
+                                                                    from datetime import datetime as _dt, timezone as _tz
+                                                                    _now = _dt.now(_tz.utc)
+                                                                    _ml_signal = {
+                                                                        'trigger_type': 'news',
+                                                                        'direction': direction,
+                                                                        'session': _news_session_info.get('session', '') if _news_session_info else '',
+                                                                        'htf_bias': _news_htf_real,
+                                                                        'market_trend': market.get('trend', ''),
+                                                                        'trend_strength': market.get('trend_strength', ''),
+                                                                        'volatility': market.get('volatility', ''),
+                                                                        'rsi_at_entry': market.get('rsi', 50),
+                                                                        'avg_range_pips': market.get('avg_range_pips', 3),
+                                                                        'hour_utc': _now.hour,
+                                                                        'day_of_week': _now.weekday(),
+                                                                        # enriched features (use medians from training)
+                                                                    }
+                                                                    _ml_conf = predict_confidence(_ml_signal)
+                                                                    if _ml_conf is not None:
+                                                                        logger.info(f"ML predictor override (news): heuristic conf {_news_conf} -> ML conf {_ml_conf}")
+                                                                        _exec_conf = _ml_conf
+                                                                except Exception as _ml_e:
+                                                                    logger.debug(f"ML predictor error (news): {_ml_e}")
+                                                                cycle_signals.append({'source': 'news', 'direction': direction, 'confidence': _exec_conf})
+                                                                logger.info(f"Auto-strategy #{sid}: {direction} @ {price:.5f} SL={sl:.5f} TP={tp:.5f} [{adaptive.get('method','?')}] conf={_exec_conf} (audit pending)")
+                                                                _try_mt5_execute(sid, direction, price, sl, tp, _exec_conf)
 
                                                                 # Gemma 4 audit in background — veto closes position if needed
                                                                 def _async_news_audit(_sid=sid, _dir=direction, _price=price, _conf=_news_conf, _base=_news_base_conf,
@@ -3114,8 +3141,33 @@ class AIdan:
                                                 entry_context=_m15_ctx,
                                             )
                                             if _m15_sid:
-                                                logger.info(f"M15 strategy #{_m15_sid}: {_m15_dir} conf={_m15_conf} SL={_m15_adapt['sl_pips']:.1f}p TP={_m15_adapt['tp_pips']:.1f}p price={_m15_price:.5f} expiry={M15_PROFILE['expiry_minutes']}min")
-                                                _try_mt5_execute(_m15_sid, _m15_dir, _m15_price, _m15_sl, _m15_tp, _m15_conf, track='m15')
+                                                # v3.35.0 — ML confidence predictor para m15_structure (AUC 0.625 en test)
+                                                _m15_exec_conf = _m15_conf
+                                                try:
+                                                    from src.optimizer.confidence_predictor import predict_confidence
+                                                    from datetime import datetime as _dt, timezone as _tz
+                                                    _now = _dt.now(_tz.utc)
+                                                    _ml_sig_m15 = {
+                                                        'trigger_type': 'm15_structure',
+                                                        'direction': _m15_dir,
+                                                        'session': _m15_state.get('session', '') if isinstance(_m15_state, dict) else '',
+                                                        'htf_bias': htf_bias or '',
+                                                        'market_trend': _m15_state.get('trend', '') if isinstance(_m15_state, dict) else '',
+                                                        'trend_strength': _m15_state.get('trend_strength', '') if isinstance(_m15_state, dict) else '',
+                                                        'volatility': _m15_state.get('volatility', '') if isinstance(_m15_state, dict) else '',
+                                                        'rsi_at_entry': _m15_state.get('rsi', 50) if isinstance(_m15_state, dict) else 50,
+                                                        'avg_range_pips': _m15_atr,
+                                                        'hour_utc': _now.hour,
+                                                        'day_of_week': _now.weekday(),
+                                                    }
+                                                    _ml_m15 = predict_confidence(_ml_sig_m15)
+                                                    if _ml_m15 is not None:
+                                                        logger.info(f"ML predictor override (m15): heuristic {_m15_conf} -> ML {_ml_m15}")
+                                                        _m15_exec_conf = _ml_m15
+                                                except Exception as _e:
+                                                    logger.debug(f"ML predictor error (m15): {_e}")
+                                                logger.info(f"M15 strategy #{_m15_sid}: {_m15_dir} conf={_m15_exec_conf} SL={_m15_adapt['sl_pips']:.1f}p TP={_m15_adapt['tp_pips']:.1f}p price={_m15_price:.5f} expiry={M15_PROFILE['expiry_minutes']}min")
+                                                _try_mt5_execute(_m15_sid, _m15_dir, _m15_price, _m15_sl, _m15_tp, _m15_exec_conf, track='m15')
                                             else:
                                                 logger.info(f"M15: add_auto_strategy returned None for {_m15_dir} (cooldown/cap?)")
                             else:
