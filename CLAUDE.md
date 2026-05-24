@@ -663,4 +663,88 @@ NO se reporta costo de tokens en Telegram (solo log local).
 
 ---
 
+## Backlog de ideas para probar (ordenadas por esfuerzo/impacto)
+
+Ideas de mejora identificadas el 22 May durante el refactor mayor.
+Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
+
+### Quick wins (horas → 1 día)
+
+1. **Random Forest / XGBoost** (en vez de logistic regression)
+   - Logistic es lineal — capaz el problema es no-lineal
+   - Mismo `train_confidence_model.py`, solo cambiar el modelo
+   - Esfuerzo: 1-2 horas. Validación inmediata (comparar AUC vs LR 0.48)
+
+2. **Auto-tuning de gates v3.34.0**
+   - Hoy puse vel > 6p y body/atr > 1.3 — thresholds arbitrarios
+   - Backtest sobre archive con todas las combinaciones (vel 3,4,5,6,7,8 × body 1.1,1.2,1.3,1.4,1.5)
+   - Encontrar el punto de mejor PF post-gates
+   - Esfuerzo: 2-3 horas
+
+3. **Modelos separados POR trigger_type**
+   - Hoy 1 modelo para todos los trades
+   - News + structure + smc tienen patrones distintos
+   - Train 1 modelo por trigger con sklearn
+   - Esfuerzo: 0.5 día
+
+### Mediano esfuerzo (1-2 días)
+
+4. **Volume features (MT5 tick_volume)**
+   - MT5 da tick_volume (no real volume forex pero proxy)
+   - Volume spike en breakout = signal más fuerte
+   - Volume bajo = posible false breakout
+   - Esfuerzo: 1 día (extracción + feature + validación)
+
+5. **Confluencia multi-TF concreta (no binaria)**
+   - Hoy solo htf_bias = bullish/bearish/neutral (3 valores)
+   - Falta: score 0-10 de alineación M5+M15+H1+H4+D1
+   - Cuanto más alineados, mejor el trade
+   - Esfuerzo: 1 día (MTFAnalyzer ya tiene trends, solo sumar)
+
+6. **Niveles psicológicos como features**
+   - Números redondos (1.1700, 1.1750, 1.1800)
+   - High/low de los últimos 3-5 días (no solo día previo)
+   - Distance to nearest level como feature
+   - Esfuerzo: 1 día
+
+7. **Régimen del mercado (trending vs ranging)**
+   - Detectar régimen con ADX o similar
+   - Confidence diferente por régimen
+   - Esfuerzo: 1-2 días
+
+### Mayor esfuerzo (3+ días)
+
+8. **Timing features finos**
+   - mins_since_last_swing_high/low
+   - candles_since_breakout (cuán reciente el setup)
+   - pullback_depth (cuánto retrocedió antes de continuar)
+   - consolidation_duration antes del move
+   - Esfuerzo: 2-3 días (feature engineering complicado)
+
+9. **News sentiment cuantificado (más granular)**
+   - Hoy solo impact_score 0-100 como entrada
+   - Falta: sentiment direction score numérico (no solo categórico)
+   - Time decay del impact (news 1h vs 1 día)
+   - Esfuerzo: 2 días
+
+10. **Pivot a swing trading (TF más largo)**
+    - Operar H4/D1 en vez de M5/M15
+    - TP/SL más grandes → comisión % mucho menor
+    - Menos sensible al timing exacto
+    - Esfuerzo: 1-2 semanas (rediseño parcial del scanner)
+
+### NO factibles con data actual (necesitan otro feed)
+
+11. **Orderbook / liquidity zones** (no tenemos data)
+12. **Inter-market correlation (DXY, treasuries, oil)** (requiere feed adicional)
+13. **News sentiment cualitativo del LLM mejor estructurado**
+
+### Próximos pasos planeados (orden)
+
+- **Weekend 23-24 May**: probar #1 (Random Forest), #2 (gate tuning), #3 (modelo por trigger)
+- **Si alguno mueve AUC >0.6**: continuar con #4 (volume) + #5 (multi-TF score)
+- **Si ninguno mejora**: discutir con user pivot a #10 (swing) o cierre
+
+---
+
 **Última actualización**: 22 May 2026 — v3.34.0 (REFACTOR Fase C: Entry Quality Gates basados en hallazgos del modelo ML)
