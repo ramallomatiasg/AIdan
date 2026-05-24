@@ -36,6 +36,7 @@ data/
 *.jsonl
 *.json
 !config/confidence_weights.json
+!config/confidence_predictor_meta.json
 
 # Backtest outputs (timestamped at root)
 backtest_*.csv
