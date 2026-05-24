@@ -3614,6 +3614,20 @@ class AIdan:
         self._anim_running = True
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        # v3.35.0 — Icon Tkinter window + taskbar (PyInstaller exe + dev)
+        try:
+            import sys as _sys
+            from pathlib import Path as _Path
+            if getattr(_sys, 'frozen', False):
+                _icon_base = _Path(getattr(_sys, '_MEIPASS', '.'))
+            else:
+                _icon_base = _Path(__file__).resolve().parent
+            _icon_ico = _icon_base / 'static' / 'aidan_icon.ico'
+            if _icon_ico.exists():
+                self.root.iconbitmap(default=str(_icon_ico))
+        except Exception as _ie:
+            pass  # silent fallback to default Tk icon
+
         # Center on screen
         self.root.update_idletasks()
         sx = (self.root.winfo_screenwidth() - W) // 2
