@@ -2,11 +2,20 @@
 enrich_archive_features.py — Calcula features predictivos adicionales sobre
 cada trade del archive, retroactivamente usando MT5 historical candles.
 
-Features agregados:
+Features agregados (v1 + v2 Domingo):
+
+V1 (sábado):
 - velocity_5c, velocity_10c: pips movidos en N candles previos (momentum reciente)
 - body_atr_ratio: |close-open| / ATR de la vela de entry (fuerza presión)
 - dist_prev_high, dist_prev_low: pips desde el high/low del día anterior
 - mins_since_high_impact_news: minutos desde el último impact>=70 news
+
+V2 (domingo):
+- volume_zscore: tick_volume del candle de entry / mean(last 20)
+- multi_tf_score: cuantos TFs (M5+M15+H1+H4) alineados con direction
+- dist_round_pips: distancia al numero redondo mas cercano
+- dist_5d_high_pips, dist_5d_low_pips: posicion en rango semanal
+- spread_at_entry_pips: spread del candle (mas alto = mas fricción)
 
 Output: F:/AIdan/trade_archive_enriched.csv (features extra por trade_id)
 
@@ -72,11 +81,80 @@ def fetch_candles_before(symbol, timeframe, end_dt, count):
                 'high': float(r['high']),
                 'low': float(r['low']),
                 'close': float(r['close']),
+                'tick_volume': int(r['tick_volume']) if 'tick_volume' in rates.dtype.names else 0,
+                'spread': int(r['spread']) if 'spread' in rates.dtype.names else 0,
             }
             for r in rates
         ]
     except Exception:
         return None
+
+
+def compute_volume_zscore(candles):
+    """tick_volume del candle de entry vs media de los previos."""
+    if not candles or len(candles) < 11:
+        return None
+    last_volume = candles[-1].get('tick_volume', 0)
+    prev_volumes = [c.get('tick_volume', 0) for c in candles[-11:-1]]
+    if not prev_volumes or all(v == 0 for v in prev_volumes):
+        return None
+    mean_v = sum(prev_volumes) / len(prev_volumes)
+    if mean_v == 0:
+        return None
+    return round(last_volume / mean_v, 3)
+
+
+def compute_multi_tf_score(symbol, trade_dt, direction):
+    """Score 0-4: cuántos TFs (M5, M15, H1, H4) están alineados con direction.
+    Trend simple: close[now] > close[-10] -> bullish."""
+    tfs = [mt5.TIMEFRAME_M5, mt5.TIMEFRAME_M15, mt5.TIMEFRAME_H1, mt5.TIMEFRAME_H4]
+    score = 0
+    for tf in tfs:
+        try:
+            rates = mt5.copy_rates_from(symbol, tf, trade_dt, 12)
+            if rates is None or len(rates) < 11:
+                continue
+            trend_bullish = float(rates[-1]['close']) > float(rates[-11]['close'])
+            if direction == 'CALL' and trend_bullish:
+                score += 1
+            elif direction == 'PUT' and not trend_bullish:
+                score += 1
+        except Exception:
+            continue
+    return score
+
+
+def compute_dist_to_round_number(entry_price):
+    """Distancia en pips al numero redondo mas cercano (1.17, 1.175, 1.18)."""
+    if not entry_price:
+        return None
+    # Niveles redondos: cada 50 pips (1.1700, 1.1750, 1.1800...)
+    nearest_50pip = round(entry_price * 200) / 200  # round to nearest 0.005 = 50p
+    dist_pips = abs(entry_price - nearest_50pip) / 0.0001
+    return round(dist_pips, 1)
+
+
+def get_5d_extremes(symbol, trade_dt):
+    """Fetch high/low de los últimos 5 daily candles antes del trade."""
+    try:
+        d1_candles = mt5.copy_rates_from(symbol, mt5.TIMEFRAME_D1, trade_dt, 7)
+        if d1_candles is None or len(d1_candles) < 5:
+            return None, None
+        trade_date = trade_dt.date()
+        previous_5 = []
+        for r in reversed(d1_candles):
+            candle_date = datetime.fromtimestamp(int(r['time'])).date()
+            if candle_date < trade_date:
+                previous_5.append(r)
+            if len(previous_5) >= 5:
+                break
+        if not previous_5:
+            return None, None
+        highs = [float(r['high']) for r in previous_5]
+        lows = [float(r['low']) for r in previous_5]
+        return max(highs), min(lows)
+    except Exception:
+        return None, None
 
 
 def compute_velocity(candles, n):
@@ -181,6 +259,15 @@ def main():
 
         mins_since_news = get_mins_since_news(cur, trade_dt)
 
+        # V2 — domingo features
+        volume_zscore = compute_volume_zscore(candles) if candles else None
+        multi_tf_score = compute_multi_tf_score(symbol, trade_dt, direction)
+        dist_round = compute_dist_to_round_number(entry_price)
+        high_5d, low_5d = get_5d_extremes(symbol, trade_dt)
+        dist_5d_high = (high_5d - entry_price) / 0.0001 if high_5d and entry_price else None
+        dist_5d_low = (entry_price - low_5d) / 0.0001 if low_5d and entry_price else None
+        spread_entry = candles[-1].get('spread', 0) / 10 if candles else None  # MT5 spread in points/10
+
         results.append({
             'trade_id': tid,
             'velocity_5c_pips': round(velocity_5c, 2) if velocity_5c is not None else None,
@@ -191,6 +278,13 @@ def main():
             'dist_prev_high_pips': round(dist_prev_high_pips, 1) if dist_prev_high_pips is not None else None,
             'dist_prev_low_pips': round(dist_prev_low_pips, 1) if dist_prev_low_pips is not None else None,
             'mins_since_high_impact_news': mins_since_news,
+            # V2 domingo
+            'volume_zscore': volume_zscore,
+            'multi_tf_score': multi_tf_score,
+            'dist_round_pips': dist_round,
+            'dist_5d_high_pips': round(dist_5d_high, 1) if dist_5d_high is not None else None,
+            'dist_5d_low_pips': round(dist_5d_low, 1) if dist_5d_low is not None else None,
+            'spread_entry_pips': round(spread_entry, 2) if spread_entry is not None else None,
         })
 
         if i % 50 == 0:

@@ -67,10 +67,17 @@ NUMERIC_FEATURES = ['rsi_at_entry', 'avg_range_pips', 'hour_utc', 'day_of_week']
 # v3.33.0 — Features predictivos adicionales (de enrich_archive_features.py)
 # Si el CSV existe, se cargan estos features adicionales (Fase B validation).
 ENRICHED_FEATURES = [
+    # V1 sabado
     'velocity_5c_aligned', 'velocity_10c_aligned',  # momentum reciente alineado a direction
     'body_atr_ratio',                                # fuerza de la vela de entry
     'dist_prev_high_pips', 'dist_prev_low_pips',    # multi-day structure
     'mins_since_high_impact_news',                   # tiempo desde news high-impact
+    # V2 domingo
+    'volume_zscore',                                 # tick_volume vs media reciente
+    'multi_tf_score',                                # alineacion M5+M15+H1+H4 (0-4)
+    'dist_round_pips',                               # dist a numero redondo
+    'dist_5d_high_pips', 'dist_5d_low_pips',        # rango semanal
+    'spread_entry_pips',                             # fricción al entrar
 ]
 ENRICHED_CSV = 'trade_archive_enriched.csv'
 
