@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.34.0"
+APP_VERSION = "3.35.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -105,6 +105,12 @@ class Config:
     TRADING_END_HOUR_AR = int(os.getenv("TRADING_END_HOUR_AR", "22"))     # 22:00 AR (default M5)
     H1_LAST_OPEN_AR = int(os.getenv("H1_LAST_OPEN_AR", "19"))             # H1: 19:00 AR (expiry 180min)
     M15_LAST_OPEN_AR = int(os.getenv("M15_LAST_OPEN_AR", "22"))           # M15: 22:00 AR
+
+    # v3.35.0 — Feature flag: usar modelo ML para confidence en triggers
+    # con modelo dedicado (news, m15_structure). Default FALSE por safety.
+    # Cuando true: news y m15_structure usan model dedicado en lugar de heuristica.
+    # Otros triggers siguen usando heuristica vieja como fallback.
+    USE_ML_CONFIDENCE = os.getenv("USE_ML_CONFIDENCE", "false").lower() in ('true', '1', 'yes')
 
     @staticmethod
     def get_sources():

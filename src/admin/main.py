@@ -462,6 +462,69 @@ async def meta_optimization_status():
         return JSONResponse({'error': str(e)}, status_code=500)
 
 
+@app.get("/ml-predictor/status")
+async def ml_predictor_status():
+    """v3.35.0 — Diagnostic: estado del modelo ML de confidence.
+    Muestra si los modelos cargaron correctamente y si el flag esta activo.
+    """
+    try:
+        from src.optimizer.confidence_predictor import get_predictor_info
+        info = get_predictor_info()
+        return JSONResponse(info, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'enabled': False, 'error': str(e)}, headers=NO_CACHE_HEADERS)
+
+
+@app.get("/ml-predictor/test")
+async def ml_predictor_test():
+    """v3.35.0 — Test: ejecutar predict_confidence con signal sintetico.
+    Util para verificar que el modelo funciona end-to-end.
+    """
+    try:
+        from src.optimizer.confidence_predictor import predict_confidence
+        import os
+        # Forzar flag para test (no afecta runtime real)
+        old_flag = os.environ.get('USE_ML_CONFIDENCE', '')
+        os.environ['USE_ML_CONFIDENCE'] = 'true'
+        try:
+            # Signal de prueba: news bullish en sesión NY con features típicos
+            test_signal = {
+                'trigger_type': 'news',
+                'direction': 'CALL',
+                'session': 'ny',
+                'htf_bias': 'bullish',
+                'market_trend': 'bullish',
+                'trend_strength': 'moderate',
+                'volatility': 'normal',
+                'rsi_at_entry': 55.0,
+                'avg_range_pips': 3.5,
+                'hour_utc': 14,
+                'day_of_week': 2,
+                # enriched (will use medians from training if missing)
+            }
+            result_news = predict_confidence(test_signal)
+            test_signal['trigger_type'] = 'm15_structure'
+            result_m15 = predict_confidence(test_signal)
+            test_signal['trigger_type'] = 'structure'
+            result_structure = predict_confidence(test_signal)
+        finally:
+            if old_flag:
+                os.environ['USE_ML_CONFIDENCE'] = old_flag
+            else:
+                os.environ.pop('USE_ML_CONFIDENCE', None)
+        return JSONResponse({
+            'test_signal': {'trigger': 'news/m15/structure', 'direction': 'CALL', 'session': 'ny', 'htf': 'bullish'},
+            'predictions': {
+                'news': result_news,
+                'm15_structure': result_m15,
+                'structure': result_structure,
+            },
+            'note': 'news/m15 should return int 0-100, structure should return None (no model)',
+        }, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'error': str(e)}, headers=NO_CACHE_HEADERS)
+
+
 @app.get("/meta-optimization")
 async def meta_optimization_dashboard():
     """Sirve el HTML del dashboard de meta-optimization."""
