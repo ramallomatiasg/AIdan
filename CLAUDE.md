@@ -214,7 +214,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.32.0 | Math fixes: TP 15→20p + BE trigger 50% + trail 80% (atacar "gana poco/pierde mucho") | activo |
 | v3.32.1 | User awake window: no abrir H1 después de 19h AR (expiry 3h cae en madrugada). Configurable via env. | activo |
 | v3.33.0 | REFACTOR Fase B: macro context (htf_bias + daily_ctx) ahora GARANTIZADO en M5/M15/H1 (antes None si M5 skipped). + tool train_confidence_model.py (Fase A preparatoria, Brier 0.28 vs 0.39) | activo |
-| **v3.34.0** | **REFACTOR Fase C: Entry Quality Gates basados en hallazgos ML (block exhaustion velocity >6p + body/atr >1.3). Retroactivo: bloquea 64/276 trades = $80 saved.** | **actual** |
+| v3.34.0 | REFACTOR Fase C: Entry Quality Gates basados en hallazgos ML | activo |
+| **v3.35.0** | **ML Confidence Predictor: modelos dedicados (news AUC 0.75, m15 AUC 0.625) + feature flag USE_ML_CONFIDENCE (default OFF). Endpoints `/ml-predictor/status` y `/ml-predictor/test`. LISTO PARA LUNES.** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -747,4 +748,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 22 May 2026 — v3.34.0 (REFACTOR Fase C: Entry Quality Gates basados en hallazgos del modelo ML)
+**Última actualización**: 24 May 2026 — v3.35.0 (Weekend refactor: ML predictor listo, news AUC 0.75 + m15 0.625, flag OFF por safety)
