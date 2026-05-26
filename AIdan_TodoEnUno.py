@@ -1473,10 +1473,14 @@ class AIdan:
                             # Bug observado en #387 (5 May 2026): news CALL counter-HTF (htf bearish)
                             # con conf 60.5 (apenas pasó threshold 60) cerró por expiry-loss.
                             # El precio recuperó a +TP 85min después del cierre. El 15-min expiry
-                            # no le dió chance al setup. v3.14.0 ya cubre el bypass; esto cubre
-                            # el path regular: counter-HTF news requiere conf >= 65 (no 60).
-                            if score_ok and conf_ok and dir_ok and _is_counter_htf_bypass and result.get('confidence', 0) < 65:
-                                logger.info(f"v3.16.0 counter-HTF news gate: {direction} conf {result.get('confidence',0):.1f} < 65 (HTF {_bypass_htf}), skip")
+                            # no le dió chance al setup.
+                            # v3.35.1 — Threshold relajado de 65 → 60 (= base min_conf).
+                            # Razon: hoy 26 May, 4 news directional, 0 strategies. 3 CALLs counter-HTF
+                            # con conf 58.5-62.5 todas bloqueadas. v3.34.0 (entry quality gates) +
+                            # v3.35.0 (ML predictor) ya filtran exhaustion entries y low-P(win) trades,
+                            # asi que duplicar con threshold 65 acumula filtros sin razon empirica.
+                            if score_ok and conf_ok and dir_ok and _is_counter_htf_bypass and result.get('confidence', 0) < 60:
+                                logger.info(f"v3.35.1 counter-HTF news gate: {direction} conf {result.get('confidence',0):.1f} < 60 (HTF {_bypass_htf}), skip")
                                 conf_ok = False  # block
 
                             if score_ok and conf_ok and dir_ok:

@@ -215,7 +215,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.32.1 | User awake window: no abrir H1 después de 19h AR (expiry 3h cae en madrugada). Configurable via env. | activo |
 | v3.33.0 | REFACTOR Fase B: macro context (htf_bias + daily_ctx) ahora GARANTIZADO en M5/M15/H1 (antes None si M5 skipped). + tool train_confidence_model.py (Fase A preparatoria, Brier 0.28 vs 0.39) | activo |
 | v3.34.0 | REFACTOR Fase C: Entry Quality Gates basados en hallazgos ML | activo |
-| **v3.35.0** | **ML Confidence Predictor: modelos dedicados (news AUC 0.75, m15 AUC 0.625) + feature flag USE_ML_CONFIDENCE (default OFF). Endpoints `/ml-predictor/status` y `/ml-predictor/test`. LISTO PARA LUNES.** | **actual** |
+| v3.35.0 | ML Confidence Predictor: modelos dedicados (news AUC 0.75, m15 AUC 0.625) + feature flag USE_ML_CONFIDENCE (default OFF). Endpoints `/ml-predictor/status` y `/ml-predictor/test`. | activo |
+| **v3.35.1** | **Counter-HTF news gate: threshold 65 → 60 (= base min_conf). 26 May: 4 news directional, 0 strategies. v3.34.0 entry gates + v3.35.0 ML predictor ya filtran exhaustion/low-P(win), duplicar con 65 acumulaba filtros sin evidencia. Tambien: cleanup meta-filters viejos (revert #10, reject #7/#9/#13).** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -225,7 +226,7 @@ Warmup gate M15 (30 min — 2 velas frescas)  -- v3.31.7
 Warmup gate H1 (60 min — 1 vela fresca)      -- v3.31.7
 ATR floor 2.5p
 ATR ceiling 6p
-Counter-HTF (news regular path requiere conf≥65)
+Counter-HTF (news regular path requiere conf≥60 — v3.35.1)
 Counter-both (M5+HTF ambos contrarios → block)
 SIM A (fully-aligned trades blocked, exhaustion entries)
 Min conf 60 (bypass a 30 si impact≥55 y NO counter-HTF)
@@ -748,4 +749,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 24 May 2026 — v3.35.0 (Weekend refactor: ML predictor listo, news AUC 0.75 + m15 0.625, flag OFF por safety)
+**Última actualización**: 26 May 2026 — v3.35.1 (Counter-HTF news gate 65→60 tras observar 4 days 0 strategies. Cleanup meta-filters viejos)
