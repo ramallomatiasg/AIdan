@@ -150,16 +150,55 @@ class MT5Executor:
         lots = max(0.01, min(lots, max_lot))
         return round(lots, 2)
 
+    def _find_existing_mt5_for_strategy(self, strategy_id):
+        """v3.35.2 — Idempotency check: scan MT5 for any position OR pending order
+        already associated with this strategy_id (via comment "AIdan #{id}...").
+        Returns ('position', p) or ('order', o) or None.
+
+        Used to prevent duplicate order sends when MT5 reconnect causes the first
+        order_send to succeed server-side but the response gets lost client-side
+        (observed 26 May 2026: strategy #537 generated tickets #1669119411 and
+        #1669121210, with orphan detector closing the duplicate at spread cost).
+        """
+        try:
+            tag_prefix = f"AIdan #{strategy_id}"
+            for p in (self._mt5.positions_get(group="*") or []):
+                if p.magic == MAGIC_NUMBER and (p.comment or '').startswith(tag_prefix):
+                    return ('position', p)
+            for o in (self._mt5.orders_get() or []):
+                if o.magic == MAGIC_NUMBER and (o.comment or '').startswith(tag_prefix):
+                    return ('order', o)
+        except Exception as e:
+            self.logger.debug(f"MT5 idempotency check error: {e}")
+        return None
+
     def open_position(self, strategy_id, direction, entry_price, sl, tp, confidence, lot_multiplier=1.0, trigger_type=None):
         """Open position: tries limit order first (better price), falls back to market.
         v3.28.0: lot_multiplier permite consensus boost (M5+M15+H1 coinciden).
         v3.31.4: trigger_type='pre_planned' -> cap lot a 0.05 max (news events
         tienen volatility alta y lot grande amplifica perdidas).
+        v3.35.2: idempotency check al inicio + en limit_order failure path
+        para evitar duplicar orden en reconexion MT5.
         """
         if not self.is_ready() or not self._mt5:
             return None
 
         from src.common.db import get_mt5_config, get_strategies_with_open_mt5, update_mt5_ticket
+
+        # v3.35.2 — Idempotency: si ya existe posicion/orden para este strategy_id, reusarla.
+        # Protege contra upper-layer retries (rare) o orden previa que quedo huerfana.
+        existing = self._find_existing_mt5_for_strategy(strategy_id)
+        if existing:
+            kind, obj = existing
+            if kind == 'position':
+                self.logger.warning(f"MT5 idempotency: position #{obj.ticket} already exists for strategy #{strategy_id} — reusing (skip new send)")
+                update_mt5_ticket(strategy_id, obj.ticket, obj.volume, 'filled', fill_price=obj.price_open)
+                return obj.ticket
+            else:  # 'order'
+                self.logger.warning(f"MT5 idempotency: pending order #{obj.ticket} already exists for strategy #{strategy_id} — reusing (skip new send)")
+                update_mt5_ticket(strategy_id, obj.ticket, obj.volume_initial, 'pending', fill_price=obj.price_open)
+                return obj.ticket
+
         config = get_mt5_config()
 
         # Guard: max positions
@@ -299,10 +338,38 @@ class MT5Executor:
             else:
                 retcode = result.retcode if result else 'None'
                 comment = result.comment if result else 'None'
+                # v3.35.2 — Antes de fallback a market: verificar si la orden
+                # llego a MT5 a pesar del response "failed". Reconexion MT5 puede
+                # hacer que order_send devuelva error mientras server SI proceso.
+                time.sleep(0.3)  # brief wait para que MT5 procese
+                existing = self._find_existing_mt5_for_strategy(strategy_id)
+                if existing:
+                    kind, obj = existing
+                    self.logger.warning(f"MT5 limit order: response retcode={retcode} pero {kind} #{obj.ticket} encontrada en MT5 — reusando (evita duplicado en market fallback)")
+                    if kind == 'order':
+                        update_mt5_ticket(strategy_id, obj.ticket, obj.volume_initial, 'pending', fill_price=obj.price_open)
+                    else:
+                        update_mt5_ticket(strategy_id, obj.ticket, obj.volume, 'filled', fill_price=obj.price_open)
+                    return obj.ticket
                 self.logger.info(f"MT5 limit order rejected: retcode={retcode} {comment} — falling back to market")
                 return None
         except Exception as e:
-            self.logger.warning(f"MT5 limit order error: {e} — falling back to market")
+            # v3.35.2 — Mismo idempotency check en exception path.
+            self.logger.warning(f"MT5 limit order exception: {e}")
+            time.sleep(0.3)
+            try:
+                existing = self._find_existing_mt5_for_strategy(strategy_id)
+                if existing:
+                    kind, obj = existing
+                    self.logger.warning(f"MT5 limit order: exception pero {kind} #{obj.ticket} encontrada en MT5 — reusando")
+                    if kind == 'order':
+                        update_mt5_ticket(strategy_id, obj.ticket, obj.volume_initial, 'pending', fill_price=obj.price_open)
+                    else:
+                        update_mt5_ticket(strategy_id, obj.ticket, obj.volume, 'filled', fill_price=obj.price_open)
+                    return obj.ticket
+            except Exception as _ce:
+                self.logger.debug(f"MT5 limit order post-exception check: {_ce}")
+            self.logger.warning(f"MT5 limit order failed — falling back to market")
             return None
 
     def _market_order(self, strategy_id, direction, entry_price, sl_distance, tp_distance, lot, tick, symbol):
