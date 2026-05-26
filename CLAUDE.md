@@ -217,7 +217,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.34.0 | REFACTOR Fase C: Entry Quality Gates basados en hallazgos ML | activo |
 | v3.35.0 | ML Confidence Predictor: modelos dedicados (news AUC 0.75, m15 AUC 0.625) + feature flag USE_ML_CONFIDENCE (default OFF). Endpoints `/ml-predictor/status` y `/ml-predictor/test`. | activo |
 | v3.35.1 | Counter-HTF news gate: threshold 65 → 60 (= base min_conf). 26 May: 4 news directional, 0 strategies. v3.34.0 entry gates + v3.35.0 ML predictor ya filtran exhaustion/low-P(win), duplicar con 65 acumulaba filtros sin evidencia. Tambien: cleanup meta-filters viejos (revert #10, reject #7/#9/#13). | activo |
-| **v3.35.2** | **Bugfix: duplicate MT5 order durante reconexion. Strategy #537 (26 May post-MT5 reconnect 11:07) genero 2 tickets en MT5 (limit order send tiro exception pero orden si llego al server). Orphan detector cerro la duplicada al spread (-$0.80 commissions waste). Fix: idempotency check en open_position + en _try_limit_order failure paths via comment match "AIdan #{strategy_id}" en positions/orders.** | **actual** |
+| v3.35.2 | Bugfix: duplicate MT5 order durante reconexion. Strategy #537 (26 May post-MT5 reconnect 11:07) genero 2 tickets en MT5 (limit order send tiro exception pero orden si llego al server). Orphan detector cerro la duplicada al spread (-$0.80 commissions waste). Fix: idempotency check en open_position + en _try_limit_order failure paths via comment match "AIdan #{strategy_id}" en positions/orders. | activo |
+| **v3.35.3** | **ATR floor M5 bajado 2.5 → 2.0p (news + structure + SMC). Semana 26 May: mercado quieto (ATR 1.8-2.3p casi todo el dia, lunes feriado US/UK) dejaba AIdan con 0-1 trades/dia. ML predictor (v3.35.0) actua como red de seguridad contra trades de baja calidad. M15 (5p) y H1 (10p) sin cambios. Reversible.** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -225,7 +226,7 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 Warmup gate M5 (10 min tras arrancar)
 Warmup gate M15 (30 min — 2 velas frescas)  -- v3.31.7
 Warmup gate H1 (60 min — 1 vela fresca)      -- v3.31.7
-ATR floor 2.5p
+ATR floor 2.0p (M5 — v3.35.3, antes 2.5p)
 ATR ceiling 6p
 Counter-HTF (news regular path requiere conf≥60 — v3.35.1)
 Counter-both (M5+HTF ambos contrarios → block)
@@ -750,4 +751,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 26 May 2026 — v3.35.2 (Bugfix duplicate MT5 order durante reconexion: idempotency check evita doble fill)
+**Última actualización**: 26 May 2026 — v3.35.3 (ATR floor M5 2.5→2.0p tras semana de mercado quieto con 0-1 trades/dia)

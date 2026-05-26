@@ -1601,8 +1601,8 @@ class AIdan:
                                                         _news_utc_h = _ndt2.now(_ntz2.utc).hour
                                                         if _warmup_elapsed < WARMUP_SECONDS:
                                                             logger.info(f"Warmup gate: skipping news {direction}, analyzer running {_warmup_elapsed:.0f}s < {WARMUP_SECONDS}s warmup")
-                                                        elif _news_atr_now < 2.5:
-                                                            logger.info(f"ATR floor: skipping news {direction}, ATR {_news_atr_now:.1f}p < 2.5p (deadzone)")
+                                                        elif _news_atr_now < 2.0:
+                                                            logger.info(f"ATR floor: skipping news {direction}, ATR {_news_atr_now:.1f}p < 2.0p (deadzone)")
                                                         # v3.17.0 — REMOVED hour gate (UTC 12/14/20).
                                                         # Original data (26 trades) era cross-version (v3.7-v3.11)
                                                         # con multiples cambios de filtros simultaneos -> data contaminada.
@@ -2238,9 +2238,12 @@ class AIdan:
                                 # === v3.11.0 DATA-DRIVEN FILTERS ===
                                 # ATR floor: skip when volatility too low (deadzone — comm eats wins).
                                 # Empirical: 15 trades with ATR<2.5 had 13% WR, -$22.81.
+                                # v3.35.3 — Floor bajado 2.5 → 2.0p. Semana 26 May: mercado quieto
+                                # (ATR 1.8-2.3p casi todo el dia) dejaba a AIdan sin operar. ML predictor
+                                # (v3.35.0) actua como red de seguridad contra trades de baja calidad.
                                 _atr_now = ms.get('avg_range_pips', 0)
-                                if _atr_now < 2.5:
-                                    logger.info(f"ATR floor: skipping structure {direction}, ATR {_atr_now:.1f}p < 2.5p (deadzone)")
+                                if _atr_now < 2.0:
+                                    logger.info(f"ATR floor: skipping structure {direction}, ATR {_atr_now:.1f}p < 2.0p (deadzone)")
                                     continue
                                 # v3.17.0 — REMOVED hour gate (UTC 12/14/20).
                                 # Data original era cross-version (v3.7-v3.11) con cambios
@@ -2446,9 +2449,10 @@ class AIdan:
                                 continue
 
                             # === v3.11.0 DATA-DRIVEN FILTERS (SMC) ===
+                            # v3.35.3 — Floor bajado 2.5 → 2.0p (ver nota en structure flow).
                             _smc_atr = ms.get('avg_range_pips', 0)
-                            if _smc_atr < 2.5:
-                                logger.info(f"ATR floor: skipping SMC {direction}, ATR {_smc_atr:.1f}p < 2.5p (deadzone)")
+                            if _smc_atr < 2.0:
+                                logger.info(f"ATR floor: skipping SMC {direction}, ATR {_smc_atr:.1f}p < 2.0p (deadzone)")
                                 continue
                             # v3.17.0 — REMOVED hour gate (UTC 12/14/20). Data contaminada cross-version.
                             # Conf ceiling check happens later, after audit may inflate conf
