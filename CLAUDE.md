@@ -753,4 +753,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 27 May 2026 — v3.37.0 (Position Manager Fases 2+3: LLM Exit Advisor + dashboard, defaults seguros pendientes de activar tras validar Fase 1)
+**Última actualización**: 27 May 2026 — v3.37.1 (botón 🎛️ Position Manager en header del dashboard → abre /position-manager)
