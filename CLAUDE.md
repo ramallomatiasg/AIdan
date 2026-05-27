@@ -218,7 +218,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.35.0 | ML Confidence Predictor: modelos dedicados (news AUC 0.75, m15 AUC 0.625) + feature flag USE_ML_CONFIDENCE (default OFF). Endpoints `/ml-predictor/status` y `/ml-predictor/test`. | activo |
 | v3.35.1 | Counter-HTF news gate: threshold 65 → 60 (= base min_conf). 26 May: 4 news directional, 0 strategies. v3.34.0 entry gates + v3.35.0 ML predictor ya filtran exhaustion/low-P(win), duplicar con 65 acumulaba filtros sin evidencia. Tambien: cleanup meta-filters viejos (revert #10, reject #7/#9/#13). | activo |
 | v3.35.2 | Bugfix: duplicate MT5 order durante reconexion. Strategy #537 (26 May post-MT5 reconnect 11:07) genero 2 tickets en MT5 (limit order send tiro exception pero orden si llego al server). Orphan detector cerro la duplicada al spread (-$0.80 commissions waste). Fix: idempotency check en open_position + en _try_limit_order failure paths via comment match "AIdan #{strategy_id}" en positions/orders. | activo |
-| **v3.35.3** | **ATR floor M5 bajado 2.5 → 2.0p (news + structure + SMC). Semana 26 May: mercado quieto (ATR 1.8-2.3p casi todo el dia, lunes feriado US/UK) dejaba AIdan con 0-1 trades/dia. ML predictor (v3.35.0) actua como red de seguridad contra trades de baja calidad. M15 (5p) y H1 (10p) sin cambios. Reversible.** | **actual** |
+| v3.35.3 | ATR floor M5 bajado 2.5 → 2.0p (news + structure + SMC). Semana 26 May: mercado quieto (ATR 1.8-2.3p casi todo el dia, lunes feriado US/UK) dejaba AIdan con 0-1 trades/dia. ML predictor (v3.35.0) actua como red de seguridad. M15 (5p) y H1 (10p) sin cambios. | activo |
+| **v3.36.0** | **Live Position Manager (Fase 1: reglas, sin LLM). Gestor en vivo que decide HOLD/CLOSE_PROFIT/CLOSE_PROTECT/CLOSE_MAXHOLD sobre posiciones abiertas, reemplazando el expiry ciego + force-close por mechas re-analizadas (bug del #538: trade correcto cerrado plano al expiry, precio llego cerca del TP 2h despues). Thread cada 15s. MODE=log (default, shadow) / active / off. MAX_HOLD 90/120/240min (M5/M15/H1). Profit-lock arma a 60% TP, cierra si retrocede 40% del pico. Nueva tabla position_manager_log. Fases 2 (LLM Gemma) y 3 (dashboard+learning) pendientes.** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -751,4 +752,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 26 May 2026 — v3.35.3 (ATR floor M5 2.5→2.0p tras semana de mercado quieto con 0-1 trades/dia)
+**Última actualización**: 27 May 2026 — v3.36.0 (Live Position Manager Fase 1 en modo log-only: gestor de salida en vivo que reemplaza el expiry ciego)

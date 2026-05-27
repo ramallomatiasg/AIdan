@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.35.3"
+APP_VERSION = "3.36.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -111,6 +111,27 @@ class Config:
     # Cuando true: news y m15_structure usan model dedicado en lugar de heuristica.
     # Otros triggers siguen usando heuristica vieja como fallback.
     USE_ML_CONFIDENCE = os.getenv("USE_ML_CONFIDENCE", "false").lower() in ('true', '1', 'yes')
+
+    # v3.36.0 — Live Position Manager (Fase 1: reglas, sin LLM).
+    # Gestor en vivo que decide HOLD/CLOSE sobre posiciones abiertas en lugar del
+    # expiry ciego + force-close por mechas re-analizadas (bug del 538).
+    # MODE:
+    #   'off'    — gestor desactivado (comportamiento legacy completo)
+    #   'log'    — gestor evalua y LOGUEA decisiones pero NO ejecuta; el force-close
+    #              viejo sigue activo. Para shadow validation sin cambiar live. (DEFAULT)
+    #   'active' — gestor ejecuta cierres; se desactiva el force-close por mechas.
+    #              MT5 SL/TP + gestor + MAX_HOLD gobiernan el ciclo de vida.
+    POSITION_MANAGER_MODE = os.getenv("POSITION_MANAGER_MODE", "log").lower()
+    # Cadencia del thread del gestor (segundos). El trailing sigue en 1s aparte.
+    POSITION_MANAGER_INTERVAL = int(os.getenv("POSITION_MANAGER_INTERVAL", "15"))
+    # MAX_HOLD por track (minutos): backstop final de cierre. Reemplaza el expiry fijo
+    # como red de seguridad de tiempo. Generosos vs expiry para dejar desarrollar el move.
+    MAX_HOLD_MIN_M5 = int(os.getenv("MAX_HOLD_MIN_M5", "90"))
+    MAX_HOLD_MIN_M15 = int(os.getenv("MAX_HOLD_MIN_M15", "120"))
+    MAX_HOLD_MIN_H1 = int(os.getenv("MAX_HOLD_MIN_H1", "240"))
+    # R1 Profit-lock: arma cuando HWM >= ARM*tp_distance; cierra si progress cae a <= KEEP*HWM.
+    PM_PROFIT_LOCK_ARM = float(os.getenv("PM_PROFIT_LOCK_ARM", "0.60"))   # llego a 60% del TP
+    PM_PROFIT_LOCK_KEEP = float(os.getenv("PM_PROFIT_LOCK_KEEP", "0.60"))  # cierra si retrocede 40% del pico
 
     @staticmethod
     def get_sources():

@@ -495,6 +495,27 @@ def init_db():
         )
     """)
 
+    # v3.36.0 — Live Position Manager log (Fase 1).
+    # Registra cada decision del gestor (HOLD/CLOSE_*) por posicion. En modo 'log'
+    # solo registra (executed=0) para shadow validation; en 'active' executed=1.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS position_manager_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER NOT NULL,
+            ticket INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mode TEXT,                         -- log | active
+            action TEXT NOT NULL,              -- HOLD | CLOSE_PROFIT | CLOSE_PROTECT | CLOSE_MAXHOLD
+            reason TEXT,
+            decision_source TEXT DEFAULT 'rules',  -- rules | llm (Fase 2)
+            progress_pips REAL,
+            hwm_pips REAL,
+            tp_pct REAL,
+            time_in_trade_min REAL,
+            executed INTEGER DEFAULT 0         -- 1 si el gestor ejecuto el cierre
+        )
+    """)
+
     # Migration: add synced_to_cloud column to trade_archive
     try:
         cursor.execute("ALTER TABLE trade_archive ADD COLUMN synced_to_cloud INTEGER DEFAULT 0")
@@ -1923,6 +1944,44 @@ def get_strategies_with_open_mt5():
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+def get_open_mt5_for_manager():
+    """v3.36.0 — Posiciones abiertas con TODOS los campos que el Position Manager
+    necesita (incluye trigger_type, expiry_minutes, created_at). Separado de
+    get_strategies_with_open_mt5() para no alterar el shape que usa el trailing thread."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, mt5_ticket, direction, entry_price, stop_loss, take_profit,
+               mt5_fill_price, mt5_high_water, created_at, expiry_minutes,
+               trigger_type, confidence
+        FROM auto_strategies
+        WHERE mt5_status = 'filled' AND mt5_ticket IS NOT NULL
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def log_position_manager_decision(strategy_id, ticket, mode, action, reason,
+                                  progress_pips, hwm_pips, tp_pct,
+                                  time_in_trade_min, decision_source='rules',
+                                  executed=0):
+    """v3.36.0 — Persiste una decision del Position Manager para audit/shadow."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            INSERT INTO position_manager_log
+                (strategy_id, ticket, mode, action, reason, decision_source,
+                 progress_pips, hwm_pips, tp_pct, time_in_trade_min, executed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (strategy_id, ticket, mode, action, reason, decision_source,
+              progress_pips, hwm_pips, tp_pct, time_in_trade_min, executed))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 def update_mt5_trailing_step(strategy_id, step):

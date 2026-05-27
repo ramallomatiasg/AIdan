@@ -2701,6 +2701,15 @@ class AIdan:
                                 # SL is still protecting against runaway losses; TP can finally trigger.
                                 mt5_closed_price = None
                                 should_force_close = hit_tp or hit_sl or hit_be
+                                # v3.36.0 — En modo Position Manager 'active', NO force-close por
+                                # mechas re-analizadas (es el bug del 538). El gestor + MT5 SL/TP +
+                                # MAX_HOLD gobiernan el cierre; dejamos que MT5 cierre naturalmente.
+                                try:
+                                    from src.common.config import Config as _PMC
+                                    if (getattr(_PMC, 'POSITION_MANAGER_MODE', 'log') or 'log').lower() == 'active':
+                                        should_force_close = False
+                                except Exception:
+                                    pass
                                 if should_force_close and mt5_exec and mt5_exec.is_ready():
                                     try:
                                         mt5_closed_price = mt5_exec.close_strategy_position(sid)
@@ -3469,6 +3478,147 @@ class AIdan:
 
             _time.sleep(1)
 
+    def run_position_manager(self):
+        """v3.36.0 — Live Position Manager (Fase 1: reglas, sin LLM).
+        Cada POSITION_MANAGER_INTERVAL s evalua cada posicion abierta y decide
+        HOLD / CLOSE_PROFIT / CLOSE_PROTECT / CLOSE_MAXHOLD.
+          - modo 'log': solo registra la decision (shadow); el force-close viejo sigue.
+          - modo 'active': ejecuta cierres; el force-close por mechas queda desactivado.
+        El SL/TP de MT5 y el trailing thread (1s) corren en paralelo sin interferir."""
+        import time as _time
+        import logging
+        from datetime import datetime as _dt
+        _logger = logging.getLogger("analyzer")
+
+        from src.common.config import Config
+        mode = (getattr(Config, 'POSITION_MANAGER_MODE', 'log') or 'log').lower()
+        interval = int(getattr(Config, 'POSITION_MANAGER_INTERVAL', 15))
+        if mode == 'off':
+            _logger.info("Position manager: OFF")
+            return
+
+        from src.broker.position_manager import (
+            PositionManager, PositionContext, max_hold_for_trigger, CLOSE_ACTIONS)
+        from src.common.db import (get_open_mt5_for_manager,
+                                   log_position_manager_decision, now_ar)
+
+        pm = PositionManager(
+            profit_lock_arm=float(getattr(Config, 'PM_PROFIT_LOCK_ARM', 0.60)),
+            profit_lock_keep=float(getattr(Config, 'PM_PROFIT_LOCK_KEEP', 0.60)),
+        )
+        _logger.info(f"Position manager started (mode={mode}, interval={interval}s)")
+        _PIP = 0.0001
+        _last_log = {}  # sid -> (action, monotonic_ts) para throttle de HOLD
+
+        while True:
+            try:
+                with self._mt5_lock:
+                    mt5 = self._mt5_exec
+                if not mt5 or not mt5.is_ready():
+                    _time.sleep(max(interval, 5))
+                    continue
+
+                open_rows = get_open_mt5_for_manager()
+                if not open_rows:
+                    _time.sleep(interval)
+                    continue
+
+                tick = mt5.get_tick()
+                if not tick:
+                    _time.sleep(interval)
+                    continue
+
+                # Velas M5 recientes para momentum + ATR (una vez por ciclo)
+                candles = mt5.get_candles('5min', count=6) or []
+                mom_raw = 0.0
+                atr_pips = 0.0
+                if len(candles) >= 4:
+                    mom_raw = (candles[-1]['close'] - candles[-4]['close']) / _PIP
+                if candles:
+                    _ranges = [(c['high'] - c['low']) / _PIP for c in candles]
+                    atr_pips = sum(_ranges) / len(_ranges)
+
+                for row in open_rows:
+                    sid, ticket, direction = row[0], row[1], row[2]
+                    entry_price, sl, tp = row[3], row[4], row[5]
+                    fill_price = row[6] or entry_price
+                    stored_hwm = row[7] or 0.0
+                    created_at = row[8]
+                    expiry_min = row[9] or 15
+                    trigger_type = row[10] or ''
+
+                    if not fill_price or not tp:
+                        continue
+
+                    current_price = tick['bid'] if direction == 'CALL' else tick['ask']
+                    progress = (current_price - fill_price) if direction == 'CALL' else (fill_price - current_price)
+                    hwm = max(stored_hwm, progress)
+                    tp_distance = abs(tp - fill_price)
+                    sl_distance = abs(sl - fill_price)
+
+                    try:
+                        _ct = _dt.strptime(str(created_at).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                        time_in_trade_min = (now_ar().replace(tzinfo=None) - _ct).total_seconds() / 60.0
+                    except Exception:
+                        time_in_trade_min = 0.0
+
+                    mom_aligned = mom_raw if direction == 'CALL' else -mom_raw
+
+                    ctx = PositionContext(
+                        strategy_id=sid, direction=direction,
+                        fill_price=fill_price, current_price=current_price,
+                        tp_distance=tp_distance, sl_distance=sl_distance,
+                        progress=progress, hwm=hwm,
+                        time_in_trade_min=time_in_trade_min,
+                        base_expiry_min=float(expiry_min),
+                        max_hold_min=max_hold_for_trigger(trigger_type, Config),
+                        momentum_aligned_pips=mom_aligned,
+                        atr_pips=atr_pips, trigger_type=trigger_type,
+                    )
+                    decision = pm.evaluate(ctx)
+                    is_close = decision.action in CLOSE_ACTIONS
+
+                    executed = 0
+                    if is_close and mode == 'active':
+                        try:
+                            closed_px = mt5.close_strategy_position(sid)
+                            if closed_px:
+                                executed = 1
+                                _logger.info(f"PositionManager CLOSE [{decision.action}] #{sid} "
+                                             f"ticket#{ticket} @ {closed_px} — {decision.reason}")
+                        except Exception as ce:
+                            _logger.error(f"PositionManager close error #{sid}: {ce}")
+                    elif is_close:
+                        _logger.info(f"PositionManager [LOG] would {decision.action} #{sid} — {decision.reason}")
+
+                    # Throttle de logging: CLOSE siempre; HOLD solo si cambio o cada 5 min.
+                    _now_m = _time.monotonic()
+                    _prev = _last_log.get(sid)
+                    _should_log = (
+                        is_close
+                        or _prev is None
+                        or _prev[0] != decision.action
+                        or (_now_m - _prev[1]) >= 300
+                    )
+                    if _should_log:
+                        log_position_manager_decision(
+                            sid, ticket, mode, decision.action, decision.reason,
+                            decision.progress_pips, decision.hwm_pips, decision.tp_pct,
+                            round(time_in_trade_min, 1),
+                            decision_source='rules', executed=executed)
+                        _last_log[sid] = (decision.action, _now_m)
+
+                # Limpiar sids cerrados del cache
+                _open_sids = {r[0] for r in open_rows}
+                for _sid in list(_last_log.keys()):
+                    if _sid not in _open_sids:
+                        _last_log.pop(_sid, None)
+
+            except Exception as e:
+                _logger.error(f"Position manager error: {e}")
+
+            _time.sleep(interval)
+
     def start_services(self):
         """Iniciar los 4 servicios como threads"""
         self.log("🚀 Iniciando servicios integrados...", "blue")
@@ -3498,6 +3648,17 @@ class AIdan:
         trailing_thread = Thread(target=self.run_trailing_monitor, daemon=True)
         trailing_thread.start()
         self.threads.append(trailing_thread)
+
+        # v3.36.0 — Position Manager thread (Fase 1: reglas). Default modo 'log'.
+        try:
+            from src.common.config import Config as _PMCfg
+            if (getattr(_PMCfg, 'POSITION_MANAGER_MODE', 'log') or 'log').lower() != 'off':
+                pm_thread = Thread(target=self.run_position_manager, daemon=True)
+                pm_thread.start()
+                self.threads.append(pm_thread)
+        except Exception as _pme:
+            import logging as _l
+            _l.getLogger('analyzer').warning(f"Position manager no iniciado: {_pme}")
 
         # v3.31.0 — Meta-optimization daemons
         # Shadow simulator: cada 2 min evalua shadow_strategies pending de simulacion
