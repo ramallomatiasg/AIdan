@@ -462,6 +462,92 @@ async def meta_optimization_status():
         return JSONResponse({'error': str(e)}, status_code=500)
 
 
+@app.get("/position-manager/state")
+async def position_manager_state():
+    """v3.36.0 — Estado del Position Manager: config + posiciones abiertas con su
+    ultima decision logueada."""
+    try:
+        import sqlite3
+        from src.common.db import DB_PATH
+        from src.common.config import Config
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        # Posiciones abiertas + ultima decision del manager
+        cur.execute("""
+            SELECT a.id, a.direction, a.trigger_type, a.mt5_ticket, a.confidence,
+                   a.mt5_fill_price, a.created_at, a.expiry_minutes
+            FROM auto_strategies a
+            WHERE a.mt5_status = 'filled' AND a.mt5_ticket IS NOT NULL
+            ORDER BY a.created_at DESC
+        """)
+        open_pos = []
+        for r in cur.fetchall():
+            d = dict(r)
+            cur2 = conn.execute("""
+                SELECT action, reason, progress_pips, hwm_pips, tp_pct,
+                       time_in_trade_min, decision_source, created_at
+                FROM position_manager_log WHERE strategy_id = ?
+                ORDER BY id DESC LIMIT 1
+            """, (d['id'],))
+            last = cur2.fetchone()
+            d['last_decision'] = dict(last) if last else None
+            open_pos.append(d)
+        conn.close()
+        return JSONResponse({
+            'mode': getattr(Config, 'POSITION_MANAGER_MODE', 'log'),
+            'llm_enabled': getattr(Config, 'POSITION_MANAGER_LLM', False),
+            'interval_sec': getattr(Config, 'POSITION_MANAGER_INTERVAL', 15),
+            'max_hold_min': {
+                'm5': getattr(Config, 'MAX_HOLD_MIN_M5', 90),
+                'm15': getattr(Config, 'MAX_HOLD_MIN_M15', 120),
+                'h1': getattr(Config, 'MAX_HOLD_MIN_H1', 240),
+            },
+            'open_positions': open_pos,
+        }, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.get("/position-manager/stats")
+async def position_manager_stats(limit: int = 200):
+    """v3.36.0 — Agregados del log del Position Manager: conteo por accion,
+    cuantas ejecutadas, rules vs llm, y feed reciente de decisiones de cierre."""
+    try:
+        import sqlite3
+        from src.common.db import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM position_manager_log")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT action, COUNT(*) n FROM position_manager_log GROUP BY action")
+        by_action = {r['action']: r['n'] for r in cur.fetchall()}
+        cur.execute("SELECT decision_source, COUNT(*) n FROM position_manager_log GROUP BY decision_source")
+        by_source = {r['decision_source']: r['n'] for r in cur.fetchall()}
+        cur.execute("SELECT COUNT(*) FROM position_manager_log WHERE executed = 1")
+        executed = cur.fetchone()[0]
+        # Feed reciente: solo decisiones de cierre (las accionables)
+        cur.execute("""
+            SELECT strategy_id, ticket, mode, action, reason, decision_source,
+                   progress_pips, hwm_pips, tp_pct, time_in_trade_min, executed, created_at
+            FROM position_manager_log
+            WHERE action != 'HOLD'
+            ORDER BY id DESC LIMIT ?
+        """, (limit,))
+        recent_closes = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return JSONResponse({
+            'total_decisions': total,
+            'by_action': by_action,
+            'by_source': by_source,
+            'executed_closes': executed,
+            'recent_close_decisions': recent_closes,
+        }, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
 @app.get("/ml-predictor/status")
 async def ml_predictor_status():
     """v3.35.0 — Diagnostic: estado del modelo ML de confidence.
@@ -537,6 +623,20 @@ async def meta_optimization_dashboard():
         if os.path.exists(p):
             return FileResponse(p, media_type="text/html", headers=NO_CACHE_HEADERS)
     return JSONResponse({"message": "Meta-optimization dashboard no encontrado", "tried": candidates})
+
+
+@app.get("/position-manager")
+async def position_manager_dashboard():
+    """v3.36.0 — Sirve el HTML del dashboard del Position Manager."""
+    candidates = [
+        os.path.join(base_path, 'position_manager.html'),
+        os.path.join(base_path, 'tools', 'position_manager.html'),
+        os.path.join(os.path.dirname(base_path), 'tools', 'position_manager.html'),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return FileResponse(p, media_type="text/html", headers=NO_CACHE_HEADERS)
+    return JSONResponse({"message": "Position manager dashboard no encontrado", "tried": candidates})
 
 
 # v3.31.2 — Manual nightly analyst trigger (replacement for scheduled task)

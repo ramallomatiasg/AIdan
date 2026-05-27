@@ -25,8 +25,9 @@ HOLD = 'HOLD'                 # no hacer nada, dejar correr
 CLOSE_PROFIT = 'CLOSE_PROFIT'  # tomar ganancia (profit-lock por reversion)
 CLOSE_PROTECT = 'CLOSE_PROTECT'  # cortar trade que se deteriora antes del SL
 CLOSE_MAXHOLD = 'CLOSE_MAXHOLD'  # cierre final por tiempo maximo
+CLOSE_LLM = 'CLOSE_LLM'        # cierre recomendado por el LLM (Fase 2)
 
-CLOSE_ACTIONS = (CLOSE_PROFIT, CLOSE_PROTECT, CLOSE_MAXHOLD)
+CLOSE_ACTIONS = (CLOSE_PROFIT, CLOSE_PROTECT, CLOSE_MAXHOLD, CLOSE_LLM)
 
 
 @dataclass
@@ -55,6 +56,7 @@ class ManagerDecision:
     progress_pips: float
     hwm_pips: float
     tp_pct: float             # hwm como % del TP distance (0-1+)
+    llm_eligible: bool = False  # True en zona ambigua (soft-expiry HOLD): vale consultar LLM
 
 
 class PositionManager:
@@ -74,9 +76,9 @@ class PositionManager:
         hwm_pips = ctx.hwm / PIP
         tp_pct = (ctx.hwm / ctx.tp_distance) if ctx.tp_distance > 0 else 0.0
 
-        def decision(action, reason):
+        def decision(action, reason, llm_eligible=False):
             return ManagerDecision(action, reason, round(progress_pips, 1),
-                                   round(hwm_pips, 1), round(tp_pct, 2))
+                                   round(hwm_pips, 1), round(tp_pct, 2), llm_eligible)
 
         # ── R4 — Max hold backstop (prioridad maxima de seguridad) ──
         if ctx.time_in_trade_min >= ctx.max_hold_min:
@@ -99,12 +101,14 @@ class PositionManager:
                             f"{ctx.base_expiry_min:.0f}min, P&L {progress_pips:+.1f}p)")
 
         # ── R2 — Soft-expiry: extender / cortar / aguantar ──
+        # Zona ambigua: aca es donde el LLM (Fase 2) aporta juicio -> llm_eligible=True.
         # En ganancia o venia funcionando -> extender
         if ctx.progress >= self.flat_band or ctx.hwm >= 0.5 * ctx.tp_distance:
             return decision(HOLD,
                             f"soft-expiry EXTEND: P&L {progress_pips:+.1f}p HWM {hwm_pips:.1f}p "
-                            f"({tp_pct:.0%} del TP) — venia funcionando")
-        # Perdiendo + momentum en contra -> cortar antes del SL
+                            f"({tp_pct:.0%} del TP) — venia funcionando",
+                            llm_eligible=True)
+        # Perdiendo + momentum en contra -> cortar antes del SL (definitivo, sin LLM)
         if ctx.progress <= -self.flat_band and ctx.momentum_aligned_pips < 0:
             return decision(CLOSE_PROTECT,
                             f"soft-expiry PROTECT: perdiendo {progress_pips:.1f}p + "
@@ -112,7 +116,8 @@ class PositionManager:
         # Plano -> aguantar hasta SL/TP o MAX_HOLD (no pagar comision por cerrar plano)
         return decision(HOLD,
                         f"soft-expiry FLAT hold: {progress_pips:+.1f}p sin momentum, "
-                        f"espera SL/TP o max hold")
+                        f"espera SL/TP o max hold",
+                        llm_eligible=True)
 
 
 def max_hold_for_trigger(trigger_type: str, cfg) -> float:

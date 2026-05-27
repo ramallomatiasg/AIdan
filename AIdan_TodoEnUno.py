@@ -3498,7 +3498,8 @@ class AIdan:
             return
 
         from src.broker.position_manager import (
-            PositionManager, PositionContext, max_hold_for_trigger, CLOSE_ACTIONS)
+            PositionManager, PositionContext, ManagerDecision,
+            max_hold_for_trigger, CLOSE_ACTIONS, CLOSE_LLM, HOLD)
         from src.common.db import (get_open_mt5_for_manager,
                                    log_position_manager_decision, now_ar)
 
@@ -3506,7 +3507,10 @@ class AIdan:
             profit_lock_arm=float(getattr(Config, 'PM_PROFIT_LOCK_ARM', 0.60)),
             profit_lock_keep=float(getattr(Config, 'PM_PROFIT_LOCK_KEEP', 0.60)),
         )
-        _logger.info(f"Position manager started (mode={mode}, interval={interval}s)")
+        _llm_enabled = bool(getattr(Config, 'POSITION_MANAGER_LLM', False))
+        _llm_cooldown_s = float(getattr(Config, 'PM_LLM_COOLDOWN_MIN', 5)) * 60.0
+        _llm_last = {}  # sid -> monotonic_ts de la ultima consulta LLM
+        _logger.info(f"Position manager started (mode={mode}, interval={interval}s, llm={_llm_enabled})")
         _PIP = 0.0001
         _last_log = {}  # sid -> (action, monotonic_ts) para throttle de HOLD
 
@@ -3576,6 +3580,52 @@ class AIdan:
                         atr_pips=atr_pips, trigger_type=trigger_type,
                     )
                     decision = pm.evaluate(ctx)
+
+                    # ── Fase 2: consulta LLM en zona ambigua (soft-expiry HOLD) ──
+                    decision_source = 'rules'
+                    if decision.llm_eligible and _llm_enabled:
+                        _lp = _llm_last.get(sid)
+                        if _lp is None or (_time.monotonic() - _lp) >= _llm_cooldown_s:
+                            try:
+                                from src.analyzer.exit_advisor import get_exit_advice
+                                _rc = ' '.join(
+                                    f"{c['open']:.5f}/{c['high']:.5f}/{c['low']:.5f}/{c['close']:.5f}"
+                                    for c in candles[-5:]
+                                ) if candles else 'n/a'
+                                _trend = 'flat'
+                                if len(candles) >= 2:
+                                    _d = candles[-1]['close'] - candles[0]['close']
+                                    _trend = 'up' if _d > 0 else ('down' if _d < 0 else 'flat')
+                                advice = get_exit_advice({
+                                    'direction': direction, 'fill_price': fill_price,
+                                    'current_price': current_price,
+                                    'progress_pips': decision.progress_pips,
+                                    'hwm_pips': decision.hwm_pips, 'tp_pct': decision.tp_pct,
+                                    'tp_pips': tp_distance / _PIP, 'sl_pips': sl_distance / _PIP,
+                                    'time_in_trade_min': time_in_trade_min,
+                                    'base_expiry_min': float(expiry_min),
+                                    'momentum_aligned_pips': mom_aligned, 'atr_pips': atr_pips,
+                                    'trend': _trend, 'htf_bias': 'n/a', 'recent_candles': _rc,
+                                })
+                                _llm_last[sid] = _time.monotonic()
+                                if advice:
+                                    decision_source = f"llm_{advice.get('source', '?')}"
+                                    if advice['action'] == 'CLOSE':
+                                        decision = ManagerDecision(
+                                            CLOSE_LLM,
+                                            f"LLM close (conf {advice['confidence']}): {advice['reasoning']}",
+                                            decision.progress_pips, decision.hwm_pips,
+                                            decision.tp_pct, False)
+                                    elif advice['action'] == 'TIGHTEN':
+                                        decision = ManagerDecision(
+                                            HOLD,
+                                            f"LLM tighten (conf {advice['confidence']}): {advice['reasoning']}",
+                                            decision.progress_pips, decision.hwm_pips,
+                                            decision.tp_pct, False)
+                                    # HOLD -> mantener decision de reglas
+                            except Exception as _le:
+                                _logger.debug(f"exit_advisor consult error #{sid}: {_le}")
+
                     is_close = decision.action in CLOSE_ACTIONS
 
                     executed = 0
@@ -3605,14 +3655,17 @@ class AIdan:
                             sid, ticket, mode, decision.action, decision.reason,
                             decision.progress_pips, decision.hwm_pips, decision.tp_pct,
                             round(time_in_trade_min, 1),
-                            decision_source='rules', executed=executed)
+                            decision_source=decision_source, executed=executed)
                         _last_log[sid] = (decision.action, _now_m)
 
-                # Limpiar sids cerrados del cache
+                # Limpiar sids cerrados de los caches
                 _open_sids = {r[0] for r in open_rows}
                 for _sid in list(_last_log.keys()):
                     if _sid not in _open_sids:
                         _last_log.pop(_sid, None)
+                for _sid in list(_llm_last.keys()):
+                    if _sid not in _open_sids:
+                        _llm_last.pop(_sid, None)
 
             except Exception as e:
                 _logger.error(f"Position manager error: {e}")

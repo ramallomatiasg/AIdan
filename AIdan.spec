@@ -11,6 +11,7 @@ a = Analysis(
         ('tools/dashboard_theme_editor.html', '.'),
         ('tools/what_if_simulator.html', '.'),
         ('tools/meta_optimization.html', '.'),
+        ('tools/position_manager.html', '.'),
         # v3.35.0 — ML confidence predictor: modelos dedicados + metadata
         ('config/confidence_model_news.joblib', 'config'),
         ('config/confidence_model_m15_structure.joblib', 'config'),

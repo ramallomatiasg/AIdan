@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.36.0"
+APP_VERSION = "3.37.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -132,6 +132,14 @@ class Config:
     # R1 Profit-lock: arma cuando HWM >= ARM*tp_distance; cierra si progress cae a <= KEEP*HWM.
     PM_PROFIT_LOCK_ARM = float(os.getenv("PM_PROFIT_LOCK_ARM", "0.60"))   # llego a 60% del TP
     PM_PROFIT_LOCK_KEEP = float(os.getenv("PM_PROFIT_LOCK_KEEP", "0.60"))  # cierra si retrocede 40% del pico
+
+    # v3.36.0 Fase 2 — LLM Exit Advisor. Sub-flag del Position Manager.
+    # Cuando true Y el manager esta en zona ambigua (soft-expiry HOLD), consulta a
+    # Gemma local (fallback Groq) HOLD/CLOSE/TIGHTEN. CLOSE se respeta; HOLD queda
+    # capeado por MAX_HOLD. Default FALSE: arranca solo cuando Fase 1 (reglas) valide.
+    POSITION_MANAGER_LLM = os.getenv("POSITION_MANAGER_LLM", "false").lower() in ('true', '1', 'yes')
+    # Rate-limit: minimo de minutos entre consultas LLM por posicion (evita spam/costo).
+    PM_LLM_COOLDOWN_MIN = float(os.getenv("PM_LLM_COOLDOWN_MIN", "5"))
 
     @staticmethod
     def get_sources():
