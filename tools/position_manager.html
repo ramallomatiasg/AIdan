@@ -65,7 +65,7 @@
   <h2>Posiciones abiertas</h2>
   <div id="openWrap"><div class="empty">…</div></div>
 
-  <h2>Decisiones de cierre recientes</h2>
+  <h2>Decisiones recientes</h2>
   <div id="closesWrap"><div class="empty">…</div></div>
 </div>
 
@@ -130,12 +130,14 @@ function renderStats(s) {
     <div class="stat"><div class="v" style="color:var(--violet)">${ba.CLOSE_LLM||0}</div><div class="l">cierre LLM</div></div>
     <div class="stat"><div class="v">${s.executed_closes||0}</div><div class="l">cierres ejecutados</div></div>
   `;
-  const rc = s.recent_close_decisions || [];
+  // Mostramos TODAS las decisiones recientes (HOLD + closes). El throttle del thread
+  // ya evita spam (HOLD solo se loguea en cambio de accion o cada 5 min).
+  const rc = s.recent_decisions || s.recent_close_decisions || [];
   if (!rc.length) {
-    document.getElementById('closesWrap').innerHTML = '<div class="empty">Sin decisiones de cierre todavía. (En modo log el gestor registra qué haría sin ejecutar.)</div>';
+    document.getElementById('closesWrap').innerHTML = '<div class="empty">Sin decisiones todavía. El gestor empieza a registrar cuando hay posiciones abiertas.</div>';
     return;
   }
-  let h = '<table><tr><th>Cuándo</th><th>#</th><th>Acción</th><th>Modo</th><th>Ejec</th><th>P&L</th><th>HWM</th><th>Min</th><th>Razón</th></tr>';
+  let h = '<table><tr><th>Cuándo</th><th>#</th><th>Acción</th><th>Modo</th><th>Ejec</th><th>P&L</th><th>HWM</th><th>%TP</th><th>Min</th><th>Razón</th></tr>';
   for (const r of rc) {
     h += `<tr>
       <td>${esc((r.created_at||'').slice(5,16))}</td>
@@ -145,6 +147,7 @@ function renderStats(s) {
       <td>${r.executed?'✓':'—'}</td>
       <td class="${cls(r.progress_pips)}">${fmtPips(r.progress_pips)}</td>
       <td>${fmtPips(r.hwm_pips)}</td>
+      <td>${r.tp_pct!=null?(r.tp_pct*100).toFixed(0)+'%':'—'}</td>
       <td>${r.time_in_trade_min!=null?Math.round(r.time_in_trade_min):'—'}</td>
       <td class="reason">${esc(r.reason)}</td>
     </tr>`;

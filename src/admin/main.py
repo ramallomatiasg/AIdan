@@ -527,21 +527,24 @@ async def position_manager_stats(limit: int = 200):
         by_source = {r['decision_source']: r['n'] for r in cur.fetchall()}
         cur.execute("SELECT COUNT(*) FROM position_manager_log WHERE executed = 1")
         executed = cur.fetchone()[0]
-        # Feed reciente: solo decisiones de cierre (las accionables)
+        # Feed: TODAS las decisiones recientes (HOLD + closes). HOLDs ya estan
+        # throttleadas en el thread (cambio de accion o cada 5min), no satura.
         cur.execute("""
             SELECT strategy_id, ticket, mode, action, reason, decision_source,
                    progress_pips, hwm_pips, tp_pct, time_in_trade_min, executed, created_at
             FROM position_manager_log
-            WHERE action != 'HOLD'
             ORDER BY id DESC LIMIT ?
         """, (limit,))
-        recent_closes = [dict(r) for r in cur.fetchall()]
+        recent = [dict(r) for r in cur.fetchall()]
+        # Compat: tambien expone solo-cierres para clientes viejos
+        recent_closes = [r for r in recent if r['action'] != 'HOLD']
         conn.close()
         return JSONResponse({
             'total_decisions': total,
             'by_action': by_action,
             'by_source': by_source,
             'executed_closes': executed,
+            'recent_decisions': recent,
             'recent_close_decisions': recent_closes,
         }, headers=NO_CACHE_HEADERS)
     except Exception as e:
