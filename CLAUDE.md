@@ -753,4 +753,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 27 May 2026 — v3.37.1 (botón 🎛️ Position Manager en header del dashboard → abre /position-manager)
+**Última actualización**: 28 May 2026 — v3.37.2 (fix bug pre-planner dedup: parser ISO con TZ + dedup por slot UTC al minuto, evita pre-plans contradictorios para el mismo evento)

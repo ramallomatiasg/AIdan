@@ -440,41 +440,62 @@ def plan_next_day_strategies(market_context=None):
 
     market_ctx = market_context or {}
     created_ids = []
-    planned_hours = set()  # track hours to avoid conflicting plans at same time
+    # v3.37.2 — dedup por slot exacto (UTC YYYY-MM-DD HH:MM) en lugar de solo hora.
+    # Antes: dedupeaba por hora con strptime '%Y-%m-%d %H:%M:%S', pero la DB guarda
+    # ISO con timezone ('2026-05-28T08:30:00-04:00') → strptime fallaba silenciosamente
+    # → planned_hours vacio → se creaban plans duplicados/contradictorios para el mismo evento.
+    # Caso real 27 May: #539 CALL + #540 PUT ambos para 2026-05-28T08:30:00-04:00.
+    # Fix: usar datetime.fromisoformat (entiende timezone) y dedupear por minuto exacto.
+    planned_slots = set()
 
-    # Persistent dedup: check DB for existing pre_planned strategies in next 48h window
-    # This prevents duplicates when plan_next_day_strategies runs twice in same day
     try:
         import sqlite3
         from src.common.db import DB_PATH
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone as _tz
         _conn = sqlite3.connect(DB_PATH)
         _c = _conn.cursor()
-        now = datetime.now()
-        window_end = now + timedelta(hours=48)
+        now_utc = datetime.now(_tz.utc)
+        window_end = now_utc + timedelta(hours=48)
+        # Buscamos pre_planned activos/planeados en proxima ventana (sin filtrar por string range
+        # para evitar problemas con formatos heterogeneos en event_time).
         _c.execute("""
-            SELECT event_time FROM auto_strategies
-            WHERE trigger_type = 'pre_planned'
-              AND event_time IS NOT NULL
-              AND event_time >= ? AND event_time <= ?
-        """, (now.strftime('%Y-%m-%d %H:%M:%S'), window_end.strftime('%Y-%m-%d %H:%M:%S')))
-        for (et,) in _c.fetchall():
+            SELECT event_time, status FROM auto_strategies
+            WHERE trigger_type = 'pre_planned' AND event_time IS NOT NULL
+              AND status IN ('planned', 'active', 'paused')
+        """)
+        for et, _st in _c.fetchall():
             try:
-                et_dt = datetime.strptime(str(et).split('.')[0], '%Y-%m-%d %H:%M:%S')
-                planned_hours.add(et_dt.hour)
+                et_dt = datetime.fromisoformat(str(et).replace('Z', '+00:00'))
+                if et_dt.tzinfo is None:
+                    et_dt = et_dt.replace(tzinfo=_tz.utc)
+                et_utc = et_dt.astimezone(_tz.utc)
+                if now_utc <= et_utc <= window_end:
+                    # Slot exacto al minuto en UTC
+                    planned_slots.add(et_utc.strftime('%Y-%m-%d %H:%M'))
             except Exception:
-                pass
+                continue
         _conn.close()
-        if planned_hours:
-            logger.info(f"Pre-planner: existing plans for hours UTC {sorted(planned_hours)} — will skip these")
+        if planned_slots:
+            logger.info(f"Pre-planner: existing plans for slots UTC {sorted(planned_slots)} — will skip these")
     except Exception as _pde:
         logger.debug(f"Pre-planner dedup check: {_pde}")
 
+    from datetime import datetime as _dt, timezone as _tz_evt
     for event in events:
-        # Skip if we already planned a strategy for this hour
-        event_hour = event.get('hour_utc', 0)
-        if event_hour in planned_hours:
-            logger.info(f"Pre-planner: skipping '{event['event']}' — already have a plan for {event_hour}:00 UTC")
+        # v3.37.2 — Skip si ya hay un plan para el mismo SLOT (al minuto, UTC).
+        # Parseamos event['date'] que tiene formato ISO completo (con o sin TZ).
+        _slot = None
+        try:
+            _evt_full = str(event.get('date', '')).replace('Z', '+00:00')
+            if _evt_full:
+                _slot_dt = _dt.fromisoformat(_evt_full)
+                if _slot_dt.tzinfo is None:
+                    _slot_dt = _slot_dt.replace(tzinfo=_tz_evt.utc)
+                _slot = _slot_dt.astimezone(_tz_evt.utc).strftime('%Y-%m-%d %H:%M')
+        except Exception:
+            _slot = None
+        if _slot and _slot in planned_slots:
+            logger.info(f"Pre-planner: skipping '{event.get('event','?')}' — ya hay plan para slot {_slot} UTC")
             continue
 
         plan = _plan_single_event(event, market_ctx)
