@@ -1541,6 +1541,42 @@ class AIdan:
                                                 except Exception as e:
                                                     logger.debug(f"HTF filter: {e}")
 
+                                            # v3.37.4 — Counter-HTF gate reforzado con ML conf.
+                                            # El gate v3.35.1 (~line 1478) usa LLM conf que puede ser sobre-optimista.
+                                            # Caso real #542 (28 May): LLM conf 72.5 paso el gate, ML predictor lo
+                                            # bajaba a 57.5, trade counter-HTF perdio. Si chequeabamos ML conf < 60
+                                            # ahi -> bloqueado, ahorrabamos -$2.40. Solo aplica cuando es counter-HTF
+                                            # (_htf_penalty>0) Y hay ML predictor disponible (USE_ML_CONFIDENCE=true).
+                                            if price > 0 and _htf_penalty > 0:
+                                                try:
+                                                    from src.optimizer.confidence_predictor import predict_confidence
+                                                    from datetime import datetime as _ndt3, timezone as _ntz3
+                                                    _now_pre = _ndt3.now(_ntz3.utc)
+                                                    _sess_pre = ''
+                                                    try:
+                                                        _sess_pre = tech.get_session_info().get('session', '')
+                                                    except Exception:
+                                                        pass
+                                                    _ml_signal_pre = {
+                                                        'trigger_type': 'news',
+                                                        'direction': direction,
+                                                        'session': _sess_pre,
+                                                        'htf_bias': _news_htf or '',
+                                                        'market_trend': market.get('trend', ''),
+                                                        'trend_strength': market.get('trend_strength', ''),
+                                                        'volatility': market.get('volatility', ''),
+                                                        'rsi_at_entry': market.get('rsi', 50),
+                                                        'avg_range_pips': market.get('avg_range_pips', 3),
+                                                        'hour_utc': _now_pre.hour,
+                                                        'day_of_week': _now_pre.weekday(),
+                                                    }
+                                                    _ml_conf_pre = predict_confidence(_ml_signal_pre)
+                                                    if _ml_conf_pre is not None and _ml_conf_pre < 60:
+                                                        logger.info(f"v3.37.4 counter-HTF ML gate: blocking news {direction} (LLM conf {result.get('confidence',0):.0f}, ML conf {_ml_conf_pre} < 60, HTF {_news_htf})")
+                                                        price = 0
+                                                except Exception as _mle:
+                                                    logger.debug(f"counter-HTF ML pre-check error: {_mle}")
+
                                             # Dedup: skip if similar news strategy exists recently
                                             if price > 0 and has_recent_similar_strategy(direction, price, 'news', 30):
                                                 logger.info(f"Dedup: skipping {direction} news near {price:.5f}, similar exists within 30min")

@@ -753,4 +753,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 28 May 2026 — v3.37.2 (fix bug pre-planner dedup: parser ISO con TZ + dedup por slot UTC al minuto, evita pre-plans contradictorios para el mismo evento)
+**Última actualización**: 29 May 2026 — v3.37.4 (counter-HTF news gate reforzado: usa ML conf adicional al LLM conf. Caso real #542 28 May: LLM conf 72.5 paso gate, ML conf 24, trade counter-HTF perdio -$2.40)
