@@ -24,6 +24,26 @@ Bot de trading automático EUR/USD scalping M5, integrado con MetaTrader 5 (cuen
 
 ---
 
+## Metodología de trabajo con IA (acordado 29 May 2026)
+
+Cómo trabajar AIdan con asistentes IA. Persiste entre sesiones.
+
+1. **Verificación adversarial de hallazgos estadísticos (ANTES de proponer/aplicar)**.
+   Todo filtro, block de bucket, o cambio de param pasa primero por un check escéptico:
+   - Reportar siempre: `n`, WR del subset vs **baseline 37.4% (294 trades archive)**, p-value de binomial test, e intervalo de confianza 95%.
+   - **Default = RUIDO (no proponer)** si: `n < 20-30` **o** el CI 95% del subset cruza el baseline.
+   - Si hay sub-agentes disponibles: 3 verificadores independientes, decidir por mayoría.
+   - Enchufar este paso **antes del shadow validation** del nightly_analyst (no gastar ciclos de shadow en ruido). Punto de inserción: `tools/nightly_analyst.py:_persist_changes()`.
+   - Esto ataca el error recurrente ya documentado (hour gate, late breakout 3p removidos; block_conf_bucket 60-69 revertido; #7/#9/#13 rechazados — todos ruido de muestra chica).
+
+2. **Backtests y sweeps en paralelo (sub-agentes / Workflow)**. Los barridos del backlog son INDEPENDIENTES → correr en paralelo, un sub-agente por combinación, recolectar y rankear por PF. Aplica a: #1 (RF/XGBoost vs LR), #2 (gate tuning vel×body ~30 combos), #3 (modelo por trigger_type). Nunca secuencial a mano.
+
+3. **NO adoptar frameworks tipo "superpowers"** (spec→plan→TDD greenfield). AIdan es sistema vivo de research cuantitativo con tests livianos. Única excepción: si se encara #10 (pivot a swing H4/D1), ahí sí conviene fase de diseño/plan formal.
+
+4. **Tests de regresión en el path de ejecución**. Cubrir la clase de bug del v3.35.2 (orden MT5 duplicada en reconexión / idempotencia en `mt5_executor.open_position`). Los tests actuales (db, feed, news) no tocan el broker. **Sube de prioridad antes de Fase 2 (cuenta real)**.
+
+---
+
 ## Arquitectura
 
 ### Layout
@@ -220,7 +240,10 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.35.2 | Bugfix: duplicate MT5 order durante reconexion. Strategy #537 (26 May post-MT5 reconnect 11:07) genero 2 tickets en MT5 (limit order send tiro exception pero orden si llego al server). Orphan detector cerro la duplicada al spread (-$0.80 commissions waste). Fix: idempotency check en open_position + en _try_limit_order failure paths via comment match "AIdan #{strategy_id}" en positions/orders. | activo |
 | v3.35.3 | ATR floor M5 bajado 2.5 → 2.0p (news + structure + SMC). Semana 26 May: mercado quieto (ATR 1.8-2.3p casi todo el dia, lunes feriado US/UK) dejaba AIdan con 0-1 trades/dia. ML predictor (v3.35.0) actua como red de seguridad. M15 (5p) y H1 (10p) sin cambios. | activo |
 | v3.36.0 | Live Position Manager (Fase 1: reglas, sin LLM). Gestor en vivo que decide HOLD/CLOSE_PROFIT/CLOSE_PROTECT/CLOSE_MAXHOLD sobre posiciones abiertas, reemplazando el expiry ciego + force-close por mechas re-analizadas (bug del #538). Thread cada 15s. MODE=log/active/off. MAX_HOLD 90/120/240min (M5/M15/H1). Profit-lock arma a 60% TP, cierra si retrocede 40% del pico. Tabla position_manager_log. | activo |
-| **v3.37.0** | **Position Manager Fases 2+3 construidas (defaults seguros). Fase 2: LLM Exit Advisor (`src/analyzer/exit_advisor.py`) — en zona ambigua (soft-expiry HOLD) consulta Gemma local (fallback Groq) HOLD/CLOSE/TIGHTEN. Sub-flag POSITION_MANAGER_LLM (default OFF), rate-limit 5min/posicion, GPU-aware, CLOSE_LLM action. Fase 3: endpoints `/position-manager/state` + `/stats` + dashboard standalone `/position-manager` (tools/position_manager.html). Activacion pendiente de validar Fase 1 con trades reales.** | **actual** |
+| v3.37.0 | Position Manager Fases 2+3 construidas (defaults seguros). Fase 2: LLM Exit Advisor (`src/analyzer/exit_advisor.py`). Fase 3: endpoints `/position-manager/state`+`/stats` + dashboard `/position-manager`. | activo |
+| v3.37.1-3 | Boton 🎛️ Position Manager en dashboard + panel muestra HOLDs ademas de closes. | activo |
+| v3.37.4 | Counter-HTF news gate reforzado: usa ML conf adicional al LLM conf (caso #542). | activo |
+| **v3.38.0** | **Gate de significancia adversarial (`src/optimizer/significance.py`). Todo block/adjust de subset pasa por verify_change_proposal ANTES de persistir en pending_changes (enchufado en `nightly_analyst.persist_changes`). Binomial test one-sided + Wilson CI 95% vs baseline 37.4%. Default=RUIDO si n<25 o CI cruza baseline. Validado: los 4 cambios revertidos/rechazados de esta semana (#10/#7/#9/#13) + #8 = TODOS ruido (CI cruza baseline, p 0.22-0.67) → los habria matado antes de gastar shadow. Primer consumidor: gate tuning sweep (#2 backlog).** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -753,4 +776,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 29 May 2026 — v3.37.4 (counter-HTF news gate reforzado: usa ML conf adicional al LLM conf. Caso real #542 28 May: LLM conf 72.5 paso gate, ML conf 24, trade counter-HTF perdio -$2.40)
+**Última actualización**: 29 May 2026 — v3.38.0 (Gate de significancia adversarial: verifica n/WR/binomial/CI vs baseline 37.4% ANTES de persistir cambios del nightly_analyst. Mata ruido de muestra chica)

@@ -426,9 +426,24 @@ def parse_llm_output(raw_output):
 def persist_changes(changes_list, source):
     """Persist parsed changes to pending_changes table.
     Returns list of created change ids.
+
+    v3.38.0 — Gate de significancia adversarial ANTES de persistir. Cada
+    propuesta de block/adjust de subset pasa por verify_change_proposal: si el
+    hallazgo no es estadisticamente distinguible del baseline (n<25 o CI cruza
+    el WR base), se RECHAZA y no se crea el pending_change (no gasta ciclos de
+    shadow validation en ruido). change_types no verificables (tune_optimizer_param,
+    block_pattern) pasan sin gate. Ver CLAUDE.md "Metodologia de trabajo con IA".
     """
     from src.common.db import create_pending_change, SUPPORTED_CHANGE_TYPES
+    try:
+        from src.optimizer.significance import verify_change_proposal, compute_baseline_wr
+        _baseline = compute_baseline_wr()
+        _sig_available = True
+    except Exception as _se:
+        logger.warning(f"Significance gate no disponible: {_se} — persistiendo sin verificar")
+        _sig_available = False
     created = []
+    rejected_noise = []
     for c in (changes_list or []):
         try:
             ct = c.get('change_type', '')
@@ -437,6 +452,20 @@ def persist_changes(changes_list, source):
                 continue
             params = c.get('params', {})
             reasoning = c.get('reasoning', '')
+
+            # v3.38.0 — Gate de significancia
+            if _sig_available:
+                sig = verify_change_proposal(ct, params, baseline_wr=_baseline)
+                if sig is not None and not sig.significant:
+                    logger.info(f"RECHAZADO por significancia ({ct} {params}): {sig.summary()}")
+                    rejected_noise.append({'change_type': ct, 'params': params,
+                                           'reason': sig.reason, 'summary': sig.summary()})
+                    continue
+                if sig is not None:
+                    logger.info(f"Significancia OK ({ct}): {sig.summary()}")
+                    # Anota la evidencia en el reasoning para audit trail
+                    reasoning = f"{reasoning} [SIG: {sig.summary()}]"
+
             cid = create_pending_change(
                 change_type=ct,
                 params_json=params,
@@ -448,6 +477,10 @@ def persist_changes(changes_list, source):
         except Exception as e:
             logger.warning(f"Failed to persist change {c}: {e}")
             continue
+    if rejected_noise:
+        logger.info(f"Significancia: {len(rejected_noise)} propuesta(s) rechazada(s) por ruido de muestra chica")
+    # Exponer rechazos para el reporte/Telegram
+    persist_changes.last_rejected = rejected_noise
     return created
 
 
@@ -597,8 +630,12 @@ def main():
 
     source = f"nightly_{kind}_{model_id.replace(':', '_').replace('-', '_')}"
     created = persist_changes(changes, source)
+    rejected = getattr(persist_changes, 'last_rejected', [])
 
     logger.info(f"Created {len(created)} pending_changes: {created}")
+    if rejected:
+        logger.info(f"Significancia rechazo {len(rejected)} propuesta(s) por ruido: "
+                    + "; ".join(f"{r['change_type']} ({r['summary']})" for r in rejected))
     _log_cost(model_id)
     _send_telegram_summary(model_id, stats.get('last_24h', {}), changes)
 
