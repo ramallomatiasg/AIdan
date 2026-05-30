@@ -704,11 +704,10 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
    - Mismo `train_confidence_model.py`, solo cambiar el modelo
    - Esfuerzo: 1-2 horas. Validación inmediata (comparar AUC vs LR 0.48)
 
-2. **Auto-tuning de gates v3.34.0**
-   - Hoy puse vel > 6p y body/atr > 1.3 — thresholds arbitrarios
-   - Backtest sobre archive con todas las combinaciones (vel 3,4,5,6,7,8 × body 1.1,1.2,1.3,1.4,1.5)
-   - Encontrar el punto de mejor PF post-gates
-   - Esfuerzo: 2-3 horas
+2. ~~**Auto-tuning de gates v3.34.0**~~ ✅ RESUELTO (29 May, v3.38.1)
+   - `tools/sweep_entry_gates.py` corrió los 30 combos (vel 3-8 × body 1.1-1.5) con gate de significancia
+   - **Hallazgo: los 30 combos dan blocked-set = RUIDO** (CI cruza baseline 37.4% en todos). Los gates NO separaban ganadores de perdedores en ningún threshold — solo recortaban frecuencia.
+   - **Acción: gates DESACTIVADOS por default** (config-driven, `ENTRY_GATES_ENABLED=false`). Reactivables con tuning si en 300+ trades aparece threshold significativo.
 
 3. **Modelos separados POR trigger_type**
    - Hoy 1 modelo para todos los trades
@@ -776,4 +775,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 29 May 2026 — v3.38.0 (Gate de significancia adversarial: verifica n/WR/binomial/CI vs baseline 37.4% ANTES de persistir cambios del nightly_analyst. Mata ruido de muestra chica)
+**Última actualización**: 29 May 2026 — v3.38.1 (Entry gates v3.34.0 DESACTIVADOS por default: sweep mostró que los 30 combos vel×body son ruido, no separaban W/L, solo recortaban frecuencia. Config-driven, reactivables vía ENTRY_GATES_ENABLED)

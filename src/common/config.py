@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.38.0"
+APP_VERSION = "3.38.1"
 
 class Config:
     VERSION = APP_VERSION
@@ -132,6 +132,16 @@ class Config:
     # R1 Profit-lock: arma cuando HWM >= ARM*tp_distance; cierra si progress cae a <= KEEP*HWM.
     PM_PROFIT_LOCK_ARM = float(os.getenv("PM_PROFIT_LOCK_ARM", "0.60"))   # llego a 60% del TP
     PM_PROFIT_LOCK_KEEP = float(os.getenv("PM_PROFIT_LOCK_KEEP", "0.60"))  # cierra si retrocede 40% del pico
+
+    # v3.38.1 — Entry Quality Gates (v3.34.0) ahora config-driven y DESACTIVADOS por default.
+    # Sweep de significancia (29 May, tools/sweep_entry_gates.py): los 30 combos de
+    # vel x body dan blocked-set = RUIDO (CI cruza baseline 37.4% en todos). Los gates
+    # NO separaban ganadores de perdedores en ningun threshold — solo reducian frecuencia.
+    # Default OFF restaura el comportamiento pre-v3.34.0. Reactivar con tuning si en 300+
+    # trades aparece un threshold que pase significancia: ENTRY_GATES_ENABLED=true.
+    ENTRY_GATES_ENABLED = os.getenv("ENTRY_GATES_ENABLED", "false").lower() in ('true', '1', 'yes')
+    ENTRY_GATE_VEL_MAX = float(os.getenv("ENTRY_GATE_VEL_MAX", "6.0"))        # vel_5c_aligned > X -> block
+    ENTRY_GATE_BODY_ATR_MAX = float(os.getenv("ENTRY_GATE_BODY_ATR_MAX", "1.3"))  # body/atr > X -> block
 
     # v3.36.0 Fase 2 — LLM Exit Advisor. Sub-flag del Position Manager.
     # Cuando true Y el manager esta en zona ambigua (soft-expiry HOLD), consulta a
