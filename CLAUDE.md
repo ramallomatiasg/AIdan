@@ -699,21 +699,26 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ### Quick wins (horas → 1 día)
 
-1. **Random Forest / XGBoost** (en vez de logistic regression)
-   - Logistic es lineal — capaz el problema es no-lineal
-   - Mismo `train_confidence_model.py`, solo cambiar el modelo
-   - Esfuerzo: 1-2 horas. Validación inmediata (comparar AUC vs LR 0.48)
+1. ~~**Random Forest / XGBoost** (en vez de logistic regression)~~ ✅ RESUELTO (31 May, workflow ml-model-bench)
+   - Hipótesis: "capaz el problema es no-lineal". **REFUTADA.**
+   - 4 modelos (LR/RF/XGBoost/HistGB) sobre 276 trades, split cronológico 80/20, verificación adversarial.
+   - **Ningún modelo supera AUC 0.60 robusto.** Los 3 que tocaron ~0.60 en holdout (XGBoost 0.600, structure 0.607, news 0.625) fueron REFUTADOS por CV/multi-seed/permutation test → AUC real 0.44-0.48 (debajo de azar). Train AUC 0.68-0.99 vs CV ~0.44-0.54 = overfit textbook.
+   - Los árboles NO le ganan a LR — overfit más (RF train 0.91, gap 0.36). No es problema de linealidad.
+   - **HALLAZGO CLAVE (3 agentes independientes): `confidence` SOLA da AUC ~0.59, MAYOR que los modelos ML completos.** El feature engineering no es el cuello de botella — a n=276 no hay señal aprendible más allá de lo que confidence ya captura.
+
+3. ~~**Modelos separados POR trigger_type**~~ ✅ RESUELTO (31 May, mismo workflow)
+   - Hipótesis: "news/structure/smc tienen patrones distintos". **No verificable a este n.**
+   - Por-trigger (structure 112, m15 56, news 50, h1 30): test sets de 6-23 filas → AUC inútil. Todos overfit (train 0.89-0.99 vs CV ~azar), todos refutados.
+   - **Bug de data detectado**: las features enriched están 100% vacías para h1_structure (30/30) y body_atr_ratio 100% vacío para m15_structure. El pipeline de enriquecido no cubre esos triggers.
+   - **Conclusión #1+#3**: ML proper necesita 300-500+ trades limpios. Coincide con la regla "no tocar dynamic_conf con <300 trades". Re-evaluar en Fase 1.
+   - ⚠️ **Implicancia para v3.35.0**: el ML predictor de producción (news AUC 0.75 claim) huele al mismo artefacto de split único que este workflow debunkeó (news 0.625→0.462 tras verificar). Pendiente: re-validar los modelos v3.35.0 con esta rigurosidad antes de confiar en USE_ML_CONFIDENCE.
 
 2. ~~**Auto-tuning de gates v3.34.0**~~ ✅ RESUELTO (29 May, v3.38.1)
    - `tools/sweep_entry_gates.py` corrió los 30 combos (vel 3-8 × body 1.1-1.5) con gate de significancia
    - **Hallazgo: los 30 combos dan blocked-set = RUIDO** (CI cruza baseline 37.4% en todos). Los gates NO separaban ganadores de perdedores en ningún threshold — solo recortaban frecuencia.
    - **Acción: gates DESACTIVADOS por default** (config-driven, `ENTRY_GATES_ENABLED=false`). Reactivables con tuning si en 300+ trades aparece threshold significativo.
 
-3. **Modelos separados POR trigger_type**
-   - Hoy 1 modelo para todos los trades
-   - News + structure + smc tienen patrones distintos
-   - Train 1 modelo por trigger con sklearn
-   - Esfuerzo: 0.5 día
+   *(#3 "modelos por trigger_type" resuelto junto con #1 arriba — ambos refutados, ver bloque #1)*
 
 ### Mediano esfuerzo (1-2 días)
 
@@ -775,4 +780,4 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 29 May 2026 — v3.38.1 (Entry gates v3.34.0 DESACTIVADOS por default: sweep mostró que los 30 combos vel×body son ruido, no separaban W/L, solo recortaban frecuencia. Config-driven, reactivables vía ENTRY_GATES_ENABLED)
+**Última actualización**: 31 May 2026 — v3.38.1 (sin cambio de código). Workflow ml-model-bench (backlog #1+#3): RF/XGB/LR y modelos por-trigger TODOS refutados a n=276 (overfit, AUC real <0.5 tras verificación adversarial). Hallazgo: `confidence` sola ≈ AUC 0.59 > cualquier modelo ML. Sin señal aprendible hasta 300-500+ trades. ⚠️ Pendiente re-validar modelos v3.35.0 (news 0.75 claim sospechoso de overfit).
