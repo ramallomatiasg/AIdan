@@ -12,10 +12,8 @@ a = Analysis(
         ('tools/what_if_simulator.html', '.'),
         ('tools/meta_optimization.html', '.'),
         ('tools/position_manager.html', '.'),
-        # v3.35.0 — ML confidence predictor: modelos dedicados + metadata
-        ('config/confidence_model_news.joblib', 'config'),
-        ('config/confidence_model_m15_structure.joblib', 'config'),
-        ('config/confidence_predictor_meta.json', 'config'),
+        # v3.35.0 ML predictor: modelos borrados 31 May (revalidacion = espejismo).
+        # Re-bundlear aca si se re-entrena con 300+ trades y pasa CV honesto.
     ],
     hiddenimports=['numpy', 'MetaTrader5', 'sklearn', 'sklearn.ensemble', 'sklearn.linear_model',
                    'sklearn.preprocessing', 'sklearn.tree', 'sklearn.utils', 'joblib', 'scipy.sparse.csgraph._validation'],

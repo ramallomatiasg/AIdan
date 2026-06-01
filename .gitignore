@@ -35,8 +35,7 @@ state/
 data/
 *.jsonl
 *.json
-!config/confidence_weights.json
-!config/confidence_predictor_meta.json
+# (modelos ML v3.35.0 + weights Fase A borrados 31 May — revalidacion = espejismo)
 
 # Backtest outputs (timestamped at root)
 backtest_*.csv
