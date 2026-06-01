@@ -780,4 +780,6 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 31 May 2026 — v3.38.1 (sin cambio de código). Workflow ml-model-bench (backlog #1+#3): RF/XGB/LR y modelos por-trigger TODOS refutados a n=276 (overfit, AUC real <0.5 tras verificación adversarial). Hallazgo: `confidence` sola ≈ AUC 0.59 > cualquier modelo ML. Sin señal aprendible hasta 300-500+ trades. ⚠️ Pendiente re-validar modelos v3.35.0 (news 0.75 claim sospechoso de overfit).
+**Última actualización**: 31 May 2026 — v3.38.1 (sin cambio de código; cambios de config/research).
+- Workflow ml-model-bench (backlog #1+#3): RF/XGB/LR y modelos por-trigger TODOS refutados a n=276 (overfit, AUC real <0.5 tras verificación adversarial). `confidence` sola ≈ AUC 0.59 > cualquier modelo ML. Sin señal aprendible hasta 300-500+ trades.
+- **ML predictor v3.35.0 APAGADO** (`USE_ML_CONFIDENCE=false` en .env). `tools/revalidate_predictor.py` confirmó que el AUC 0.75/0.625 era espejismo de corte único (~12 trades test); AUC honesto ~0.57 ambos, no significativo (p 0.17-0.34). La heurística vieja (~0.59) es igual o mejor. AIdan vuelve a confianza heurística en todos los triggers. Reactivable solo con 300+ trades + CV honesto.
