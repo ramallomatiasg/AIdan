@@ -468,6 +468,8 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 
 ## Glosario de patrones observados
 
+> 📋 **Playbook de regímenes de mercado**: `docs/market_playbook.md` — registro vivo de los tipos de mercado (lateral muerto, tendencia alineada, ranging/chop, conflicto M5-vs-HTF, falling knife, news stale, volatilidad extrema) y cómo debería accionar AIdan en cada uno. Marca evidencia vs hipótesis-a-verificar. Actualizar en cada checkpoint.
+
 - **Expiry-loss**: trade direccionalmente correcto que cierra por timeout antes de hit TP. Frecuente en M5 con expiry 15min.
 - **Catch-the-falling-knife**: AIdan ve un breakdown como "structure breakout" y compra el bottom. SL hit en <2 min.
 - **Counter-HTF**: dirección contraria a HTF bias (H1+). Históricamente -EV.
