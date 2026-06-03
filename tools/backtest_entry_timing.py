@@ -85,6 +85,31 @@ def confirms(candle, direction):
     return candle['c'] < candle['o'] if direction == 'PUT' else candle['c'] > candle['o']
 
 
+def sim_limit_pullback(candles, ei, direction, sl_pips, tp_pips, max_wait=5):
+    """Variante 'entrar desde mejor precio': pone orden limite en el extremo de la
+    vela de rebote (PUT: short desde el high; CALL: long desde el low). Si el precio
+    llega ahi en <=max_wait velas, entra; si no, skip (None)."""
+    limit = candles[ei]['h'] if direction == 'PUT' else candles[ei]['l']
+    for j in range(ei + 1, min(ei + 1 + max_wait, len(candles))):
+        cj = candles[j]
+        hit = cj['h'] >= limit if direction == 'PUT' else cj['l'] <= limit
+        if hit:
+            return sim_forward(candles, j, limit, direction, sl_pips, tp_pips)[0]
+    return None  # nunca volvio al nivel -> trade evitado
+
+
+def era_of(created):
+    """Bucket de epoca por fecha (para detectar contaminacion cross-version)."""
+    d = str(created)[:10]
+    if d < '2026-05-01':
+        return '1_abril'
+    if d < '2026-05-20':
+        return '2_may1-19'
+    if d < '2026-05-29':
+        return '3_may20-28'
+    return '4_post-limpieza'  # gates off + ML off (v3.38.x)
+
+
 def is_bounce(entry_candle, direction):
     """Vela de entrada va EN CONTRA de la direccion (retroceso)."""
     return entry_candle['c'] > entry_candle['o'] if direction == 'PUT' else entry_candle['c'] < entry_candle['o']
@@ -109,38 +134,37 @@ def main():
     if args.limit:
         rows = rows[-args.limit:]
 
-    bounce_actual, bounce_wait = [], []
+    # recolectar por trade: (era, is_bounce, actual, wait, limit)
+    recs = []
     nonbounce = []
     no_data = 0
     for tid, created, direction, entry, slp, tpp, pnl in rows:
         try:
             dt_ar = datetime.strptime(str(created).split('.')[0], '%Y-%m-%d %H:%M:%S')
-            dt_utc = dt_ar + timedelta(hours=3)  # AR UTC-3 -> UTC aprox
+            dt_utc = dt_ar + timedelta(hours=3)
         except Exception:
             continue
         candles = fetch_window(mt5, dt_utc)
         if len(candles) < 5:
             no_data += 1; continue
-        exp_t = int(dt_utc.timestamp())
-        ei = find_entry_idx(candles, entry, exp_t)
+        ei = find_entry_idx(candles, entry, int(dt_utc.timestamp()))
         if ei is None or ei >= len(candles) - 2:
             no_data += 1; continue
         ec = candles[ei]
         a_pips, _ = sim_forward(candles, ei, entry, direction, slp, tpp)
+        era = era_of(created)
         if is_bounce(ec, direction):
-            bounce_actual.append(a_pips)
-            # WAIT: buscar 1ra vela de confirmacion desde ei+1
+            # WAIT confirmacion
             wi = None
-            for j in range(ei + 1, min(ei + 6, len(candles))):  # hasta 5 velas de espera
+            for j in range(ei + 1, min(ei + 6, len(candles))):
                 if confirms(candles[j], direction):
                     wi = j; break
-            if wi is not None and wi < len(candles) - 2:
-                new_entry = candles[wi]['c']
-                w_pips, _ = sim_forward(candles, wi, new_entry, direction, slp, tpp)
-                bounce_wait.append(w_pips)
-            else:
-                bounce_wait.append(None)  # nunca confirmo -> trade evitado
+            w_pips = sim_forward(candles, wi, candles[wi]['c'], direction, slp, tpp)[0] if (wi is not None and wi < len(candles) - 2) else None
+            # LIMIT pullback (entrar desde mejor precio)
+            l_pips = sim_limit_pullback(candles, ei, direction, slp, tpp)
+            recs.append({'era': era, 'bounce': True, 'actual': a_pips, 'wait': w_pips, 'limit': l_pips})
         else:
+            recs.append({'era': era, 'bounce': False, 'actual': a_pips})
             nonbounce.append(a_pips)
 
     def stats(lst):
@@ -149,23 +173,32 @@ def main():
         n = len(v); wins = sum(1 for x in v if x > 0)
         return (n, wins / n * 100, sum(v), sum(v) / n)
 
-    print(f"\n{'='*60}\nBACKTEST entry-timing (esperar confirmacion en bounce-entries)\n{'='*60}")
-    print(f"Trades procesados: {len(rows)} | sin data MT5: {no_data}")
-    print(f"Non-bounce (entrada normal): {len(nonbounce)}")
-    nb = stats(nonbounce)
-    print(f"  -> WR {nb[1]:.0f}%  PnL {nb[2]:+.1f}p  avg {nb[3]:+.2f}p\n")
+    bounce = [r for r in recs if r['bounce']]
+    print(f"\n{'='*64}\nBACKTEST entry-timing — contaminacion + variantes de espera\n{'='*64}")
+    print(f"Trades procesados: {len(rows)} | sin data MT5: {no_data}\n")
 
-    n_b = len(bounce_actual)
-    print(f"BOUNCE-ENTRIES (donde la regla actuaria): {n_b}")
-    a = stats(bounce_actual)
-    print(f"  A) ACTUAL (entrar sobre el rebote): n={a[0]} WR {a[1]:.0f}%  PnL {a[2]:+.1f}p  avg {a[3]:+.2f}p")
-    avoided = sum(1 for x in bounce_wait if x is None)
-    w = stats(bounce_wait)
-    print(f"  B) WAIT (esperar confirmacion):     n={w[0]} WR {w[1]:.0f}%  PnL {w[2]:+.1f}p  avg {w[3]:+.2f}p")
-    print(f"     (+ {avoided} trades evitados por no confirmar nunca)")
-    print(f"\n  DELTA avg/trade (WAIT - ACTUAL): {w[3]-a[3]:+.2f}p")
-    if n_b < 25:
-        print(f"  [!] n={n_b} < 25: muestra chica, resultado provisorio (gate de significancia).")
+    # 1) Bounce vs non-bounce GLOBAL
+    nb = stats(nonbounce); a = stats([r['actual'] for r in bounce])
+    print("GLOBAL:")
+    print(f"  Non-bounce: n={nb[0]} WR {nb[1]:.0f}% avg {nb[3]:+.2f}p")
+    print(f"  Bounce:     n={a[0]} WR {a[1]:.0f}% avg {a[3]:+.2f}p\n")
+
+    # 2) POR EPOCA (clave: detectar contaminacion cross-version)
+    print("POR EPOCA (bounce vs non-bounce) — si el efecto se sostiene post-limpieza, NO es artefacto:")
+    print(f"  {'epoca':<18}{'NB n':>5}{'NB WR':>7}{'NB avg':>8}  |{'B n':>5}{'B WR':>7}{'B avg':>8}")
+    for era in ['1_abril', '2_may1-19', '3_may20-28', '4_post-limpieza']:
+        nbs = stats([r['actual'] for r in recs if r['era'] == era and not r['bounce']])
+        bs = stats([r['actual'] for r in recs if r['era'] == era and r['bounce']])
+        print(f"  {era:<18}{nbs[0]:>5}{nbs[1]:>6.0f}%{nbs[3]:>+8.2f}  |{bs[0]:>5}{bs[1]:>6.0f}%{bs[3]:>+8.2f}")
+
+    # 3) VARIANTES sobre bounce-entries
+    print("\nVARIANTES sobre bounce-entries (que hacer con ellas):")
+    print(f"  A) Entrar igual (actual):       n={a[0]} WR {a[1]:.0f}% avg {a[3]:+.2f}p  total {a[2]:+.1f}p")
+    w = stats([r['wait'] for r in bounce]); w_skip = sum(1 for r in bounce if r['wait'] is None)
+    print(f"  B) Esperar confirmacion:        n={w[0]} WR {w[1]:.0f}% avg {w[3]:+.2f}p  total {w[2]:+.1f}p  (+{w_skip} evitados)")
+    l = stats([r['limit'] for r in bounce]); l_skip = sum(1 for r in bounce if r['limit'] is None)
+    print(f"  C) Entrar desde mejor precio:   n={l[0]} WR {l[1]:.0f}% avg {l[3]:+.2f}p  total {l[2]:+.1f}p  (+{l_skip} evitados)")
+    print(f"  D) Saltarlos (skip):            n=0  -> evita {a[2]:+.1f}p de perdida")
     mt5.shutdown()
 
 
