@@ -72,7 +72,15 @@
   - `1.0-1.5×`: n=56, WR 39%, avg -$0.62
   - `1.5-2.0×` (ancho): n=30, WR **23%**, avg **-$1.78** (PEOR)
   - `>2.0×`: n=29, WR 31%, avg -$0.61
-  El SL ancho rescata algún rebote PERO sangra más en los trades genuinamente equivocados → neto peor. El SL pegado es el de mejor WR. **No tocar el ancho del SL.** El #565 fue hindsight: para cada #565 salvado, varios otros pierden más. Queda como lección: la solución NO es el SL. Si hay arreglo, es el TIMING de entrada (esperar agotamiento del rebote), que es más difícil y la versión naive (gates v3.34.0) ya fue ruido.
+  El SL ancho rescata algún rebote PERO sangra más en los trades genuinamente equivocados → neto peor. El SL pegado es el de mejor WR. **No tocar el ancho del SL.** El #565 fue hindsight: para cada #565 salvado, varios otros pierden más. Queda como lección: la solución NO es el SL.
+- **✅ ARREGLO VALIDADO (3 Jun) — SALTAR las bounce-entries** (`tools/backtest_entry_timing.py`, 306 trades, velas MT5):
+  - Definición "bounce entry": la vela de entrada cierra EN CONTRA de la dirección del trade (PUT entrando sobre vela verde, CALL sobre vela roja).
+  - **Non-bounce (entrada normal): n=154, WR 45%, +0.91p/trade, +139.6p total.**
+  - **Bounce (como #565): n=147, WR 22%, -3.19p/trade, -468.7p total.**
+  - **Gate de significancia: bounce WR 21.8%, CI [15.9%, 29.1%] enteramente debajo del baseline 37.4%, p=0.000 → SIGNIFICATIVO.** Es ~la mitad de los trades de AIdan.
+  - **Acción**: NO tomar trades cuya vela de entrada va en contra de la dirección. (Esperar confirmación reduce el daño pero sigue negativo -1.47p → SKIP > WAIT.)
+  - **Impacto estimado**: +468p al sacar los bounce-losers (aun con backtest inflado 20-30%, el gap 22% vs 45% es brutal).
+  - **Pendiente**: implementar con flag + shadow (no confiar 100% en backtest — nos paso con el ML predictor v3.35.0). Definir la detección de "bounce candle" idéntica al backtest en el scanner.
 
 ---
 
