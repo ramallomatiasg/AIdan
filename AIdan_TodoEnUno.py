@@ -988,6 +988,40 @@ class AIdan:
                             return None
                     except Exception as e:
                         logger.debug(f"User-window check: {e}")
+                    # v3.39.0 — Skip bounce-entry: ¿la vela de entrada va EN CONTRA?
+                    # PUT entrando sobre vela verde / CALL sobre vela roja = bounce.
+                    # Validado p=0.000 (bounce 22% WR vs 45%). MODE off/shadow/active.
+                    _bounce_mode = (getattr(Config, 'SKIP_BOUNCE_ENTRY', 'shadow') or 'shadow').lower()
+                    if _bounce_mode != 'off':
+                        try:
+                            _bc = tech._fetch_candles()
+                            if _bc and len(_bc) >= 1:
+                                _ec = _bc[-1]
+                                _o = _ec.get('open'); _cl = _ec.get('close')
+                                if _o is not None and _cl is not None and _o != _cl:
+                                    _is_bounce = (_cl > _o) if direction == 'PUT' else (_cl < _o)
+                                    _will_skip = bool(_is_bounce and _bounce_mode == 'active')
+                                    try:
+                                        from src.common.db import log_bounce_decision
+                                        log_bounce_decision(sid, direction, trigger_type, _o, _cl,
+                                                            _is_bounce, _bounce_mode, _will_skip)
+                                    except Exception:
+                                        pass
+                                    if _is_bounce and _bounce_mode == 'active':
+                                        logger.info(f"Skip bounce-entry [ACTIVE]: #{sid} {direction} entra sobre vela contra-direccion (O={_o:.5f} C={_cl:.5f}) -> SKIP")
+                                        try:
+                                            import sqlite3 as _sq
+                                            _cn = _sq.connect(DB_PATH)
+                                            _cn.execute("UPDATE auto_strategies SET status='skipped_bounce' WHERE id=?", (sid,))
+                                            _cn.commit(); _cn.close()
+                                        except Exception:
+                                            pass
+                                        return None
+                                    elif _is_bounce:
+                                        logger.info(f"Skip bounce-entry [SHADOW]: #{sid} {direction} habria saltado (vela contra-direccion O={_o:.5f} C={_cl:.5f})")
+                        except Exception as _be:
+                            logger.debug(f"bounce-entry check #{sid}: {_be}")
+
                     # v3.28.0 Spread guardian
                     try:
                         from src.common.slippage_tracker import is_spread_acceptable

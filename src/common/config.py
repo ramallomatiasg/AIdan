@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.38.1"
+APP_VERSION = "3.39.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -142,6 +142,14 @@ class Config:
     ENTRY_GATES_ENABLED = os.getenv("ENTRY_GATES_ENABLED", "false").lower() in ('true', '1', 'yes')
     ENTRY_GATE_VEL_MAX = float(os.getenv("ENTRY_GATE_VEL_MAX", "6.0"))        # vel_5c_aligned > X -> block
     ENTRY_GATE_BODY_ATR_MAX = float(os.getenv("ENTRY_GATE_BODY_ATR_MAX", "1.3"))  # body/atr > X -> block
+
+    # v3.39.0 — Skip bounce-entry: no entrar sobre una vela que va EN CONTRA de la
+    # direccion del trade (PUT entrando sobre vela verde, CALL sobre vela roja).
+    # Validado sobre 306 trades + velas MT5 (tools/backtest_entry_timing.py):
+    # bounce-entries WR 22% vs 45% normales, p=0.000, sostenido en todas las epocas,
+    # sin subgrupo salvable. Es ~la mitad de los trades de AIdan (los que sangran).
+    # MODE: off | shadow (registra "habria saltado" sin actuar, DEFAULT) | active (saltea).
+    SKIP_BOUNCE_ENTRY = (os.getenv("SKIP_BOUNCE_ENTRY", "shadow") or "shadow").lower()
 
     # v3.36.0 Fase 2 — LLM Exit Advisor. Sub-flag del Position Manager.
     # Cuando true Y el manager esta en zona ambigua (soft-expiry HOLD), consulta a

@@ -551,6 +551,51 @@ async def position_manager_stats(limit: int = 200):
         return JSONResponse({'error': str(e)}, status_code=500)
 
 
+@app.get("/bounce-entry/stats")
+async def bounce_entry_stats(limit: int = 50):
+    """v3.39.0 — Shadow log del filtro skip-bounce-entry: cuantos trades habria
+    saltado y si esos (bounce) terminaron peor que los demas."""
+    try:
+        import sqlite3
+        from src.common.db import DB_PATH
+        from src.common.config import Config
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) n, SUM(is_bounce) b, SUM(skipped) sk FROM bounce_entry_log")
+        agg = cur.fetchone()
+        total, bounces, skipped = agg['n'] or 0, agg['b'] or 0, agg['sk'] or 0
+        # cruzar las decisiones bounce con el resultado real del trade (shadow validation)
+        cur.execute("""
+            SELECT b.is_bounce, a.mt5_pnl
+            FROM bounce_entry_log b JOIN auto_strategies a ON a.id = b.strategy_id
+            WHERE a.mt5_pnl IS NOT NULL
+        """)
+        rows = cur.fetchall()
+        def wr(grp):
+            v = [r['mt5_pnl'] for r in rows if r['is_bounce'] == grp]
+            if not v: return {'n': 0, 'wr': None, 'pnl': 0}
+            return {'n': len(v), 'wr': round(sum(1 for x in v if x > 0)/len(v)*100, 1), 'pnl': round(sum(v), 2)}
+        cur.execute("""
+            SELECT strategy_id, direction, trigger_type, entry_candle_open,
+                   entry_candle_close, is_bounce, mode, skipped, created_at
+            FROM bounce_entry_log ORDER BY id DESC LIMIT ?
+        """, (limit,))
+        recent = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return JSONResponse({
+            'mode': getattr(Config, 'SKIP_BOUNCE_ENTRY', 'shadow'),
+            'total_decisions': total,
+            'bounce_would_skip': bounces,
+            'actually_skipped': skipped,
+            'outcome_bounce': wr(1),       # los que habria saltado: ¿perdieron?
+            'outcome_nonbounce': wr(0),    # los que dejo pasar: ¿ganaron?
+            'recent': recent,
+        }, headers=NO_CACHE_HEADERS)
+    except Exception as e:
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
 @app.get("/ml-predictor/status")
 async def ml_predictor_status():
     """v3.35.0 — Diagnostic: estado del modelo ML de confidence.

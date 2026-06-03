@@ -495,6 +495,22 @@ def init_db():
         )
     """)
 
+    # v3.39.0 — Skip bounce-entry log: registra la decision (shadow/active) por trade.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS bounce_entry_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER,
+            direction TEXT,
+            trigger_type TEXT,
+            entry_candle_open REAL,
+            entry_candle_close REAL,
+            is_bounce INTEGER,           -- 1 si la vela de entrada va contra la direccion
+            mode TEXT,                   -- shadow | active
+            skipped INTEGER DEFAULT 0,   -- 1 si efectivamente se salteo (solo active)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.36.0 — Live Position Manager log (Fase 1).
     # Registra cada decision del gestor (HOLD/CLOSE_*) por posicion. En modo 'log'
     # solo registra (executed=0) para shadow validation; en 'active' executed=1.
@@ -1962,6 +1978,24 @@ def get_open_mt5_for_manager():
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+def log_bounce_decision(strategy_id, direction, trigger_type, candle_open,
+                        candle_close, is_bounce, mode, skipped=0):
+    """v3.39.0 — Persiste la decision del filtro bounce-entry (shadow/active)."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            INSERT INTO bounce_entry_log
+                (strategy_id, direction, trigger_type, entry_candle_open,
+                 entry_candle_close, is_bounce, mode, skipped)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (strategy_id, direction, trigger_type, candle_open, candle_close,
+              1 if is_bounce else 0, mode, 1 if skipped else 0))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 def log_position_manager_decision(strategy_id, ticket, mode, action, reason,

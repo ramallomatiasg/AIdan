@@ -243,7 +243,9 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 | v3.37.0 | Position Manager Fases 2+3 construidas (defaults seguros). Fase 2: LLM Exit Advisor (`src/analyzer/exit_advisor.py`). Fase 3: endpoints `/position-manager/state`+`/stats` + dashboard `/position-manager`. | activo |
 | v3.37.1-3 | Boton 🎛️ Position Manager en dashboard + panel muestra HOLDs ademas de closes. | activo |
 | v3.37.4 | Counter-HTF news gate reforzado: usa ML conf adicional al LLM conf (caso #542). | activo |
-| **v3.38.0** | **Gate de significancia adversarial (`src/optimizer/significance.py`). Todo block/adjust de subset pasa por verify_change_proposal ANTES de persistir en pending_changes (enchufado en `nightly_analyst.persist_changes`). Binomial test one-sided + Wilson CI 95% vs baseline 37.4%. Default=RUIDO si n<25 o CI cruza baseline. Validado: los 4 cambios revertidos/rechazados de esta semana (#10/#7/#9/#13) + #8 = TODOS ruido (CI cruza baseline, p 0.22-0.67) → los habria matado antes de gastar shadow. Primer consumidor: gate tuning sweep (#2 backlog).** | **actual** |
+| v3.38.0 | Gate de significancia adversarial (`src/optimizer/significance.py`). Todo block/adjust de subset pasa por verify_change_proposal ANTES de persistir en pending_changes. Binomial one-sided + Wilson CI 95% vs baseline 37.4%. Default=RUIDO si n<25 o CI cruza baseline. | activo |
+| v3.38.1 | Entry Quality Gates v3.34.0 DESACTIVADOS (config-driven `ENTRY_GATES_ENABLED=false`). Sweep mostró que los 30 combos vel×body son ruido. | activo |
+| **v3.39.0** | **Skip bounce-entry (modo SHADOW por default). Filtro que detecta cuando AIdan entra sobre una vela contra-direccion (PUT sobre vela verde / CALL sobre roja) — validado p=0.000: bounce-entries 22% WR vs 45% normales, sostenido en todas las epocas, sin subgrupo salvable (ni esperar ni SL ancho lo arreglan, solo SKIP). Hook central en `_try_mt5_execute`. Config SKIP_BOUNCE_ENTRY=off/shadow/active. Shadow registra "habria saltado" sin actuar → tabla `bounce_entry_log` + endpoint `/bounce-entry/stats`. Validar en vivo antes de flip a active. Origen: caso #565 + insistencia del user.** | **actual** |
 
 ### Filtros activos (v3.18.0)
 
@@ -782,6 +784,9 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 31 May 2026 — v3.38.1 (sin cambio de código; cambios de config/research).
+**Última actualización**: 3 Jun 2026 — v3.39.0 (Skip bounce-entry en modo SHADOW: registra qué trades habría saltado por entrar sobre vela contra-direccion. Validado p=0.000. Validar en vivo unos días antes de activar).
+
+### Historial previo
+**31 May 2026 — v3.38.1 (sin cambio de código; cambios de config/research).**
 - Workflow ml-model-bench (backlog #1+#3): RF/XGB/LR y modelos por-trigger TODOS refutados a n=276 (overfit, AUC real <0.5 tras verificación adversarial). `confidence` sola ≈ AUC 0.59 > cualquier modelo ML. Sin señal aprendible hasta 300-500+ trades.
 - **ML predictor v3.35.0 APAGADO** (`USE_ML_CONFIDENCE=false` en .env). `tools/revalidate_predictor.py` confirmó que el AUC 0.75/0.625 era espejismo de corte único (~12 trades test); AUC honesto ~0.57 ambos, no significativo (p 0.17-0.34). La heurística vieja (~0.59) es igual o mejor. AIdan vuelve a confianza heurística en todos los triggers. Reactivable solo con 300+ trades + CV honesto.
