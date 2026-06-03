@@ -66,7 +66,13 @@
 - **Acción ideal `[HIPÓTESIS a verificar]`**: con dirección correcta, NO entrar sobre la vela de rebote — esperar que el rebote se agote (vela de rechazo/continuación) y entrar desde mejor precio. Y/o dar más aire al SL (≥1.5× ATR) para sobrevivir el coletazo del rebote. RSI extremo = más riesgo de rebote, no menos.
 - **Evidencia**: mar 3 Jun → **#565 PUT**, dirección correcta (precio cayó de 1.16009 a 1.1599 después), pero entró en 1.16009 sobre una vela verde de rebote, RSI 19.7, SL a 3.7p (ATR 3.4p ≈ 1× ATR) → stopeado en 1 min a 1.16046, y luego el precio cayó como AIdan predijo. **Entrada y SL la mataron, no la dirección.**
 - **Distinguir de Régimen 5**: #5 = dirección EQUIVOCADA (comprar la caída). #8 = dirección CORRECTA, entrada/SL malos. Diagnóstico y arreglo distintos — no confundir.
-- **A verificar el viernes**: ¿trades alineados-con-tendencia con SL < 1.3× ATR tienen más SL-hit-prematuro? ¿entrar tras confirmación (no en la vela de rebote) mejora WR?
+- **A verificar el viernes**: ¿entrar tras confirmación (no en la vela de rebote) mejora WR?
+- **⚠️ ARREGLO REFUTADO (3 Jun) — ensanchar el SL NO funciona**: análisis sobre 208 trades del archive por ratio SL/ATR:
+  - `<1.0×` (pegado, como #565): n=93, WR **42%**, avg -$0.78
+  - `1.0-1.5×`: n=56, WR 39%, avg -$0.62
+  - `1.5-2.0×` (ancho): n=30, WR **23%**, avg **-$1.78** (PEOR)
+  - `>2.0×`: n=29, WR 31%, avg -$0.61
+  El SL ancho rescata algún rebote PERO sangra más en los trades genuinamente equivocados → neto peor. El SL pegado es el de mejor WR. **No tocar el ancho del SL.** El #565 fue hindsight: para cada #565 salvado, varios otros pierden más. Queda como lección: la solución NO es el SL. Si hay arreglo, es el TIMING de entrada (esperar agotamiento del rebote), que es más difícil y la versión naive (gates v3.34.0) ya fue ruido.
 
 ---
 
