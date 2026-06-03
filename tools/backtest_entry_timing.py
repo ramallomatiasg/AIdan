@@ -125,7 +125,8 @@ def main():
     mt5 = connect_mt5()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""SELECT id, created_at, direction, entry_price, sl_pips, tp_pips, mt5_pnl
+    c.execute("""SELECT id, created_at, direction, entry_price, sl_pips, tp_pips, mt5_pnl,
+                  trigger_type, market_trend, trend_strength, rsi_at_entry, htf_bias
            FROM trade_archive
            WHERE mt5_pnl IS NOT NULL AND entry_price>0 AND sl_pips>0 AND tp_pips>0
            ORDER BY created_at""")
@@ -138,7 +139,7 @@ def main():
     recs = []
     nonbounce = []
     no_data = 0
-    for tid, created, direction, entry, slp, tpp, pnl in rows:
+    for tid, created, direction, entry, slp, tpp, pnl, trig, mtrend, tstr, rsi, htf in rows:
         try:
             dt_ar = datetime.strptime(str(created).split('.')[0], '%Y-%m-%d %H:%M:%S')
             dt_utc = dt_ar + timedelta(hours=3)
@@ -154,15 +155,24 @@ def main():
         a_pips, _ = sim_forward(candles, ei, entry, direction, slp, tpp)
         era = era_of(created)
         if is_bounce(ec, direction):
-            # WAIT confirmacion
             wi = None
             for j in range(ei + 1, min(ei + 6, len(candles))):
                 if confirms(candles[j], direction):
                     wi = j; break
             w_pips = sim_forward(candles, wi, candles[wi]['c'], direction, slp, tpp)[0] if (wi is not None and wi < len(candles) - 2) else None
-            # LIMIT pullback (entrar desde mejor precio)
             l_pips = sim_limit_pullback(candles, ei, direction, slp, tpp)
-            recs.append({'era': era, 'bounce': True, 'actual': a_pips, 'wait': w_pips, 'limit': l_pips})
+            # segmentos
+            mt = (mtrend or '').lower()
+            with_trend = (direction == 'CALL' and 'bull' in mt) or (direction == 'PUT' and 'bear' in mt)
+            counter_trend = (direction == 'CALL' and 'bear' in mt) or (direction == 'PUT' and 'bull' in mt)
+            align = 'with-trend' if with_trend else ('counter-trend' if counter_trend else 'neutral')
+            try:
+                rsi_f = float(rsi)
+            except (TypeError, ValueError):
+                rsi_f = 50.0
+            rsi_seg = 'extremo' if (rsi_f < 30 or rsi_f > 70) else 'medio'
+            recs.append({'era': era, 'bounce': True, 'actual': a_pips, 'wait': w_pips, 'limit': l_pips,
+                         'trig': trig or '?', 'align': align, 'rsi_seg': rsi_seg, 'win': a_pips > 0})
         else:
             recs.append({'era': era, 'bounce': False, 'actual': a_pips})
             nonbounce.append(a_pips)
@@ -199,6 +209,28 @@ def main():
     l = stats([r['limit'] for r in bounce]); l_skip = sum(1 for r in bounce if r['limit'] is None)
     print(f"  C) Entrar desde mejor precio:   n={l[0]} WR {l[1]:.0f}% avg {l[3]:+.2f}p  total {l[2]:+.1f}p  (+{l_skip} evitados)")
     print(f"  D) Saltarlos (skip):            n=0  -> evita {a[2]:+.1f}p de perdida")
+
+    # 4) SEGMENTACION: ¿todo el grupo es malo, o solo una parte? (con significancia)
+    from src.optimizer.significance import verify_finding
+    def seg_report(title, keyfn):
+        print(f"\n  Por {title}:")
+        groups = {}
+        for r in bounce:
+            k = keyfn(r)
+            groups.setdefault(k, []).append(r)
+        for k in sorted(groups):
+            g = groups[k]; n = len(g); wins = sum(1 for r in g if r['win'])
+            avg = sum(r['actual'] for r in g) / n
+            sig = verify_finding(n, wins, direction='worse')
+            tag = 'SIGNIF. PEOR' if sig.significant else 'ruido (no concluyente)'
+            print(f"    {str(k):<16} n={n:>3} WR {wins/n*100:>4.0f}% avg {avg:>+6.2f}p  -> {tag}")
+
+    print(f"\n{'='*64}\nSEGMENTACION de bounce-entries (¿cortar todo o solo una parte?)\n{'='*64}")
+    seg_report('alineacion con tendencia', lambda r: r['align'])
+    seg_report('trigger', lambda r: r['trig'])
+    seg_report('RSI', lambda r: r['rsi_seg'])
+    print("\n  (SIGNIF. PEOR = ese subgrupo pierde de forma significativa vs baseline 37.4%;")
+    print("   'ruido' = no se distingue del baseline a este n -> NO justifica cortarlo solo)")
     mt5.shutdown()
 
 

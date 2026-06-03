@@ -82,6 +82,8 @@
   - **Impacto estimado**: +468p al sacar los bounce-losers (aun con backtest inflado 20-30%, el gap 22% vs 45% es brutal).
   - **NO es contaminacion cross-version** (verificado 3 Jun, split por epoca): el efecto se sostiene en las 4 epocas, incluida post-limpieza v3.38.x (non-bounce 64% vs bounce 33%). Abril 48/18, May1-19 44/24, May20-28 32/22, post-limpieza 64/33. En cada epoca bounce < non-bounce. Es estructural, no artefacto de fixes viejos.
   - **Esperar NO alcanza** (verificado): esperar confirmacion -1.47p, entrar desde mejor precio (limite) -1.67p — ambas reducen el daño pero siguen NEGATIVAS. Solo SKIP llega a no-perder. La bounce-entry es setup malo de raiz, no buen trade mal entrado.
+  - **NO hay subgrupo salvable** (segmentado 3 Jun): bounce-entries son malas en TODO corte — with-trend (n=61, 18% WR) igual de malas que counter-trend (n=39, 21%); todos los triggers con muestra (structure 21%, news 19%) signif. peores; RSI medio y extremo ambos malos. No existe version quirurgica que mantenga frecuencia sin quedarse con perdedores → el corte completo se justifica.
+  - **Frecuencia**: corta ~50% de los trades PERO son los que sangran (22% WR, -3.19p). El 50% que queda es +0.89p (post-limpieza 64% WR). Menos trades, pero los que ganan.
   - **Pendiente**: implementar filtro 'skip bounce-entry' con flag + shadow (no confiar 100% en backtest — nos paso con el ML predictor v3.35.0). Deteccion idéntica al backtest: vela de entrada (ultima cerrada al disparar) cierra en contra de la direccion.
 
 ---
