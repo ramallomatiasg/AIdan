@@ -60,6 +60,14 @@
 - **Qué hace AIdan**: ATR ceiling 6p saltea (el SL queda muy pegado vs el ruido → SL hit por rebotes). + spread gate (skip si spread > 50% del SL).
 - **Acción ideal**: esperar a que la volatilidad baje a rango operable (2-6p). Operar SL pegado en spike = SL hit garantizado.
 
+## Régimen 8 — Entrada contra un rebote (dirección correcta, timing malo)  `[HIPÓTESIS — entry quality]`
+- **Identificar**: dirección del trade ALINEADA con la tendencia fuerte (ej: PUT en bajista fuerte) PERO entrando justo sobre una vela de rebote contra-tendencia + RSI extremo (ej: <20 sobrevendido para un PUT) + SL pegado (~1× ATR).
+- **Qué hace AIdan**: entra en el medio del rebote (shortea la vela verde / compra la roja) → el rebote sigue un poco más → toca el SL pegado → DESPUÉS el precio va a donde AIdan predijo, pero ya sin nosotros.
+- **Acción ideal `[HIPÓTESIS a verificar]`**: con dirección correcta, NO entrar sobre la vela de rebote — esperar que el rebote se agote (vela de rechazo/continuación) y entrar desde mejor precio. Y/o dar más aire al SL (≥1.5× ATR) para sobrevivir el coletazo del rebote. RSI extremo = más riesgo de rebote, no menos.
+- **Evidencia**: mar 3 Jun → **#565 PUT**, dirección correcta (precio cayó de 1.16009 a 1.1599 después), pero entró en 1.16009 sobre una vela verde de rebote, RSI 19.7, SL a 3.7p (ATR 3.4p ≈ 1× ATR) → stopeado en 1 min a 1.16046, y luego el precio cayó como AIdan predijo. **Entrada y SL la mataron, no la dirección.**
+- **Distinguir de Régimen 5**: #5 = dirección EQUIVOCADA (comprar la caída). #8 = dirección CORRECTA, entrada/SL malos. Diagnóstico y arreglo distintos — no confundir.
+- **A verificar el viernes**: ¿trades alineados-con-tendencia con SL < 1.3× ATR tienen más SL-hit-prematuro? ¿entrar tras confirmación (no en la vela de rebote) mejora WR?
+
 ---
 
 ## Resumen — matriz rápida
@@ -73,10 +81,11 @@
 | Falling knife | trend fuerte + RSI extremo contra | No comprar el rebote | hipótesis (recurrente) |
 | News stale | >30min vieja | Saltear | ✓ evidencia |
 | Volatilidad extrema | ATR >6p | Esperar | ✓ evidencia |
+| Entrada contra rebote | dir correcta + entra en vela de rebote + SL ~1×ATR | Esperar agotamiento del rebote + SL ≥1.5×ATR | hipótesis (entry quality) |
 
 ## Cómo evoluciona este doc
 Cada checkpoint (viernes) o hallazgo nuevo: agregar régimen o mover una `[HIPÓTESIS]` a `[EVIDENCIA]` SOLO si pasó el gate de significancia. Si una hipótesis se refuta (resulta ruido), anotarlo también — los "no funcionó" valen tanto como los "sí".
 
 ---
 **Creado**: 2 Jun 2026 (tras día 1/6 que destapó los regímenes 4 y 5).
-**Última actualización**: 2 Jun 2026.
+**Última actualización**: 3 Jun 2026 — +Régimen 8 (entry quality: #565 PUT dirección correcta pero entró sobre rebote con SL pegado → stopeada antes de acertar).
