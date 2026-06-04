@@ -28,6 +28,22 @@ Bot de trading automático EUR/USD scalping M5, integrado con MetaTrader 5 (cuen
 
 Cómo trabajar AIdan con asistentes IA. Persiste entre sesiones.
 
+> **🧭 PRINCIPIO RECTOR (acordado 3 Jun 2026): un fix que no arregla nada, EMPEORA.**
+> En un sistema de trading en vivo los cambios NO son gratis: un filtro que no separa
+> ganar/perder recorta frecuencia para nada; un modelo que no es mejor agrega falsa
+> confianza; un tweak sobre ruido sobre-ajusta. Por eso, antes de TODO cambio:
+> 1. **Pensarlo dos veces.** ¿Esto realmente arregla algo, o lo creo porque quiero que arregle?
+> 2. **Cuestionar la propia evaluación.** ¿Puede estar mal MI medición? ¿Cuál es la medición
+>    LIMPIA (real, no simulada; medida en el momento, no reconstruida)? Si la muestra limpia
+>    es chica → la respuesta honesta es "no sé" → no actuar.
+> 3. **La carga de la prueba la tiene el cambio.** Default = NO tocar. Solo cambiar con
+>    evidencia real y verificada.
+> 4. **Pero conclusión sin acción tampoco sirve**: cuando la evidencia (real) alcanza, jugarse
+>    un juicio calibrado y actuar — y revisarlo con datos nuevos. Ni sobre-confianza ni parálisis.
+> Track record que lo justifica (3 Jun): bounce-skip (habría cortado las mejores trades),
+> ML predictor v3.35.0 (espejismo), gates v3.34.0 (ruido) — los tres "arreglos" habrían
+> empeorado AIdan, frenados por cuestionar antes de aplicar.
+
 1. **Verificación adversarial de hallazgos estadísticos (ANTES de proponer/aplicar)**.
    Todo filtro, block de bucket, o cambio de param pasa primero por un check escéptico:
    - Reportar siempre: `n`, WR del subset vs **baseline 37.4% (294 trades archive)**, p-value de binomial test, e intervalo de confianza 95%.
