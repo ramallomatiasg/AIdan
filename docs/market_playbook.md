@@ -73,19 +73,16 @@
   - `1.5-2.0×` (ancho): n=30, WR **23%**, avg **-$1.78** (PEOR)
   - `>2.0×`: n=29, WR 31%, avg -$0.61
   El SL ancho rescata algún rebote PERO sangra más en los trades genuinamente equivocados → neto peor. El SL pegado es el de mejor WR. **No tocar el ancho del SL.** El #565 fue hindsight: para cada #565 salvado, varios otros pierden más. Queda como lección: la solución NO es el SL.
-- **❌❌ ARREGLO REFUTADO (3 Jun, auditoria con outcomes REALES) — NO saltar las bounce-entries.**
-  - `tools/validate_bounce_real.py` re-corrio el analisis usando el **`mt5_pnl` REAL** de cada trade (no el simulado), clasificando bounce/non-bounce igual:
-    - **Non-bounce (real): n=164, WR 34%, avg -$1.40**
-    - **Bounce (real): n=138, WR 43%, avg -$0.36**  ← MEJORES, no peores
-    - Significancia (real): bounce WR 43.5%, p=0.940, CI cruza baseline → NO significativo.
-  - **El backtest_entry_timing.py estaba SISTEMATICAMENTE MAL.** Uso outcomes SIMULADOS (sim_forward con horizonte fijo 90min + SL-first) que penalizaban de mas a los trades que arrancan adversos (= las bounce-entries). En la realidad esas trades se recuperaban (expiry real ~15min, fills, position manager). El sim invirtio el resultado: dijo bounce 22% WR cuando el real es 43%.
-  - **Si activabamos el skip, cortabamos las MEJORES trades (43%) y dejabamos las peores (34%) → AIdan PEOR.** El user lo cazo al cuestionar la validez de la simulacion.
-  - **Filtro APAGADO**: `SKIP_BOUNCE_ENTRY=off` en .env. El codigo v3.39.0 queda dormant.
-  - **LECCION METODOLOGICA (critica)**: un backtest con outcomes RE-SIMULADOS puede invertir la realidad. El gate de significancia NO salva de esto — corrio p=0.000 sobre datos simulados sesgados (garbage in, garbage out). **Regla nueva: validar SIEMPRE con mt5_pnl REAL, nunca con outcomes simulados, antes de creer un hallazgo.**
-  - Lo de abajo (el "✅ VALIDADO" con sim) queda como REGISTRO DEL ERROR, NO como conclusion vigente. La conclusion vigente es la de arriba.
-
-  ~~**Lo siguiente fue el analisis SIMULADO erroneo (conservado como leccion):**~~
-  - Backtest sim decia: non-bounce n=154 WR 45% +0.91p; bounce n=147 WR 22% -3.19p; p=0.000. **TODO esto era artefacto del sim** — refutado por outcomes reales arriba.
+- **⚠️ ESTADO REAL: NO CONCLUYENTE (3 Jun). NO activar el skip. Dejar shadow juntando datos limpios.**
+  - **Round 1 (sim)**: `backtest_entry_timing.py` con outcomes SIMULADOS dijo bounce 22% WR vs 45%, p=0.000. Parecia solido.
+  - **Round 2 (outcomes reales)**: `validate_bounce_real.py` con `mt5_pnl` REAL dio bounce 43% vs non-bounce 34% — lo OPUESTO. El sim invertia la realidad (sim_forward horizonte fijo + SL-first penaliza de mas a trades que arrancan adversos; en vivo se recuperan).
+  - **Round 3 (el user cuestiona TAMBIEN la validacion)**: tiene razon. Ambos analisis clasifican "bounce" RE-BAJANDO velas de MT5 y adivinando la vela de entrada (timezone server-vs-UTC + cual-vela exacta = FRAGIL). Solo el OUTCOME (mt5_pnl) es solido en round 2; la CLASIFICACION es dudosa en los dos. La unica fuente de clasificacion LIMPIA (candles_snapshot guardado al disparar) tiene **n=4** → no concluye nada.
+  - **CONCLUSION HONESTA**: NO sabemos si bounce-entries son buenas/malas/neutras. La afirmacion fuerte del sim (22%, p=0.000) NO es creible; "bounce es mejor" tampoco esta probado. El #565 fue 1 trade que perdio, no un patron demostrado.
+  - **DECISION (robusta en todos los casos)**: NO activar el skip (sin evidencia confiable a favor). `SKIP_BOUNCE_ENTRY=shadow` (registra sin actuar, inofensivo). El shadow clasifica EN VIVO al ejecutar (vela real, sin ambiguedad de timezone) + outcome real → es la UNICA fuente confiable. Acumular varias semanas; activar SOLO si el shadow log en vivo muestra señal robusta.
+  - **LECCION METODOLOGICA (doble, critica)**:
+    1. Backtest con outcomes RE-SIMULADOS puede INVERTIR la realidad. Validar siempre con `mt5_pnl` real.
+    2. El gate de significancia NO salva de datos sesgados (corrio p=0.000 sobre sim basura).
+    3. Aun con outcomes reales, si la CLASIFICACION del subset es fragil, el hallazgo no es confiable. La medicion limpia (clasificar en el momento, no re-bajar despues) es la unica que vale.
 
 ---
 
@@ -100,7 +97,7 @@
 | Falling knife | trend fuerte + RSI extremo contra | No comprar el rebote | hipótesis (recurrente) |
 | News stale | >30min vieja | Saltear | ✓ evidencia |
 | Volatilidad extrema | ATR >6p | Esperar | ✓ evidencia |
-| Entrada contra rebote | dir correcta + entra en vela de rebote | ~~saltar~~ NADA — REFUTADO (con outcomes reales bounce 43% > non-bounce 34%) | ❌ refutado |
+| Entrada contra rebote | dir correcta + entra en vela de rebote | NO concluyente — clasificacion fragil en ambos analisis (n limpio=4). No activar; shadow junta datos | ⚠️ inconcluso |
 
 ## Cómo evoluciona este doc
 Cada checkpoint (viernes) o hallazgo nuevo: agregar régimen o mover una `[HIPÓTESIS]` a `[EVIDENCIA]` SOLO si pasó el gate de significancia. Si una hipótesis se refuta (resulta ruido), anotarlo también — los "no funcionó" valen tanto como los "sí".
