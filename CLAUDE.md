@@ -35,6 +35,7 @@ Cómo trabajar AIdan con asistentes IA. Persiste entre sesiones.
    - Si hay sub-agentes disponibles: 3 verificadores independientes, decidir por mayoría.
    - Enchufar este paso **antes del shadow validation** del nightly_analyst (no gastar ciclos de shadow en ruido). Punto de inserción: `tools/nightly_analyst.py:_persist_changes()`.
    - Esto ataca el error recurrente ya documentado (hour gate, late breakout 3p removidos; block_conf_bucket 60-69 revertido; #7/#9/#13 rechazados — todos ruido de muestra chica).
+   - **⚠️ REGLA CRÍTICA (3 Jun 2026): validar con `mt5_pnl` REAL, NUNCA con outcomes simulados.** Caso bounce-entry: un backtest re-simulando SL/TP/expiry (horizonte fijo) dijo "bounce-entries 22% WR vs 45%, p=0.000" → parecía sólido. Auditado con el `mt5_pnl` REAL: bounce 43% vs non-bounce 34% — **el sim había INVERTIDO la realidad** (penalizaba de más a trades que arrancan adversos pero se recuperan en vivo). Casi cortamos las MEJORES trades. El gate de significancia NO protege contra esto (corrió p=0.000 sobre datos simulados sesgados: garbage in, garbage out). Antes de creer cualquier hallazgo de backtest, re-validar con el resultado real de los trades.
 
 2. **Backtests y sweeps en paralelo (sub-agentes / Workflow)**. Los barridos del backlog son INDEPENDIENTES → correr en paralelo, un sub-agente por combinación, recolectar y rankear por PF. Aplica a: #1 (RF/XGBoost vs LR), #2 (gate tuning vel×body ~30 combos), #3 (modelo por trigger_type). Nunca secuencial a mano.
 
@@ -784,7 +785,7 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 3 Jun 2026 — v3.39.0 (Skip bounce-entry en modo SHADOW: registra qué trades habría saltado por entrar sobre vela contra-direccion. Validado p=0.000. Validar en vivo unos días antes de activar).
+**Última actualización**: 3 Jun 2026 — v3.39.0 + auditoria. Skip bounce-entry **REFUTADO y APAGADO** (`SKIP_BOUNCE_ENTRY=off`). El backtest (outcomes simulados) decia bounce 22% WR; con `mt5_pnl` REAL es 43% vs 34% non-bounce → las bounce-entries son MEJORES. El sim invirtio la realidad. Lección: validar SIEMPRE con outcomes reales (ver Metodología punto 1). El código v3.39.0 queda dormant.
 
 ### Historial previo
 **31 May 2026 — v3.38.1 (sin cambio de código; cambios de config/research).**

@@ -73,18 +73,19 @@
   - `1.5-2.0×` (ancho): n=30, WR **23%**, avg **-$1.78** (PEOR)
   - `>2.0×`: n=29, WR 31%, avg -$0.61
   El SL ancho rescata algún rebote PERO sangra más en los trades genuinamente equivocados → neto peor. El SL pegado es el de mejor WR. **No tocar el ancho del SL.** El #565 fue hindsight: para cada #565 salvado, varios otros pierden más. Queda como lección: la solución NO es el SL.
-- **✅ ARREGLO VALIDADO (3 Jun) — SALTAR las bounce-entries** (`tools/backtest_entry_timing.py`, 306 trades, velas MT5):
-  - Definición "bounce entry": la vela de entrada cierra EN CONTRA de la dirección del trade (PUT entrando sobre vela verde, CALL sobre vela roja).
-  - **Non-bounce (entrada normal): n=154, WR 45%, +0.91p/trade, +139.6p total.**
-  - **Bounce (como #565): n=147, WR 22%, -3.19p/trade, -468.7p total.**
-  - **Gate de significancia: bounce WR 21.8%, CI [15.9%, 29.1%] enteramente debajo del baseline 37.4%, p=0.000 → SIGNIFICATIVO.** Es ~la mitad de los trades de AIdan.
-  - **Acción**: NO tomar trades cuya vela de entrada va en contra de la dirección. (Esperar confirmación reduce el daño pero sigue negativo -1.47p → SKIP > WAIT.)
-  - **Impacto estimado**: +468p al sacar los bounce-losers (aun con backtest inflado 20-30%, el gap 22% vs 45% es brutal).
-  - **NO es contaminacion cross-version** (verificado 3 Jun, split por epoca): el efecto se sostiene en las 4 epocas, incluida post-limpieza v3.38.x (non-bounce 64% vs bounce 33%). Abril 48/18, May1-19 44/24, May20-28 32/22, post-limpieza 64/33. En cada epoca bounce < non-bounce. Es estructural, no artefacto de fixes viejos.
-  - **Esperar NO alcanza** (verificado): esperar confirmacion -1.47p, entrar desde mejor precio (limite) -1.67p — ambas reducen el daño pero siguen NEGATIVAS. Solo SKIP llega a no-perder. La bounce-entry es setup malo de raiz, no buen trade mal entrado.
-  - **NO hay subgrupo salvable** (segmentado 3 Jun): bounce-entries son malas en TODO corte — with-trend (n=61, 18% WR) igual de malas que counter-trend (n=39, 21%); todos los triggers con muestra (structure 21%, news 19%) signif. peores; RSI medio y extremo ambos malos. No existe version quirurgica que mantenga frecuencia sin quedarse con perdedores → el corte completo se justifica.
-  - **Frecuencia**: corta ~50% de los trades PERO son los que sangran (22% WR, -3.19p). El 50% que queda es +0.89p (post-limpieza 64% WR). Menos trades, pero los que ganan.
-  - **Pendiente**: implementar filtro 'skip bounce-entry' con flag + shadow (no confiar 100% en backtest — nos paso con el ML predictor v3.35.0). Deteccion idéntica al backtest: vela de entrada (ultima cerrada al disparar) cierra en contra de la direccion.
+- **❌❌ ARREGLO REFUTADO (3 Jun, auditoria con outcomes REALES) — NO saltar las bounce-entries.**
+  - `tools/validate_bounce_real.py` re-corrio el analisis usando el **`mt5_pnl` REAL** de cada trade (no el simulado), clasificando bounce/non-bounce igual:
+    - **Non-bounce (real): n=164, WR 34%, avg -$1.40**
+    - **Bounce (real): n=138, WR 43%, avg -$0.36**  ← MEJORES, no peores
+    - Significancia (real): bounce WR 43.5%, p=0.940, CI cruza baseline → NO significativo.
+  - **El backtest_entry_timing.py estaba SISTEMATICAMENTE MAL.** Uso outcomes SIMULADOS (sim_forward con horizonte fijo 90min + SL-first) que penalizaban de mas a los trades que arrancan adversos (= las bounce-entries). En la realidad esas trades se recuperaban (expiry real ~15min, fills, position manager). El sim invirtio el resultado: dijo bounce 22% WR cuando el real es 43%.
+  - **Si activabamos el skip, cortabamos las MEJORES trades (43%) y dejabamos las peores (34%) → AIdan PEOR.** El user lo cazo al cuestionar la validez de la simulacion.
+  - **Filtro APAGADO**: `SKIP_BOUNCE_ENTRY=off` en .env. El codigo v3.39.0 queda dormant.
+  - **LECCION METODOLOGICA (critica)**: un backtest con outcomes RE-SIMULADOS puede invertir la realidad. El gate de significancia NO salva de esto — corrio p=0.000 sobre datos simulados sesgados (garbage in, garbage out). **Regla nueva: validar SIEMPRE con mt5_pnl REAL, nunca con outcomes simulados, antes de creer un hallazgo.**
+  - Lo de abajo (el "✅ VALIDADO" con sim) queda como REGISTRO DEL ERROR, NO como conclusion vigente. La conclusion vigente es la de arriba.
+
+  ~~**Lo siguiente fue el analisis SIMULADO erroneo (conservado como leccion):**~~
+  - Backtest sim decia: non-bounce n=154 WR 45% +0.91p; bounce n=147 WR 22% -3.19p; p=0.000. **TODO esto era artefacto del sim** — refutado por outcomes reales arriba.
 
 ---
 
@@ -99,7 +100,7 @@
 | Falling knife | trend fuerte + RSI extremo contra | No comprar el rebote | hipótesis (recurrente) |
 | News stale | >30min vieja | Saltear | ✓ evidencia |
 | Volatilidad extrema | ATR >6p | Esperar | ✓ evidencia |
-| Entrada contra rebote | dir correcta + entra en vela de rebote + SL ~1×ATR | Esperar agotamiento del rebote + SL ≥1.5×ATR | hipótesis (entry quality) |
+| Entrada contra rebote | dir correcta + entra en vela de rebote | ~~saltar~~ NADA — REFUTADO (con outcomes reales bounce 43% > non-bounce 34%) | ❌ refutado |
 
 ## Cómo evoluciona este doc
 Cada checkpoint (viernes) o hallazgo nuevo: agregar régimen o mover una `[HIPÓTESIS]` a `[EVIDENCIA]` SOLO si pasó el gate de significancia. Si una hipótesis se refuta (resulta ruido), anotarlo también — los "no funcionó" valen tanto como los "sí".
