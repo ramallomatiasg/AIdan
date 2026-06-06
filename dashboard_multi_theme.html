@@ -1030,8 +1030,8 @@
     <!-- Performance bar -->
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
         <span style="font-size:16px;font-weight:700;color:var(--text-primary);">&#x1F3AF; Estrategias Auto-Generadas</span>
-        <span style="font-size:16px;color:var(--text-muted);">Max 6 · Noticias + Estructura de mercado</span>
-        <span id="structureStatus" style="font-size:16px;color:var(--accent-cyan);"></span>
+        <span style="display:none;">Max 6</span>
+        <span id="structureStatus" style="display:none;"></span>
         <!-- Strategy filter toggle -->
         <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden;font-size:14px;" id="stratFilterBar">
             <button class="strat-filter-btn active" data-filter="all" onclick="setStratFilter('all')">Todas</button>
@@ -1063,40 +1063,33 @@
 
     <!-- v3.19.0 Track Comparison Panel (M5 vs M15) - hidden until M15 has data -->
     <div id="trackComparePanel" style="display:none;background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;margin-bottom:14px;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-            <span style="font-weight:700;font-size:16px;color:var(--text-primary);">&#x1F50D; COMPARATIVA DUAL-TRACK</span>
-            <span style="font-size:13px;color:var(--text-muted);">Decision viernes / +30 trades</span>
-        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
             <div id="trackACard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #22c55e;">
-                <div style="font-weight:700;font-size:14px;color:#22c55e;margin-bottom:6px;">TRACK A &mdash; M5 (produccion)</div>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;font-size:13px;" id="trackAStats">
+                <div style="font-weight:700;font-size:17px;color:#22c55e;margin-bottom:6px;">TRACK A &mdash; M5 (produccion)</div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:16px;" id="trackAStats">
                     <div>Trades: <span id="taTotal">-</span></div>
                     <div>WR: <span id="taWR">-</span></div>
                     <div>PnL: <span id="taPnL">-</span></div>
-                    <div>PF: <span id="taPF">-</span></div>
                     <div>Avg W: <span id="taWin">-</span></div>
                     <div>Avg L: <span id="taLoss">-</span></div>
                 </div>
             </div>
             <div id="trackBCard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #d97706;">
-                <div style="font-weight:700;font-size:14px;color:#d97706;margin-bottom:6px;">&#x23F0; TRACK B &mdash; M15 (experimental)</div>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;font-size:13px;" id="trackBStats">
+                <div style="font-weight:700;font-size:17px;color:#d97706;margin-bottom:6px;">&#x23F0; TRACK B &mdash; M15 (experimental)</div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:16px;" id="trackBStats">
                     <div>Trades: <span id="tbTotal">-</span></div>
                     <div>WR: <span id="tbWR">-</span></div>
                     <div>PnL: <span id="tbPnL">-</span></div>
-                    <div>PF: <span id="tbPF">-</span></div>
                     <div>Avg W: <span id="tbWin">-</span></div>
                     <div>Avg L: <span id="tbLoss">-</span></div>
                 </div>
             </div>
             <div id="trackCCard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #7c3aed;">
-                <div style="font-weight:700;font-size:14px;color:#7c3aed;margin-bottom:6px;">&#x1F310; TRACK C &mdash; H1 (experimental)</div>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;font-size:13px;" id="trackCStats">
+                <div style="font-weight:700;font-size:17px;color:#7c3aed;margin-bottom:6px;">&#x1F310; TRACK C &mdash; H1 (experimental)</div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:16px;" id="trackCStats">
                     <div>Trades: <span id="tcTotal">-</span></div>
                     <div>WR: <span id="tcWR">-</span></div>
                     <div>PnL: <span id="tcPnL">-</span></div>
-                    <div>PF: <span id="tcPF">-</span></div>
                     <div>Avg W: <span id="tcWin">-</span></div>
                     <div>Avg L: <span id="tcLoss">-</span></div>
                 </div>
@@ -1130,7 +1123,7 @@
                 <div id="smcM5Detail" style="font-size:16px;color:var(--text-muted);line-height:1.3;"></div>
             </div>
         </div>
-        <div id="smcZonesInfo" style="margin-top:6px;font-size:16px;color:var(--text-muted);"></div>
+        <div id="smcZonesInfo" style="display:none;"></div>
     </div>
 
     <!-- Strategy cards grid -->
@@ -2457,14 +2450,12 @@
             document.getElementById('taPnL').textContent = fmtPnL(ta.sum_pnl || 0);
             document.getElementById('taWin').textContent = ta.avg_win_pips ? fmtPips(ta.avg_win_pips) : '-';
             document.getElementById('taLoss').textContent = ta.avg_loss_pips ? fmtPips(ta.avg_loss_pips) : '-';
-            document.getElementById('taPF').textContent = (ta.profit_factor >= 999) ? '∞' : (ta.profit_factor || '-');
 
             document.getElementById('tbTotal').textContent = tb.total || 0;
             document.getElementById('tbWR').textContent = (tb.win_rate || 0) + '%';
             document.getElementById('tbPnL').textContent = fmtPnL(tb.sum_pnl || 0);
             document.getElementById('tbWin').textContent = tb.avg_win_pips ? fmtPips(tb.avg_win_pips) : '-';
             document.getElementById('tbLoss').textContent = tb.avg_loss_pips ? fmtPips(tb.avg_loss_pips) : '-';
-            document.getElementById('tbPF').textContent = (tb.profit_factor >= 999) ? '∞' : (tb.profit_factor || '-');
 
             // Track C H1
             document.getElementById('tcTotal').textContent = tc.total || 0;
@@ -2472,7 +2463,6 @@
             document.getElementById('tcPnL').textContent = fmtPnL(tc.sum_pnl || 0);
             document.getElementById('tcWin').textContent = tc.avg_win_pips ? fmtPips(tc.avg_win_pips) : '-';
             document.getElementById('tcLoss').textContent = tc.avg_loss_pips ? fmtPips(tc.avg_loss_pips) : '-';
-            document.getElementById('tcPF').textContent = (tc.profit_factor >= 999) ? '∞' : (tc.profit_factor || '-');
 
             // v3.19.0 Day 5: verdict con criterios robustos + alert destacado
             const v = document.getElementById('trackVerdict');
