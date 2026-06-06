@@ -626,8 +626,10 @@ class TechnicalAnalyzer:
                 if prev_close > 0 and abs(price - prev_close) < 0.0005:  # within 5p of prev close
                     conf -= 5  # price at reversion zone — uncertain direction
 
-            # ── 10. Random jitter to avoid identical values (±3) ──
-            conf += random.randint(-3, 3)
+            # ── 10. (v3.39.1) Jitter random ±3 REMOVIDO: hacia NO determinista la
+            # decision de ejecutar/no-ejecutar en el borde de min_confidence (mismo
+            # estado de mercado -> trade o no-trade al azar). Bug confirmado por auditoria.
+            # La confianza ahora es deterministica y reproducible.
 
             return max(20, min(95, conf))
 
@@ -1359,10 +1361,13 @@ class TechnicalAnalyzer:
             final_sl = max(effective_prof_sl, SL_HARD_MIN)
 
         # TP: maintain R:R ratio from profile or use learning override
+        # v3.39.1 FIX: rr_ratio se define SIEMPRE (antes solo en el else, y el bloque
+        # estructural de abajo lo usaba incondicionalmente -> NameError cuando habia
+        # learning_tp_override + ensanche de SL estructural). Bug confirmado por auditoria.
+        rr_ratio = prof_tp / prof_sl if prof_sl > 0 else 4.0
         if learning_tp_override:
             final_tp = round(learning_tp_override, 1)
         else:
-            rr_ratio = prof_tp / prof_sl if prof_sl > 0 else 4.0
             final_tp = round(final_sl * rr_ratio, 1)
 
         # Optionally place SL behind nearest structural level (can WIDEN, not narrow)
@@ -1386,7 +1391,8 @@ class TechnicalAnalyzer:
                 structural_sl = (price - nearest_sup) * 10000 + 1.0
                 if structural_sl > final_sl and structural_sl <= sl_max_struct:
                     final_sl = round(structural_sl, 1)
-                    final_tp = round(final_sl * rr_ratio, 1)
+                    if not learning_tp_override:  # v3.39.1: preservar el TP del learning
+                        final_tp = round(final_sl * rr_ratio, 1)
         elif direction == 'PUT' and resistances:
             above_res = [r for r in resistances if r > price]
             if above_res:
@@ -1394,7 +1400,8 @@ class TechnicalAnalyzer:
                 structural_sl = (nearest_res - price) * 10000 + 1.0
                 if structural_sl > final_sl and structural_sl <= sl_max_struct:
                     final_sl = round(structural_sl, 1)
-                    final_tp = round(final_sl * rr_ratio, 1)
+                    if not learning_tp_override:  # v3.39.1: preservar el TP del learning
+                        final_tp = round(final_sl * rr_ratio, 1)
 
         # TP priority: next structural level if reachable with min R:R 1:1.5, else ATR cap
         # Structural TP hits natural levels (resistance for CALL, support for PUT) where price naturally pauses

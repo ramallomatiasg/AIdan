@@ -1136,6 +1136,23 @@ class AIdan:
                         be_triggered = bool(row[11]) if len(row) > 11 and row[11] else False
                         if not current_price or not entry_price:
                             continue
+                        # v3.39.1 FIX: no evaluar con outcome SINTETICO (current_price) una
+                        # posicion que sigue ABIERTA en MT5 -> reintroducia el win-amputation
+                        # v3.9.0 / P&L fantasma en trade_archive en cada restart. Si la posicion
+                        # sigue viva en MT5, la salteamos y deja que el main loop la cierre/evalue
+                        # con el P&L real. (Bug confirmado por auditoria.)
+                        try:
+                            if mt5_exec and mt5_exec.is_ready() and mt5_exec._mt5:
+                                _c2 = _sq3.connect(DB_PATH)
+                                _r2 = _c2.execute("SELECT mt5_status, mt5_ticket FROM auto_strategies WHERE id=?", (sid,)).fetchone()
+                                _c2.close()
+                                if _r2 and _r2[0] == 'filled' and _r2[1]:
+                                    _pos = mt5_exec._mt5.positions_get(ticket=int(_r2[1]))
+                                    if _pos and len(_pos) > 0:
+                                        logger.info(f"Startup eval: #{sid} sigue ABIERTA en MT5 -> skip (la maneja el main loop con P&L real)")
+                                        continue
+                        except Exception as _se:
+                            logger.debug(f"Startup MT5-open check #{sid}: {_se}")
                         hit_tp, hit_sl, hit_be = False, False, False
                         # SL/TP fijos — trailing desactivado.
                         # Solo trackea HWM para learning.
@@ -3159,9 +3176,9 @@ class AIdan:
                                     _m5_state_now = tech.get_market_state()
                                     _m5_trend_now = _m5_state_now.get('trend', 'neutral')
                                     _m15_counter_both = (
-                                        _htf_bias_now and _htf_bias_now != 'neutral' and _m5_trend_now != 'neutral' and (
-                                            (_m15_dir == 'CALL' and _htf_bias_now == 'bearish' and _m5_trend_now == 'bearish') or
-                                            (_m15_dir == 'PUT' and _htf_bias_now == 'bullish' and _m5_trend_now == 'bullish')
+                                        htf_bias and htf_bias != 'neutral' and _m5_trend_now != 'neutral' and (
+                                            (_m15_dir == 'CALL' and htf_bias == 'bearish' and _m5_trend_now == 'bearish') or
+                                            (_m15_dir == 'PUT' and htf_bias == 'bullish' and _m5_trend_now == 'bullish')
                                         )
                                     )
                                     # v3.19.1 — REMOVED conf ceiling. Era data M5 contaminada aplicada
@@ -3177,7 +3194,7 @@ class AIdan:
                                         pass
 
                                     if _m15_counter_both:
-                                        logger.info(f"M15: counter-both blocked {_m15_dir} (htf={_htf_bias_now} m5={_m5_trend_now})")
+                                        logger.info(f"M15: counter-both blocked {_m15_dir} (htf={htf_bias} m5={_m5_trend_now})")
                                     elif _m15_skip_dup:
                                         logger.info(f"M15: skipping {_m15_dir}, active opposite exists")
                                     else:
@@ -3208,7 +3225,7 @@ class AIdan:
                                                 'trend': _m15_state.get('trend'),
                                                 'trend_strength': _m15_state.get('trend_strength'),
                                                 'momentum': _m15_state.get('momentum'),
-                                                'htf_bias': _htf_bias_now,
+                                                'htf_bias': htf_bias,
                                                 'timeframe': 'M15',
                                             })
                                             _m15_title = f"[M15-STRUCT] {_top.get('reason', '')[:200]}"
@@ -3295,9 +3312,9 @@ class AIdan:
                                     _m5_state_h1 = tech.get_market_state()
                                     _m5_trend_h1 = _m5_state_h1.get('trend', 'neutral')
                                     _h1_counter_both = (
-                                        _htf_bias_h1 and _htf_bias_h1 != 'neutral' and _m5_trend_h1 != 'neutral' and (
-                                            (_h1_dir == 'CALL' and _htf_bias_h1 == 'bearish' and _m5_trend_h1 == 'bearish') or
-                                            (_h1_dir == 'PUT' and _htf_bias_h1 == 'bullish' and _m5_trend_h1 == 'bullish')
+                                        htf_bias and htf_bias != 'neutral' and _m5_trend_h1 != 'neutral' and (
+                                            (_h1_dir == 'CALL' and htf_bias == 'bearish' and _m5_trend_h1 == 'bearish') or
+                                            (_h1_dir == 'PUT' and htf_bias == 'bullish' and _m5_trend_h1 == 'bullish')
                                         )
                                     )
                                     # Anti-spam: skip si hay opposite activa
@@ -3309,7 +3326,7 @@ class AIdan:
                                         pass
 
                                     if _h1_counter_both:
-                                        logger.info(f"H1: counter-both blocked {_h1_dir} (htf={_htf_bias_h1} m5={_m5_trend_h1})")
+                                        logger.info(f"H1: counter-both blocked {_h1_dir} (htf={htf_bias} m5={_m5_trend_h1})")
                                     elif _h1_skip_dup:
                                         logger.info(f"H1: skipping {_h1_dir}, active opposite exists")
                                     else:
@@ -3338,7 +3355,7 @@ class AIdan:
                                                 'trend': _h1_state.get('trend'),
                                                 'trend_strength': _h1_state.get('trend_strength'),
                                                 'momentum': _h1_state.get('momentum'),
-                                                'htf_bias': _htf_bias_h1,
+                                                'htf_bias': htf_bias,
                                                 'timeframe': 'H1',
                                             })
                                             _h1_title = f"[H1-STRUCT] {_h1_top.get('reason', '')[:200]}"
