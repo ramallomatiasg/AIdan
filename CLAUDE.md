@@ -804,7 +804,10 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 3 Jun 2026 — v3.39.0 + doble auditoria. Skip bounce-entry **NO CONCLUYENTE** (queda en `SKIP_BOUNCE_ENTRY=shadow`, no activar). Round 1 (sim): bounce 22% WR p=0.000. Round 2 (outcomes reales): 43% vs 34% — opuesto, el sim invertia. Round 3 (user cuestiona la validacion): ambos clasifican "bounce" re-bajando velas MT5 (timezone/cual-vela = fragil); clasificacion limpia tiene n=4 → no concluye. NO sabemos si bounce es bueno/malo. Decision robusta: no activar, dejar shadow juntando clasificacion LIMPIA en vivo varias semanas. Lección triple en Metodología punto 1.
+**Última actualización**: 5 Jun 2026 — CHECKPOINT semanal + decisión. Semana (por cierre, real): NETO +$10.52, 38 trades, WR 47% (vs histórico 37% y sangrado -$93/sem). Veredicto calibrado: sangrado FRENADO (confianza alta, real) pero NO probado rentable (margen microscópico, n chico). El mayor logro fue el PROCESO (limpieza de overfit + metodología + 2 casi-desastres evitados). **DECISIÓN (fase demo = sandbox, testear en vivo sin miedo a plata ficticia, 1 cambio a la vez): Experimento #1 = Position Manager ACTIVADO** (`POSITION_MANAGER_MODE=active`). Ataca el problema #1 (expiry mata trades buenos), solo validable en vivo (contrafáctico=sim=trampa). Medir 2 semanas avg_win/WR/PF vs previas; revertir a 'log' si empeora. Bounce sigue en shadow; ATR ceiling y params overfit en cola.
+
+### Historial bounce-entry (3 Jun)
+Skip bounce-entry **NO CONCLUYENTE** (queda en `SKIP_BOUNCE_ENTRY=shadow`, no activar). Round 1 (sim): bounce 22% WR p=0.000. Round 2 (outcomes reales): 43% vs 34% — opuesto, el sim invertia. Round 3 (user cuestiona la validacion): ambos clasifican "bounce" re-bajando velas MT5 (timezone/cual-vela = fragil); clasificacion limpia tiene n=4 → no concluye. NO sabemos si bounce es bueno/malo. Decision robusta: no activar, dejar shadow juntando clasificacion LIMPIA en vivo varias semanas. Lección triple en Metodología punto 1.
 
 ### Historial previo
 **31 May 2026 — v3.38.1 (sin cambio de código; cambios de config/research).**
