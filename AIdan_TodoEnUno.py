@@ -1373,6 +1373,7 @@ class AIdan:
                             for _act_id in activated:
                                 try:
                                     import sqlite3 as _sq3
+                                    from datetime import timedelta  # v3.40.1 FIX: timedelta no estaba en scope -> NameError en el UPDATE de l.1408 (re-pricing/expiry de pre-plan fallaba en silencio dentro del try). Detectado por pyflakes.
                                     _act_price = tech.get_market_state().get('price', 0)
                                     if _act_price > 0:
                                         _pip = 0.0001
