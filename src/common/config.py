@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.40.3"
+APP_VERSION = "3.40.4"
 
 class Config:
     VERSION = APP_VERSION
@@ -150,6 +150,12 @@ class Config:
     # sin subgrupo salvable. Es ~la mitad de los trades de AIdan (los que sangran).
     # MODE: off | shadow (registra "habria saltado" sin actuar, DEFAULT) | active (saltea).
     SKIP_BOUNCE_ENTRY = (os.getenv("SKIP_BOUNCE_ENTRY", "shadow") or "shadow").lower()
+
+    # v3.40.4 — Calendar (straddle pre-news) mode. El trigger 'calendar' nunca opero (0/325):
+    # el feed FF se auto-baneo (hammering -> 429) y ademas el straddle esta roto (anti-
+    # contradiccion bloquea la 2da pata -> solo CALL). off | shadow (loguea el straddle SIN
+    # operar, DEFAULT) | active (opera — requiere fix del straddle de ambas patas antes de usar).
+    CALENDAR_MODE = (os.getenv("CALENDAR_MODE", "shadow") or "shadow").lower()
 
     # v3.36.0 Fase 2 — LLM Exit Advisor. Sub-flag del Position Manager.
     # Cuando true Y el manager esta en zona ambigua (soft-expiry HOLD), consulta a

@@ -1983,6 +1983,25 @@ class AIdan:
                                         news_title_cal = f"[CALENDARIO] Pre-{evt_name} ({evt_impact} Impact) - {side['label']}"
                                         prof_name = profile.get('name', 'default')
 
+                                        # v3.40.4 — CALENDAR_MODE gate. Default 'shadow': loguea el
+                                        # straddle (ambas patas) SIN operar. En shadow no se crea la
+                                        # estrategia CALL, asi que la anti-contradiccion no bloquea la
+                                        # PUT -> vemos el straddle completo (que en vivo esta roto).
+                                        try:
+                                            from src.common.config import Config as _CalCfg
+                                            _cal_mode = getattr(_CalCfg, 'CALENDAR_MODE', 'shadow')
+                                        except Exception:
+                                            _cal_mode = 'shadow'
+                                        if _cal_mode != 'active':
+                                            if _cal_mode == 'shadow':
+                                                try:
+                                                    from src.common.db import log_calendar_shadow
+                                                    log_calendar_shadow(evt_name, evt_impact, direction, entry_px, sl, tp, conf, int(minutes_until))
+                                                    logger.info(f"[CALENDAR shadow] {direction} {evt_name} ({evt_impact}) @ {entry_px:.5f} conf={conf} SL={sl:.5f} TP={tp:.5f} — NO operado")
+                                                except Exception as _cse:
+                                                    logger.debug(f"calendar shadow log: {_cse}")
+                                            continue
+
                                         # Dedup: skip if similar calendar strategy exists
                                         if has_recent_similar_strategy(direction, entry_px, 'calendar', 60):
                                             logger.info(f"Dedup: skipping {direction} calendar near {entry_px:.5f}")

@@ -2124,16 +2124,26 @@ class ChatRequest(BaseModel):
 
 # ── Economic Calendar (Forex Factory free JSON) ──
 _calendar_cache = {"events": [], "ts": 0}
+_CAL_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 def _fetch_calendar_events():
-    """Fetch economic calendar from Forex Factory free JSON"""
+    """Fetch economic calendar from Forex Factory free JSON.
+    v3.40.4: FF limita a ~1 load/hora por IP. El cache viejo solo cacheaba exitos (`and events`),
+    asi que con events vacio re-fetcheaba CADA ciclo -> auto-ban 429. Ahora cachea el intento por
+    1h SIEMPRE (exito o fallo) + User-Agent de navegador + loguea respuestas no-200 (antes silencio)."""
     import time as _time
     now = _time.time()
-    if now - _calendar_cache["ts"] < 3600 and _calendar_cache["events"]:
+    if now - _calendar_cache["ts"] < 3600:
         return _calendar_cache["events"]
+    _calendar_cache["ts"] = now  # marca el intento ya: respeta el rate-limit aunque falle
 
     try:
-        resp = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.json", timeout=10)
+        resp = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+                            headers=_CAL_HEADERS, timeout=10)
         if resp.status_code == 200:
             all_events = resp.json()
             from datetime import datetime, timezone, timedelta
@@ -2166,8 +2176,9 @@ def _fetch_calendar_events():
                 })
 
             _calendar_cache["events"] = filtered
-            _calendar_cache["ts"] = now
             return filtered
+        else:
+            logger.warning(f"Calendar feed non-200: HTTP {resp.status_code} (FF rate-limit/throttle) — usando cache ({len(_calendar_cache['events'])} ev); reintento en 1h")
     except Exception as e:
         logger.warning(f"Calendar fetch failed: {e}")
 

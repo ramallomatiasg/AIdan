@@ -511,6 +511,22 @@ def init_db():
         )
     """)
 
+    # v3.40.4 — Calendar shadow log: el straddle que 'calendar' generaria (ambas patas) SIN operar.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS calendar_shadow_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_name TEXT,
+            event_impact TEXT,
+            direction TEXT,
+            entry_price REAL,
+            stop_loss REAL,
+            take_profit REAL,
+            confidence REAL,
+            minutes_until INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.36.0 — Live Position Manager log (Fase 1).
     # Registra cada decision del gestor (HOLD/CLOSE_*) por posicion. En modo 'log'
     # solo registra (executed=0) para shadow validation; en 'active' executed=1.
@@ -1992,6 +2008,24 @@ def log_bounce_decision(strategy_id, direction, trigger_type, candle_open,
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (strategy_id, direction, trigger_type, candle_open, candle_close,
               1 if is_bounce else 0, mode, 1 if skipped else 0))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def log_calendar_shadow(event_name, event_impact, direction, entry_price,
+                        stop_loss, take_profit, confidence, minutes_until):
+    """v3.40.4 — Persiste la senal de straddle que 'calendar' generaria en shadow (sin operar)."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            INSERT INTO calendar_shadow_log
+                (event_name, event_impact, direction, entry_price, stop_loss,
+                 take_profit, confidence, minutes_until)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (event_name, event_impact, direction, entry_price, stop_loss,
+              take_profit, confidence, minutes_until))
         conn.commit()
         conn.close()
     except Exception:
