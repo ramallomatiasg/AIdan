@@ -190,8 +190,10 @@ def _query_subset(change_type: str, params: dict, db_path: str = None):
         st = params.get('setup_type', '')
         where = "(trigger_type = ? OR setup_type = ?)"
         args = [st, st]
-        # direccion depende del signo del ajuste
-        claim = 'better' if params.get('adjustment', 0) >= 0 else 'worse'
+        # direccion depende del signo del ajuste.
+        # v3.40.3 FIX: el sistema entero usa 'delta' (prompts LLM, change_manager, shadow);
+        # 'adjustment' nunca venia → el gate corria la hipotesis direccional equivocada.
+        claim = 'better' if params.get('delta', params.get('adjustment', 0)) >= 0 else 'worse'
     else:
         # block_pattern, tune_optimizer_param, adjust_min_confidence_per_track:
         # no mapean a un subset simple -> no verificable por este metodo

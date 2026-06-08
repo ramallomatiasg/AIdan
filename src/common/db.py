@@ -3169,7 +3169,10 @@ def update_pending_change_status(change_id, new_status, **extra_fields):
         'reverted': 'reverted_at',
     }
     if new_status in ts_map:
-        set_parts.append(f"{ts_map[new_status]} = CURRENT_TIMESTAMP")
+        # v3.40.3 FIX: sellar con now_ar() (AR/UTC-3) en vez de CURRENT_TIMESTAMP (UTC).
+        # created_at se guarda en AR; mezclar UTC desfasaba ~3h el monitor de auto-revert.
+        set_parts.append(f"{ts_map[new_status]} = ?")
+        set_values.append(now_ar())
 
     for k, v in extra_fields.items():
         set_parts.append(f"{k} = ?")

@@ -24,6 +24,40 @@ Bot de trading automático EUR/USD scalping M5, integrado con MetaTrader 5 (cuen
 
 ---
 
+## 📌 NOTAS / Hilos abiertos de la sesión (REVISAR antes de cada acción)
+
+> **Acordado 8 Jun 2026.** El user pidió: anotar acá los hilos abiertos y **revisarlos cada vez que vayamos a hacer algo**, para no dejar cosas tiradas. Regla: hilo cerrado → marcar ✅ y bajar al historial; hilo nuevo → agregarlo.
+
+**Experimentos en vivo (midiendo — NO tocar sin data nueva):**
+- [ ] **Position Manager (experimento #1)** · `POSITION_MANAGER_MODE=active`. Medir ~2 sem (desde 5 Jun): avg_win / WR / PF vs baseline; revertir a `log` si empeora. *Obs 8 Jun:* el PM es **pasivo en perdedores** (sostuvo #580 de −3.6p a −12.6p hasta expiry); su valor solo aparecería en **ganadores lentos** (profit-lock arma a 60% TP). Falta ver un ganador lento para juzgarlo. No cambiar reglas por n=1.
+- [ ] **Bounce-entry** · `SKIP_BOUNCE_ENTRY=shadow`. Juntar clasificación **limpia** en vivo (log al ejecutar, no reconstruida). No activar sin señal robusta varias semanas. Clasificación retrospectiva = frágil.
+
+**Deudas técnicas / gaps:**
+- [ ] **Evaluation gap del news LLM** — Groq malinterpreta news (negaciones de bancos centrales, problema estructural #3) y **no medimos cuán seguido**. Gap de evaluación legítimo (lección LinkedIn 8 Jun). Idea: medir tasa de error con muestra etiquetada. No urgente.
+- [ ] **OLLAMA_API/URL/MODEL sin definir** — GUI-only, no afecta trading. Spawneado como task aparte. Baja prioridad.
+- [ ] **Sincronizar CLAUDE.md ↔ APP_VERSION** — tabla de versiones debe coincidir con `Config.APP_VERSION` (hoy 3.40.2). Regla de mantenimiento.
+
+**Auditoría 8 Jun (multi-agente, 5 frentes) — hallazgos CONFIRMados (ninguno rompe trading HOY):**
+- [x] ✅ **[HIGH] Significance gate `adjustment` vs `delta`** — RESUELTO v3.40.3 (`significance.py:194`): ahora lee `delta` (fallback `adjustment`). Testeado funcional: delta<0→worse, delta>0→better.
+- [x] ✅ **[HIGH] Thread del PM con imports sin guard** — RESUELTO v3.40.3 (`AIdan_TodoEnUno.py:3588`): setup envuelto en try/except con log FATAL. Verificado en vivo: PM arranca y gestiona #585.
+- [x] ✅ **[MED] Timezone applied_at/reverted_at** — RESUELTO v3.40.3 (`db.py:3172`): sella con `now_ar()` (AR), igual que `created_at`; el monitor de auto-revert ya no se desfasa 3h.
+- [x] ✅ **[MED] `smc_status` sin guard 1er ciclo** — RESUELTO v3.40.3 (`AIdan_TodoEnUno.py:2082`): init `smc_status = None` junto a htf_bias/daily_ctx.
+- [ ] **[LOW/hipótesis] `sync_pending_orders` 'expired' en respuesta vacía transitoria** (`mt5_executor.py:552-589`): clase v3.35.2 al revés. HIPÓTESIS (necesita confirmación runtime). Hardening: confirmar con `history_orders_get` antes de escribir 'expired'.
+- [ ] **[LOW] Idempotency `startswith` colisión** (`mt5_executor.py:164`): "AIdan #5" matchea #50/#565; hoy inalcanzable (siempre el id más nuevo). Fix defensa: match delimitado.
+- [ ] **[nota, NO fix apurado] HWM no lo persiste el PM** (`AIdan_TodoEnUno.py:3647`): R1 profit-lock depende de que el thread de trailing (1s) escriba `mt5_high_water`. Funciona hoy; el fix naive clobberea el trailing step → arreglar con helper HWM-only, sin apuro.
+
+**Verificado OK (no tocar):** los 3 fixes de v3.40.0 (htf_bias, rr_ratio, jitter) completos; SL/TP dirección + BE/trailing + lot sizing OK; guard del eval de arranque (phantom-P&L) presente; 3 tracks alcanzables y M15/H1 ya LOGUEAN errores; guard-rails sólidos (incl. force=True); binomial/Wilson correcto; sims no escriben prod; SQL parametrizado. **El #580 sostenido hasta expiry = diseño intencional** (R1 no arma sin +60% TP; antes de soft-expiry el único stop es el SL duro), NO bug.
+
+**Riesgo estructural transversal (los 5 agentes coinciden):** la CLASE de bug que mató M15 (excepción tragada a `logger.debug`) sigue presente arquitectónicamente aunque cada instancia puntual esté arreglada. Todo refactor futuro puede volver a fallar en silencio.
+
+**Bloqueado hasta tener data (NO tocar antes):**
+- [ ] **dynamic_conf** (triple-conteo, ±15 minSize, calibración) — solo con 300+ trades limpios. Antes = overfit garantizado.
+- [ ] **ATR ceiling + params overfit "en cola"** — revisar en checkpoint, no antes.
+
+**Principio que rige (lección LinkedIn 8 Jun):** *"most AI failures are **data & architecture** failures, not **model** failures"* → **confirma** la metodología: no perseguir sofisticación del modelo (ML ya refutado a n<300), sí invertir en calidad de datos + evaluación + plomería. El stack RAG (vector DB, embeddings) NO aplica a AIdan. Es validación, no to-do nuevo.
+
+---
+
 ## Metodología de trabajo con IA (acordado 29 May 2026)
 
 Cómo trabajar AIdan con asistentes IA. Persiste entre sesiones.
@@ -804,7 +838,9 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 
 ---
 
-**Última actualización**: 5 Jun 2026 — v3.40.0: arreglados 5 bugs confirmados por auditoría multi-agente. **CRÍTICO: M15 (Track B) y H1 (Track C) estaban MUERTOS desde el 23 May** (v3.33.0 borró `_htf_bias_now`/`_htf_bias_h1` pero dejó las lecturas → NameError silencioso en cada señal; 0 trades m15/h1 en 2 semanas — esto explicaba la baja frecuencia). Fix: → `htf_bias`. También: rr_ratio NameError en compute_adaptive_sl_tp (override learning + SL estructural), eval de arranque ignoraba MT5 (P&L fantasma en trade_archive), jitter random ±3 removido (decisiones deterministas), y preservación del TP override en ensanche estructural. dynamic_conf (triple-conteo, ±15 minSize, calibración) NO tocado (regla <300 trades). Re-baseline del experimento PM tras esto.
+**Última actualización**: 8 Jun 2026 — v3.40.3: 2da auditoría multi-agente (5 frentes, read-only). 4 hallazgos confirmados arreglados — (1) significance gate leía `params['adjustment']` cuando todo el sistema usa `delta` → corría la hipótesis direccional al revés (gate adversarial mal calibrado para `adjust_setup_confidence`); (2) thread del Position Manager con imports sin guard → ahora try/except + log FATAL (defiende contra la clase de bug que mató M15); (3) `applied_at`/`reverted_at` sellados en UTC vs `created_at` en AR → ahora `now_ar()` (el monitor de auto-revert ya no se desfasa 3h); (4) `smc_status` sin init → NameError 1er ciclo. Verificado en vivo: PM gestiona #585 (h1), 0 errores, fix significance testeado funcionalmente. Hardening menor (sync_pending_orders 'expired' transitorio, idempotency `startswith`, HWM coupling) documentado en NOTAS sin tocar (default = no tocar lo que anda). v3.40.2: chip `profile_name` fuera del dashboard. v3.40.1: timedelta NameError en pre-plan.
+
+**Historial 5 Jun 2026 — v3.40.0**: arreglados 5 bugs confirmados por auditoría multi-agente. **CRÍTICO: M15 (Track B) y H1 (Track C) estaban MUERTOS desde el 23 May** (v3.33.0 borró `_htf_bias_now`/`_htf_bias_h1` pero dejó las lecturas → NameError silencioso en cada señal; 0 trades m15/h1 en 2 semanas — esto explicaba la baja frecuencia). Fix: → `htf_bias`. También: rr_ratio NameError en compute_adaptive_sl_tp (override learning + SL estructural), eval de arranque ignoraba MT5 (P&L fantasma en trade_archive), jitter random ±3 removido (decisiones deterministas), y preservación del TP override en ensanche estructural. dynamic_conf (triple-conteo, ±15 minSize, calibración) NO tocado (regla <300 trades). Re-baseline del experimento PM tras esto.
 
 ### Checkpoint 5 Jun (pre-bugfix) Semana (por cierre, real): NETO +$10.52, 38 trades, WR 47% (vs histórico 37% y sangrado -$93/sem). Veredicto calibrado: sangrado FRENADO (confianza alta, real) pero NO probado rentable (margen microscópico, n chico). El mayor logro fue el PROCESO (limpieza de overfit + metodología + 2 casi-desastres evitados). **DECISIÓN (fase demo = sandbox, testear en vivo sin miedo a plata ficticia, 1 cambio a la vez): Experimento #1 = Position Manager ACTIVADO** (`POSITION_MANAGER_MODE=active`). Ataca el problema #1 (expiry mata trades buenos), solo validable en vivo (contrafáctico=sim=trampa). Medir 2 semanas avg_win/WR/PF vs previas; revertir a 'log' si empeora. Bounce sigue en shadow; ATR ceiling y params overfit en cola.
 

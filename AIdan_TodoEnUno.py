@@ -2081,6 +2081,7 @@ class AIdan:
                     # Fix: calcular ambos ANTES del bloque y mantener en scope para todos los tracks.
                     htf_bias = None
                     daily_ctx = None
+                    smc_status = None  # v3.40.3: init para evitar NameError 1er ciclo si SMC falla
                     try:
                         if smc:
                             smc.update()
@@ -3585,22 +3586,28 @@ class AIdan:
             _logger.info("Position manager: OFF")
             return
 
-        from src.broker.position_manager import (
-            PositionManager, PositionContext, ManagerDecision,
-            max_hold_for_trigger, CLOSE_ACTIONS, CLOSE_LLM, HOLD)
-        from src.common.db import (get_open_mt5_for_manager,
-                                   log_position_manager_decision, now_ar)
+        # v3.40.3: setup (imports + construccion) envuelto en try → si un refactor futuro
+        # rompe un simbolo, el thread NO muere en silencio (clase del bug que mato M15 2 semanas).
+        try:
+            from src.broker.position_manager import (
+                PositionManager, PositionContext, ManagerDecision,
+                max_hold_for_trigger, CLOSE_ACTIONS, CLOSE_LLM, HOLD)
+            from src.common.db import (get_open_mt5_for_manager,
+                                       log_position_manager_decision, now_ar)
 
-        pm = PositionManager(
-            profit_lock_arm=float(getattr(Config, 'PM_PROFIT_LOCK_ARM', 0.60)),
-            profit_lock_keep=float(getattr(Config, 'PM_PROFIT_LOCK_KEEP', 0.60)),
-        )
-        _llm_enabled = bool(getattr(Config, 'POSITION_MANAGER_LLM', False))
-        _llm_cooldown_s = float(getattr(Config, 'PM_LLM_COOLDOWN_MIN', 5)) * 60.0
-        _llm_last = {}  # sid -> monotonic_ts de la ultima consulta LLM
-        _logger.info(f"Position manager started (mode={mode}, interval={interval}s, llm={_llm_enabled})")
-        _PIP = 0.0001
-        _last_log = {}  # sid -> (action, monotonic_ts) para throttle de HOLD
+            pm = PositionManager(
+                profit_lock_arm=float(getattr(Config, 'PM_PROFIT_LOCK_ARM', 0.60)),
+                profit_lock_keep=float(getattr(Config, 'PM_PROFIT_LOCK_KEEP', 0.60)),
+            )
+            _llm_enabled = bool(getattr(Config, 'POSITION_MANAGER_LLM', False))
+            _llm_cooldown_s = float(getattr(Config, 'PM_LLM_COOLDOWN_MIN', 5)) * 60.0
+            _llm_last = {}  # sid -> monotonic_ts de la ultima consulta LLM
+            _logger.info(f"Position manager started (mode={mode}, interval={interval}s, llm={_llm_enabled})")
+            _PIP = 0.0001
+            _last_log = {}  # sid -> (action, monotonic_ts) para throttle de HOLD
+        except Exception as _pm_setup_err:
+            _logger.error(f"FATAL Position manager setup fallo — thread no arranca: {_pm_setup_err}", exc_info=True)
+            return
 
         while True:
             try:
