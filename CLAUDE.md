@@ -35,6 +35,8 @@ Bot de trading automático EUR/USD scalping M5, integrado con MetaTrader 5 (cuen
 **Deudas técnicas / gaps:**
 - [ ] **Evaluation gap del news LLM** — Groq malinterpreta news (negaciones de bancos centrales, problema estructural #3) y **no medimos cuán seguido**. Gap de evaluación legítimo (lección LinkedIn 8 Jun). Idea: medir tasa de error con muestra etiquetada. No urgente.
 - [ ] **OLLAMA_API/URL/MODEL sin definir** — GUI-only, no afecta trading. Spawneado como task aparte. Baja prioridad.
+- [ ] **`calendar` trigger MUERTO (0 trades en 325)** — investigado 8 Jun: depende del feed Forex Factory (`ff_calendar_thisweek.json`, `main.py:2136`) que devuelve **429**. AIdan chequea `if status==200`, cae al `return cache vacío` y **ni loguea** (el 429 no es excepción → swallow silencioso, clase conocida). NO es bug de lógica del trigger; es **data source caído**. UA de navegador NO lo arregla (IP throttled). Fix = feed/acceso nuevo, y activar calendar = estrategia straddle-news NUEVA sin validar → NO apurar. Mínimo útil: loguear el 429 (volver visible el silencio).
+- [x] ✅ **`smc` "dormido" = FALSA ALARMA (mía)** — investigado 8 Jun: `/smc-state` lo muestra VIVO (detectando zonas, "esperando confirmación M5" en zona demand); `smc.py` sin cambios desde v3.6.0; cadencia SIEMPRE fue lumpy (gaps de varios días normales). El "último trade 06-02" del archivo me asustó pero la data viva dice que está sano. NO tocar. Lección: chequear estado vivo antes de gritar bug.
 - [x] ✅ **Sincronizar CLAUDE.md ↔ APP_VERSION** — sincronizado en v3.40.3 (línea *Última actualización* coincide con `Config.APP_VERSION`). Regla permanente: re-chequear en cada bump.
 
 **Auditoría 8 Jun (multi-agente, 5 frentes) — hallazgos CONFIRMados (ninguno rompe trading HOY):**
