@@ -35,7 +35,7 @@ Bot de trading automático EUR/USD scalping M5, integrado con MetaTrader 5 (cuen
 **Deudas técnicas / gaps:**
 - [ ] **Evaluation gap del news LLM** — Groq malinterpreta news (negaciones de bancos centrales, problema estructural #3) y **no medimos cuán seguido**. Gap de evaluación legítimo (lección LinkedIn 8 Jun). Idea: medir tasa de error con muestra etiquetada. No urgente.
 - [ ] **OLLAMA_API/URL/MODEL sin definir** — GUI-only, no afecta trading. Spawneado como task aparte. Baja prioridad.
-- [ ] **Sincronizar CLAUDE.md ↔ APP_VERSION** — tabla de versiones debe coincidir con `Config.APP_VERSION` (hoy 3.40.2). Regla de mantenimiento.
+- [x] ✅ **Sincronizar CLAUDE.md ↔ APP_VERSION** — sincronizado en v3.40.3 (línea *Última actualización* coincide con `Config.APP_VERSION`). Regla permanente: re-chequear en cada bump.
 
 **Auditoría 8 Jun (multi-agente, 5 frentes) — hallazgos CONFIRMados (ninguno rompe trading HOY):**
 - [x] ✅ **[HIGH] Significance gate `adjustment` vs `delta`** — RESUELTO v3.40.3 (`significance.py:194`): ahora lee `delta` (fallback `adjustment`). Testeado funcional: delta<0→worse, delta>0→better.
