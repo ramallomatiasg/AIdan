@@ -426,6 +426,32 @@ def _plan_single_event(event, market_context):
         return None
 
 
+def _resolve_slot(items):
+    """v3.40.9 — Resuelve N planes del MISMO evento (ej. las 4 lineas del CPI) en UNO.
+    Premisa corregida: el confidence del LLM esta mal calibrado (conf 90 tuvo 0% WR), asi que
+    NO se elige por el numero mas alto. Se vota la DIRECCION (cada take = 1 voto); si hay EMPATE
+    la senal es incoherente -> None (no operar). Confianza consolidada = PROMEDIO de la direccion
+    ganadora (un lado mayormente debil con un outlier confiado NO sube); el gate conf-60 decide
+    al final. Devuelve (event, plan) elegido, o None si no hay direccion mayoritaria clara."""
+    if len(items) == 1:
+        return items[0]
+    from collections import Counter
+    votes = Counter(p['direction'] for _e, p in items)
+    ranked = votes.most_common()
+    if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+        return None  # empate de direcciones -> contradictorio -> no operar
+    win_dir = ranked[0][0]
+    win_items = [ep for ep in items if ep[1]['direction'] == win_dir]
+    avg_conf = sum((p.get('confidence', 0) or 0) for _e, p in win_items) / len(win_items)
+    # plan base = el take de mayor conf DENTRO de la direccion ganadora (para SL/TP/reasoning)
+    base_event, base_plan = sorted(win_items, key=lambda ep: ep[1].get('confidence', 0) or 0, reverse=True)[0]
+    chosen = dict(base_plan)
+    chosen['confidence'] = int(round(avg_conf))
+    chosen['reasoning'] = (f"[Consolidado: {win_dir} en {ranked[0][1]}/{len(items)} lineas del evento, "
+                           f"conf promedio {int(round(avg_conf))}] {base_plan.get('reasoning', '')}")[:500]
+    return (base_event, chosen)
+
+
 def plan_next_day_strategies(market_context=None):
     """
     Main entry: fetch tomorrow's HIGH impact events, plan strategies with Groq + Gemma 4.
@@ -510,16 +536,18 @@ def plan_next_day_strategies(market_context=None):
             continue
         slot_plans[_slot or event.get('event', '?')].append((event, plan))
 
-    # Un plan por slot: el de mayor confianza. Las lineas del mismo informe mueven el mercado
-    # una sola vez; quedarse con la senal mas fuerte evita los planes contradictorios.
+    # Resolver cada slot: votar la DIRECCION entre las N lineas del mismo evento -> UN plan
+    # (o ninguno si es contradictorio). NO se elige por el confidence mas alto: ese numero es
+    # auto-reportado por el LLM y esta mal calibrado (conf 90 -> 0% WR historico). Ver _resolve_slot.
+    from collections import Counter as _Counter
     for _slot, _items in slot_plans.items():
+        _chosen = _resolve_slot(_items)
+        if _chosen is None:
+            logger.info(f"Pre-planner: slot {_slot} CONTRADICTORIO {dict(_Counter(p['direction'] for _e, p in _items))} -> NO se crea plan (el LLM no resuelve a una direccion)")
+            continue
+        event, plan = _chosen
         if len(_items) > 1:
-            _dir_counts = {}
-            for _e, _p in _items:
-                _dir_counts[_p['direction']] = _dir_counts.get(_p['direction'], 0) + 1
-            _items = sorted(_items, key=lambda ep: ep[1].get('confidence', 0) or 0, reverse=True)
-            logger.info(f"Pre-planner: slot {_slot} tenia {len(_items)} lineas {_dir_counts} -> consolido en 1 (mayor conf: {_items[0][1]['direction']} {_items[0][1].get('confidence')})")
-        event, plan = _items[0]
+            logger.info(f"Pre-planner: slot {_slot} consolidado de {len(_items)} lineas {dict(_Counter(p['direction'] for _e, p in _items))} -> {plan['direction']} conf {plan['confidence']}")
         try:
             from src.common.db import add_planned_strategy
             strategy_id = add_planned_strategy(
