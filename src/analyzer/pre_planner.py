@@ -481,9 +481,16 @@ def plan_next_day_strategies(market_context=None):
         logger.debug(f"Pre-planner dedup check: {_pde}")
 
     from datetime import datetime as _dt, timezone as _tz_evt
+    from collections import defaultdict
+    # v3.40.8 — Consolidar por SLOT (un evento = un solo movimiento de mercado). Un mismo
+    # informe sale en varias lineas al MISMO horario (CPI y/y, m/m, Core y/y, Core m/m) ->
+    # antes se generaba un plan por linea (4 planes, a veces contradictorios). Causa: la dedup
+    # intra-run estaba ROTA -> la vieja l.523 hacia `planned_hours.add(event_hour)` (nombres de
+    # un refactor viejo, ya inexistentes) -> NameError silencioso tragado por el try -> el set
+    # `planned_slots` nunca se actualizaba dentro de la corrida. Fix: juntar los planes por slot
+    # y crear UNO solo (el de mayor confianza = la senal mas fuerte del informe).
+    slot_plans = defaultdict(list)  # slot UTC 'YYYY-MM-DD HH:MM' -> [(event, plan)]
     for event in events:
-        # v3.37.2 — Skip si ya hay un plan para el mismo SLOT (al minuto, UTC).
-        # Parseamos event['date'] que tiene formato ISO completo (con o sin TZ).
         _slot = None
         try:
             _evt_full = str(event.get('date', '')).replace('Z', '+00:00')
@@ -494,17 +501,27 @@ def plan_next_day_strategies(market_context=None):
                 _slot = _slot_dt.astimezone(_tz_evt.utc).strftime('%Y-%m-%d %H:%M')
         except Exception:
             _slot = None
+        # Dedup cross-run: ya hay un plan en la DB para este slot (corridas anteriores)
         if _slot and _slot in planned_slots:
             logger.info(f"Pre-planner: skipping '{event.get('event','?')}' — ya hay plan para slot {_slot} UTC")
             continue
-
         plan = _plan_single_event(event, market_ctx)
         if not plan:
             continue
+        slot_plans[_slot or event.get('event', '?')].append((event, plan))
 
+    # Un plan por slot: el de mayor confianza. Las lineas del mismo informe mueven el mercado
+    # una sola vez; quedarse con la senal mas fuerte evita los planes contradictorios.
+    for _slot, _items in slot_plans.items():
+        if len(_items) > 1:
+            _dir_counts = {}
+            for _e, _p in _items:
+                _dir_counts[_p['direction']] = _dir_counts.get(_p['direction'], 0) + 1
+            _items = sorted(_items, key=lambda ep: ep[1].get('confidence', 0) or 0, reverse=True)
+            logger.info(f"Pre-planner: slot {_slot} tenia {len(_items)} lineas {_dir_counts} -> consolido en 1 (mayor conf: {_items[0][1]['direction']} {_items[0][1].get('confidence')})")
+        event, plan = _items[0]
         try:
             from src.common.db import add_planned_strategy
-
             strategy_id = add_planned_strategy(
                 news_title=f"[PRE-PLAN] {event['event']}",
                 direction=plan['direction'],
@@ -517,12 +534,11 @@ def plan_next_day_strategies(market_context=None):
                 entry_strategy=plan.get('entry_strategy', 'breakout'),
                 risk_level=plan.get('risk_level', 'normal'),
             )
-
             if strategy_id:
                 created_ids.append(strategy_id)
-                planned_hours.add(event_hour)
+                if _slot:
+                    planned_slots.add(_slot)
                 logger.info(f"Pre-planner: created planned strategy #{strategy_id} for '{event['event']}' @ {event['time']}")
-
         except Exception as e:
             logger.error(f"Pre-planner: failed to create strategy for '{event['event']}': {e}")
 
