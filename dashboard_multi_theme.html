@@ -2229,6 +2229,9 @@
                 const timeStr = eventDate ? _fmtTime(eventDate) : _fmtTime(createdDate);
                 const expiresDate = _safeDate(s.expires_at);
                 const expiresStr = _fmtTime(expiresDate);
+                // v3.40.7 — pre-plans: la activacion es ~5min antes del evento (activate_due_planned_strategies minutes_before=5)
+                const activateDate = (isPlanned && eventDate) ? new Date(eventDate.getTime() - 5*60000) : null;
+                const activateStr = _fmtTime(activateDate);
                 // Tag de evento + creación: mostrar fecha del evento si es pre-plan
                 const eventTimeTag = isPrePlan && eventDate ? `<span style="font-size:12px;color:#a78bfa;margin-left:4px;" title="Generado: ${createdDate ? createdDate.toLocaleString('es-AR') : '-'}\nEvento: ${eventDate.toLocaleString('es-AR')}">📅 ${eventDate.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})}</span>` : '';
                 const expiryTag = !s.result && !isPlanned && expiresStr ? `<span style="font-size:12px;color:var(--text-muted);margin-left:4px;" title="Expira a las ${expiresStr} (${s.expiry_minutes || '?'}min)">⏱ ${expiresStr}</span>` : '';
@@ -2280,7 +2283,7 @@
                         ${s.risk_level ? ' | Riesgo: <strong>' + escapeHtml(s.risk_level) + '</strong>' : ''}
                     </div>` : ''}
                     <div style="padding:4px 12px;font-size:16px;color:var(--text-secondary);border-top:1px solid var(--border-color);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <span style="white-space:nowrap;color:var(--accent-yellow);font-weight:700;font-size:17px;">&#x23F0; ${timeStr}${(expiresStr && !s.result) ? ` <span style="color:var(--text-muted);font-weight:400;">&rarr;</span> &#x1F3C1; ${expiresStr}` : ''}</span>
+                        <span style="white-space:nowrap;color:var(--accent-yellow);font-weight:700;font-size:17px;">${isPlanned ? `&#x23F0; Se activa ~${activateStr} <span style="color:var(--text-muted);font-weight:400;font-size:14px;">&middot; evento ${timeStr}</span>` : `&#x23F0; ${timeStr}${(expiresStr && !s.result) ? ` <span style="color:var(--text-muted);font-weight:400;">&rarr;</span> &#x1F3C1; ${expiresStr}` : ''}`}</span>
                         ${'' /* v3.40.2: chip de profile_name (⚙ ...) removido — clutter, no aporta */}
                         ${(() => {
                             const tt = s.trigger_type || 'news';
