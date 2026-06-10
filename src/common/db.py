@@ -2001,13 +2001,14 @@ def log_bounce_decision(strategy_id, direction, trigger_type, candle_open,
     """v3.39.0 — Persiste la decision del filtro bounce-entry (shadow/active)."""
     try:
         conn = sqlite3.connect(DB_PATH)
+        # v3.40.11: created_at explicito en AR (DEFAULT era UTC) — data limpia del shadow
         conn.execute("""
             INSERT INTO bounce_entry_log
                 (strategy_id, direction, trigger_type, entry_candle_open,
-                 entry_candle_close, is_bounce, mode, skipped)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 entry_candle_close, is_bounce, mode, skipped, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (strategy_id, direction, trigger_type, candle_open, candle_close,
-              1 if is_bounce else 0, mode, 1 if skipped else 0))
+              1 if is_bounce else 0, mode, 1 if skipped else 0, now_ar()))
         conn.commit()
         conn.close()
     except Exception:
@@ -2019,13 +2020,14 @@ def log_calendar_shadow(event_name, event_impact, direction, entry_price,
     """v3.40.4 — Persiste la senal de straddle que 'calendar' generaria en shadow (sin operar)."""
     try:
         conn = sqlite3.connect(DB_PATH)
+        # v3.40.11: created_at explicito en AR (DEFAULT era UTC)
         conn.execute("""
             INSERT INTO calendar_shadow_log
                 (event_name, event_impact, direction, entry_price, stop_loss,
-                 take_profit, confidence, minutes_until)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 take_profit, confidence, minutes_until, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (event_name, event_impact, direction, entry_price, stop_loss,
-              take_profit, confidence, minutes_until))
+              take_profit, confidence, minutes_until, now_ar()))
         conn.commit()
         conn.close()
     except Exception:
@@ -2039,13 +2041,15 @@ def log_position_manager_decision(strategy_id, ticket, mode, action, reason,
     """v3.36.0 — Persiste una decision del Position Manager para audit/shadow."""
     try:
         conn = sqlite3.connect(DB_PATH)
+        # v3.40.11: created_at explicito en AR (el DEFAULT CURRENT_TIMESTAMP era UTC,
+        # ~3h corrido vs auto_strategies -> confundia todo forense). Filas previas quedan UTC.
         conn.execute("""
             INSERT INTO position_manager_log
                 (strategy_id, ticket, mode, action, reason, decision_source,
-                 progress_pips, hwm_pips, tp_pct, time_in_trade_min, executed)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 progress_pips, hwm_pips, tp_pct, time_in_trade_min, executed, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (strategy_id, ticket, mode, action, reason, decision_source,
-              progress_pips, hwm_pips, tp_pct, time_in_trade_min, executed))
+              progress_pips, hwm_pips, tp_pct, time_in_trade_min, executed, now_ar()))
         conn.commit()
         conn.close()
     except Exception:
@@ -2487,7 +2491,12 @@ def get_entry_context(strategy_id):
                            (strategy_id,)).fetchone()
         conn.close()
         if row and row[0]:
-            return _json.loads(row[0])
+            data = _json.loads(row[0])
+            # v3.40.11: filas viejas m15/h1 quedaron doble-encodeadas (json de un string
+            # json) -> loads devuelve str. Segundo loads para esas; si no es dict, {}.
+            if isinstance(data, str):
+                data = _json.loads(data)
+            return data if isinstance(data, dict) else {}
     except Exception:
         pass
     return {}

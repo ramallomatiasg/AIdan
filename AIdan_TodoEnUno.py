@@ -3064,7 +3064,21 @@ class AIdan:
                     if mt5_exec and mt5_exec.is_ready():
                         try:
                             from src.common.db import get_evaluated_open_mt5
+                            # v3.40.11 FIX (forense 10 Jun): con PM active, NO cerrar por 'expired'.
+                            # Este late-close pisaba los HOLD/EXTEND del Position Manager a segundos
+                            # del expiry (#609/#613/#614; y corto al ganador #603 a +5.8p de 17p TP)
+                            # -> la pata "extender mas alla del expiry" del experimento PM estaba
+                            # estructuralmente muerta. Ahora con PM active gobiernan PM (R2/R4
+                            # MAX_HOLD 90/120/240min) + SL/TP duro. auto_win/auto_loss se siguen
+                            # cerrando (ya evaluados). En mode log/off el comportamiento no cambia.
+                            try:
+                                from src.common.config import Config as _LCCfg
+                                _pm_owns_expiry = (getattr(_LCCfg, 'POSITION_MANAGER_MODE', 'log') or 'log').lower() == 'active'
+                            except Exception:
+                                _pm_owns_expiry = False
                             for row in get_evaluated_open_mt5():
+                                if _pm_owns_expiry and row['result'] == 'expired':
+                                    continue  # el PM decide la salida; MAX_HOLD es el techo
                                 try:
                                     mt5_exec.close_strategy_position(row['id'])
                                     logger.info(f"MT5 late-close: strategy #{row['id']} (evaluated as {row['result']})")
@@ -3243,9 +3257,11 @@ class AIdan:
                                             )
                                             _m15_sl = _m15_adapt['sl']
                                             _m15_tp = _m15_adapt['tp']
-                                            # entry_context atomic
-                                            import json as _json
-                                            _m15_ctx = _json.dumps({
+                                            # entry_context atomic — v3.40.11 FIX: dict crudo, NO json.dumps.
+                                            # add_auto_strategy ya dumpea (db.py); el doble-encode hacia que
+                                            # get_entry_context devolviera str -> .get() AttributeError tragado
+                                            # -> archive directo NUNCA corria para m15 (features vacias).
+                                            _m15_ctx = {
                                                 'rsi': _m15_state.get('rsi'),
                                                 'rsi_zone': _m15_state.get('rsi_zone'),
                                                 'avg_range_pips': _m15_atr,
@@ -3255,7 +3271,7 @@ class AIdan:
                                                 'momentum': _m15_state.get('momentum'),
                                                 'htf_bias': htf_bias,
                                                 'timeframe': 'M15',
-                                            })
+                                            }
                                             _m15_title = f"[M15-STRUCT] {_top.get('reason', '')[:200]}"
                                             _m15_sid = add_auto_strategy(
                                                 alert_id=None,
@@ -3374,8 +3390,8 @@ class AIdan:
                                             )
                                             _h1_sl = _h1_adapt['sl']
                                             _h1_tp = _h1_adapt['tp']
-                                            import json as _json2
-                                            _h1_ctx = _json2.dumps({
+                                            # v3.40.11 FIX: dict crudo, NO json.dumps (mismo doble-encode que m15)
+                                            _h1_ctx = {
                                                 'rsi': _h1_state.get('rsi'),
                                                 'rsi_zone': _h1_state.get('rsi_zone'),
                                                 'avg_range_pips': _h1_atr,
@@ -3385,7 +3401,7 @@ class AIdan:
                                                 'momentum': _h1_state.get('momentum'),
                                                 'htf_bias': htf_bias,
                                                 'timeframe': 'H1',
-                                            })
+                                            }
                                             _h1_title = f"[H1-STRUCT] {_h1_top.get('reason', '')[:200]}"
                                             _h1_sid = add_auto_strategy(
                                                 alert_id=None,

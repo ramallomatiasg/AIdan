@@ -733,6 +733,10 @@ class MT5Executor:
                     if 'CALENDARIO' in _nt: _tt = 'calendar'
                     elif 'SMC' in _nt: _tt = 'smc'
                     elif 'NOTICIA' in _nt: _tt = 'news'
+                    # v3.40.11: m15/h1 no se reconocian -> etiquetaba 'structure' en el eval.
+                    # Tags exactos [M15-STRUCT]/[H1-STRUCT] (un title m15 puede MENCIONAR 'H1').
+                    elif '[M15-STRUCT]' in _nt: _tt = 'm15_structure'
+                    elif '[H1-STRUCT]' in _nt: _tt = 'h1_structure'
                 # Get current market state for trend context
                 _mt5_trend = ''
                 _mt5_trend_str = ''
