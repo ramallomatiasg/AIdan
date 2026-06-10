@@ -67,7 +67,8 @@ def promote_shadow_validating_to_validated():
                 started_at = c.get('shadow_started_at') or c.get('proposed_at')
                 if started_at:
                     started_dt = datetime.fromisoformat(str(started_at).replace('Z', '+00:00').split('.')[0])
-                    days_elapsed = (datetime.utcnow() - started_dt.replace(tzinfo=None)).days
+                    from src.common.db import now_ar as _nar  # v3.40.10: AR (matchea shadow_started_at sellado con now_ar), no UTC
+                    days_elapsed = (_nar() - started_dt.replace(tzinfo=None)).days
                 else:
                     days_elapsed = 0
             except Exception:
@@ -240,7 +241,8 @@ def _is_in_revert_cooldown():
         if not row or not row[0]:
             return False
         reverted_dt = datetime.fromisoformat(str(row[0]).replace('Z', '+00:00').split('.')[0])
-        days = (datetime.utcnow() - reverted_dt.replace(tzinfo=None)).days
+        from src.common.db import now_ar as _nar  # v3.40.10: AR (matchea reverted_at sellado con now_ar), no UTC
+        days = (_nar() - reverted_dt.replace(tzinfo=None)).days
         return days < COOLDOWN_DAYS_AFTER_REVERT
     except Exception:
         return False

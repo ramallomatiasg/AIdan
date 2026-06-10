@@ -1452,10 +1452,17 @@ class AIdan:
                             _precomputed = None
 
                     for _news_idx, (news_id, url, title, summary, entities, tags) in enumerate(news_items):
-                        if _precomputed is not None and _news_idx < len(_precomputed):
-                            result = _precomputed[_news_idx]
-                        else:
-                            result = analyzer.analyze(news_id, title, summary, entities, tags)
+                        # v3.40.10: guard del analyze serial (LLM/red). Un throw aca abortaba el
+                        # ciclo entero (incl. SMC/M15/H1, que corren despues). El path paralelo ya
+                        # cae a None solo; este faltaba. Aislar -> el ciclo sigue aunque 1 news falle.
+                        try:
+                            if _precomputed is not None and _news_idx < len(_precomputed):
+                                result = _precomputed[_news_idx]
+                            else:
+                                result = analyzer.analyze(news_id, title, summary, entities, tags)
+                        except Exception as _ane:
+                            logger.error(f"News analyze error (item {_news_idx}): {_ane}")
+                            result = None
 
                         if result:
                             # Freshness check: stale news (>30min) get price=0 so they don't show as "Evaluando"

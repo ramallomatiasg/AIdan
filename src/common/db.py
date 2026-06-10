@@ -2108,6 +2108,11 @@ def add_planned_strategy(news_title, direction, confidence, sl_pips, tp_pips,
         try:
             from datetime import datetime as _dt
             evt = _dt.fromisoformat(event_time.replace('Z', '+00:00')) if event_time else now
+            # v3.40.10: evt puede venir TZ-aware (ej. event_time '...-04:00') -> dejaba expires_at
+            # con doble offset al re-serializar en el dashboard ('-04:00-03:00' = Invalid Date en la
+            # card planned). Normalizar a AR naive, como el resto de la tabla (created_at, etc.).
+            if getattr(evt, 'tzinfo', None) is not None:
+                evt = evt.astimezone(TZ_AR).replace(tzinfo=None)
             expires_at = evt + timedelta(minutes=30)
         except Exception:
             expires_at = now + timedelta(hours=24)

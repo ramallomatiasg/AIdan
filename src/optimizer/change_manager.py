@@ -218,7 +218,7 @@ def _apply_tune_optimizer_param(params: dict):
         tuner = AutoTuner(logger, DB_PATH)
         current = dict(tuner.get_params())
         current[param_name] = new_value
-        tuner._save_params(current, win_rate=0, total_trades=0, profit_factor=0, iteration=current.get('iteration', 0) + 1)
+        tuner._save_params(current, win_rate=0, total_trades=0, profit_factor=0)
     except Exception as e:
         raise ValueError(f"failed to update optimizer_params: {e}")
 
@@ -242,7 +242,7 @@ def _set_optimizer_param(param_name: str, value):
         tuner = AutoTuner(logger, DB_PATH)
         current = dict(tuner.get_params())
         current[param_name] = value
-        tuner._save_params(current, win_rate=0, total_trades=0, profit_factor=0, iteration=current.get('iteration', 0) + 1)
+        tuner._save_params(current, win_rate=0, total_trades=0, profit_factor=0)
     except Exception as e:
         logger.warning(f"failed to restore param {param_name}: {e}")
 
