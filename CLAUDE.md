@@ -433,11 +433,11 @@ Anti-contradiction pre_planned (no PUT+CALL simultáneos)
 
 ### Próximo checkpoint
 
-**Viernes 15 May 2026** — review semanal:
-- Trades acumulados por track (M5 vs M15 vs H1)
-- ¿Patrón conf no-monotónica persiste con data nueva?
-- Heatmap horas: ¿16h UTC y 19h UTC siguen siendo 0% WR?
-- Decisión: surgical fix bucket 70-74 vs seguir esperando
+**Viernes 12 Jun 2026** — agenda:
+1. **⏰ DECISIÓN PRINCIPAL: activar cooldown 5min post-pérdida.** Único hallazgo que pasó el gate adversarial (n=74, WR 24% vs 38%, p=0.010, sostenido 4/5 quincenas, frontera nítida a ~5min; #611 del día CPI = el patrón exacto). Re-correr `tools/measure_entry_suspects.py` (segundos) para confirmar sobre la data más nueva → si sostiene, activarlo como EL próximo cambio (1 a la vez). Detalle completo en NOTAS.
+2. Primeros días del experimento PM re-baselineado (v3.40.11): ¿los trades extendidos más allá del expiry (comportamiento NUEVO) ayudan o duelen? Ver `position_manager_log` (CLOSE_MAXHOLD/EXTEND) + avg_win.
+3. Calendar shadow: ¿FF se destrabó (429)? Revisar `calendar_shadow_log` si hay filas.
+4. En cola de siempre: ATR ceiling + params overfit; data limpia acumulada (contador desde 5 Jun, sin contaminación m15/h1 desde v3.40.11).
 
 ---
 
