@@ -3618,7 +3618,7 @@ class AIdan:
         El SL/TP de MT5 y el trailing thread (1s) corren en paralelo sin interferir."""
         import time as _time
         import logging
-        from datetime import datetime as _dt
+        from datetime import datetime as _dt, timedelta as _td_pm
         _logger = logging.getLogger("analyzer")
 
         from src.common.config import Config
@@ -3699,7 +3699,24 @@ class AIdan:
 
                     try:
                         _ct = _dt.strptime(str(created_at).split('.')[0], '%Y-%m-%d %H:%M:%S')
-                        time_in_trade_min = (now_ar().replace(tzinfo=None) - _ct).total_seconds() / 60.0
+                        # v3.40.12 FIX (caso #615): para pre-plans, created_at es cuando se
+                        # PLANEO (dia anterior), no cuando se lleno la orden -> el PM creia
+                        # "985min en trade" 20s despues del fill y lo mato por MAX_HOLD antes
+                        # del evento. Edad real = expires_at - expiry_minutes (expires_at se
+                        # re-escribe a activacion+expiry al activarse; para trades normales
+                        # da exactamente created_at). Solo se usa si es POSTERIOR a created_at;
+                        # cualquier parse raro -> fallback a created_at.
+                        _trade_start = _ct
+                        try:
+                            _exp_raw = row[12] if len(row) > 12 else None
+                            if _exp_raw:
+                                _exp = _dt.strptime(str(_exp_raw).replace('T', ' ').split('.')[0], '%Y-%m-%d %H:%M:%S')
+                                _derived = _exp - _td_pm(minutes=expiry_min)
+                                if _derived > _ct:
+                                    _trade_start = _derived
+                        except Exception:
+                            pass
+                        time_in_trade_min = (now_ar().replace(tzinfo=None) - _trade_start).total_seconds() / 60.0
                     except Exception:
                         time_in_trade_min = 0.0
 

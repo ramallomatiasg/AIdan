@@ -1987,7 +1987,7 @@ def get_open_mt5_for_manager():
     cursor.execute("""
         SELECT id, mt5_ticket, direction, entry_price, stop_loss, take_profit,
                mt5_fill_price, mt5_high_water, created_at, expiry_minutes,
-               trigger_type, confidence
+               trigger_type, confidence, expires_at
         FROM auto_strategies
         WHERE mt5_status = 'filled' AND mt5_ticket IS NOT NULL
     """)
