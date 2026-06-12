@@ -180,6 +180,62 @@ def main():
             if name.startswith('BIAS STALE') and n >= 10:
                 print(gate('stale', n, w, overall_wr))
 
+        # ── Sospechoso C: ¿entra TARDE o entra MAL? (delay señal→fill + drift de precio) ──
+        print('\n=== SOSPECHOSO C: ¿tarde o mal? (delay senal->fill y precio corrido al fill) ===')
+        conn = sqlite3.connect(DB_PATH)
+        meta = {}
+        for tbl, key in (('trade_archive', 'strategy_id'), ('auto_strategies', 'id')):
+            try:
+                for sid, ca, ep in conn.execute(f"SELECT {key}, created_at, entry_price FROM {tbl} WHERE created_at IS NOT NULL"):
+                    if sid is not None and sid not in meta:
+                        meta[sid] = (ca, ep)
+            except Exception:
+                pass
+        conn.close()
+        import time as _t
+        from datetime import datetime as _dt2
+        tick = None
+        try:
+            import MetaTrader5 as _mt5b
+            tick = _mt5b.symbol_info_tick(SYMBOL)
+        except Exception:
+            pass
+        offset_s = round(((tick.time if tick else 0) - _t.time()) / 1800.0) * 1800 if tick else 6 * 1800
+        delays, drifts = [], []
+        for p in positions:
+            m = meta.get(p['sid'])
+            if not m or not m[0]:
+                continue
+            try:
+                c0 = _dt2.strptime(str(m[0]).split('.')[0].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+            except Exception:
+                continue
+            fill_ar = _dt2.utcfromtimestamp(p['open_ts'] - offset_s) - timedelta(hours=3)
+            delay = (fill_ar - c0).total_seconds() / 60.0
+            if -3 <= delay <= 300:
+                delays.append((p, delay))
+            if m[1]:
+                # drift>0 = fill MAS ALLA del precio de la senal en la direccion del trade
+                # (CALL llenado mas arriba / PUT mas abajo) = persiguio el precio.
+                drift = (p['entry_price'] - m[1]) / PIP * (1 if p['direction'] == 'CALL' else -1)
+                if abs(drift) <= 50:
+                    drifts.append((p, drift))
+        print(f'  (con metadata en DB: delay={len(delays)}, drift={len(drifts)} de {len(positions)} posiciones)')
+        print('  -- POR DELAY senal->fill --')
+        for lo, hi, lbl in ((-3, 1, 'fill inmediato (<1min)'), (1, 5, '1-5min'), (5, 15, '5-15min'), (15, 9e9, '>15min (retry tardio)')):
+            sub = [p for p, v in delays if lo <= v < hi]
+            line, n, w = fmt_stats(sub)
+            print(f'  {lbl:24s}: {line}')
+            if n >= 10 and lo >= 1:
+                print(gate(f'delay{lbl}', n, w, overall_wr))
+        print('  -- POR DRIFT de precio al fill --')
+        for lo, hi, lbl in ((-9e9, -3, 'mejor precio (<-3p)'), (-3, 3, 'al precio planeado'), (3, 9e9, 'PERSIGUIO (>+3p)')):
+            sub = [p for p, v in drifts if lo <= v < hi]
+            line, n, w = fmt_stats(sub)
+            print(f'  {lbl:24s}: {line}')
+            if n >= 10 and lbl != 'al precio planeado':
+                print(gate(f'drift{lbl}', n, w, overall_wr))
+
         print('\n--- CAVEATS (leer antes de actuar) ---')
         print('1. Muestra historica SUCIA (mezcla v3.6->v3.40, phantom-pnl viejo, regimenes).')
         print('   Esto es INPUT de checkpoint, NO un auto-aplicar.')

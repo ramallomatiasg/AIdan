@@ -988,6 +988,39 @@ class AIdan:
                             return None
                     except Exception as e:
                         logger.debug(f"User-window check: {e}")
+                    # v3.40.15 — COOLDOWN POST-PERDIDA (decision del checkpoint 12 Jun).
+                    # Unico hallazgo que paso el gate adversarial: re-entradas <=5min tras
+                    # una perdida = 24% WR vs 37% (n=76, p=0.009, broker-truth, sostenido
+                    # 4/5 quincenas; #611 y #633->#634-class = el patron). Senal generada
+                    # dentro del cooldown -> SKIP definitivo (status skipped_cooldown), no
+                    # delay: la senal nace de la vela de panico, esperar no la arregla.
+                    try:
+                        _cd_min = float(getattr(Config, 'COOLDOWN_AFTER_LOSS_MIN', 5) or 0)
+                    except Exception:
+                        _cd_min = 5.0
+                    if _cd_min > 0:
+                        try:
+                            import sqlite3 as _sq_cd
+                            from datetime import datetime as _cd_dt
+                            from src.common.db import now_ar as _cd_now
+                            _cn = _sq_cd.connect(DB_PATH)
+                            _r = _cn.execute("SELECT MAX(mt5_closed_at) FROM auto_strategies WHERE mt5_pnl < 0 AND mt5_closed_at IS NOT NULL").fetchone()
+                            _cn.close()
+                            if _r and _r[0]:
+                                _lc = _cd_dt.strptime(str(_r[0]).split('.')[0].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                                _cd_elapsed = (_cd_now() - _lc).total_seconds() / 60.0
+                                if 0 <= _cd_elapsed < _cd_min:
+                                    logger.info(f"COOLDOWN post-perdida: skip #{sid} {trigger_type or ''} — ultima perdida hace {_cd_elapsed:.1f}min (<{_cd_min:.0f}min)")
+                                    try:
+                                        _cn = _sq_cd.connect(DB_PATH)
+                                        _cn.execute("UPDATE auto_strategies SET status='skipped_cooldown' WHERE id=? AND status='active'", (sid,))
+                                        _cn.commit(); _cn.close()
+                                    except Exception:
+                                        pass
+                                    return None
+                        except Exception as _cde:
+                            logger.debug(f"cooldown check #{sid}: {_cde}")
+
                     # v3.39.0 — Skip bounce-entry: ¿la vela de entrada va EN CONTRA?
                     # PUT entrando sobre vela verde / CALL sobre vela roja = bounce.
                     # Validado p=0.000 (bounce 22% WR vs 45%). MODE off/shadow/active.
@@ -1037,31 +1070,37 @@ class AIdan:
                             _prox = get_event_proximity()
                             if _prox:
                                 _stale_mins = None
+                                _ew_trig = trigger_type
                                 try:
                                     import sqlite3 as _sq_ew
                                     from datetime import datetime as _ew_dt
                                     from src.common.db import now_ar as _ew_now
                                     _cn = _sq_ew.connect(DB_PATH)
-                                    _r = _cn.execute("SELECT created_at FROM auto_strategies WHERE id=?", (sid,)).fetchone()
+                                    # v3.40.15 FIX: leer tambien trigger_type de la fila — la mayoria
+                                    # de los call sites no lo pasan como param -> None -> el shadow
+                                    # trataba TODO como 'structure' (ciego) y marco mal a un news (#635).
+                                    _r = _cn.execute("SELECT created_at, trigger_type FROM auto_strategies WHERE id=?", (sid,)).fetchone()
                                     _cn.close()
                                     if _r and _r[0]:
                                         _c0 = _ew_dt.strptime(str(_r[0]).split('.')[0].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
                                         _stale_mins = round((_ew_now() - _c0).total_seconds() / 60.0, 1)
+                                    if _r and _r[1]:
+                                        _ew_trig = _r[1]
                                 except Exception:
                                     _stale_mins = None
-                                _blind = (trigger_type or 'structure') in ('structure', 'm15_structure', 'h1_structure', 'smc')
+                                _blind = (_ew_trig or 'structure') in ('structure', 'm15_structure', 'h1_structure', 'smc')
                                 _would_block = bool(_prox.get('in_window') and (_blind or (_stale_mins or 0) > 10))
                                 try:
                                     from src.common.db import log_event_window
-                                    log_event_window(sid, trigger_type, direction, _stale_mins, _prox, _would_block, _ew_mode)
+                                    log_event_window(sid, _ew_trig, direction, _stale_mins, _prox, _would_block, _ew_mode)
                                 except Exception:
                                     pass
                                 if _would_block:
                                     _ev_name = _prox.get('next_event') if (_prox.get('mins_to_next') or 9e9) <= (_prox.get('mins_since_prev') or 9e9) else _prox.get('prev_event')
                                     if _ew_mode == 'active':
-                                        logger.info(f"Event-window [ACTIVE]: skip #{sid} {trigger_type or 'structure'} dentro de ventana de '{_ev_name}' (stale={_stale_mins}min)")
+                                        logger.info(f"Event-window [ACTIVE]: skip #{sid} {_ew_trig or 'structure'} dentro de ventana de '{_ev_name}' (stale={_stale_mins}min)")
                                         return None
-                                    logger.info(f"Event-window [SHADOW]: #{sid} {trigger_type or 'structure'} habria sido bloqueado — ventana de '{_ev_name}' (stale={_stale_mins}min)")
+                                    logger.info(f"Event-window [SHADOW]: #{sid} {_ew_trig or 'structure'} habria sido bloqueado — ventana de '{_ev_name}' (stale={_stale_mins}min)")
                         except Exception as _ewe:
                             logger.debug(f"event-window check #{sid}: {_ewe}")
 

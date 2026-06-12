@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.40.14"
+APP_VERSION = "3.40.15"
 
 class Config:
     VERSION = APP_VERSION
@@ -150,6 +150,14 @@ class Config:
     # sin subgrupo salvable. Es ~la mitad de los trades de AIdan (los que sangran).
     # MODE: off | shadow (registra "habria saltado" sin actuar, DEFAULT) | active (saltea).
     SKIP_BOUNCE_ENTRY = (os.getenv("SKIP_BOUNCE_ENTRY", "shadow") or "shadow").lower()
+
+    # v3.40.15 — Cooldown post-perdida (DECISION checkpoint 12 Jun 2026). Re-entradas
+    # <=5min tras una perdida: 24% WR vs 37% baseline (n=76, p=0.009, -$170 = 34% de toda
+    # la perdida historica en 12% de los trades; unico hallazgo que paso el gate adversarial;
+    # frontera nitida: 5-10min ya rinde 43%). Las senales generadas dentro del cooldown se
+    # SKIPEAN (no se delayean: una senal de la vela de panico no mejora por esperar).
+    # 0 = off.
+    COOLDOWN_AFTER_LOSS_MIN = float(os.getenv("COOLDOWN_AFTER_LOSS_MIN", "5"))
 
     # v3.40.14 — Event window (conciencia de eventos en la ejecucion). off | shadow
     # (DEFAULT: etiqueta cada ejecucion con proximidad al evento + loguea que bloquearia,
