@@ -1936,12 +1936,26 @@ def update_mt5_close(strategy_id, pnl, close_price, status='closed'):
         conn.close()
 
 def get_mt5_daily_pnl():
+    """v3.40.13 FIX: incluir tambien trade_archive (dedup por strategy_id). Antes
+    sumaba SOLO el buffer vivo auto_strategies -> al archivarse/purgarse trades del
+    dia, el 'P&L diario' del dashboard perdia justo esos (caso +6.87 en dia de -30).
+    Para el archive se usa date(created_at) como proxy del dia (los trades abren y
+    cierran el mismo dia AR salvo pre-plans overnight; archived_at NO sirve porque el
+    cap-delete archiva dias despues). NOTA: fallback — el dashboard prefiere el
+    calculo broker-truth de MT5Executor.get_daily_pnl()."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    today = now_ar()
     cursor.execute("""
-        SELECT COALESCE(SUM(mt5_pnl), 0) FROM auto_strategies
-        WHERE mt5_status = 'closed' AND date(mt5_closed_at) = date(?)
-    """, (now_ar(),))
+        SELECT COALESCE(SUM(pnl), 0) FROM (
+            SELECT mt5_pnl AS pnl FROM auto_strategies
+            WHERE mt5_status = 'closed' AND date(mt5_closed_at) = date(?)
+            UNION ALL
+            SELECT mt5_pnl FROM trade_archive
+            WHERE mt5_pnl IS NOT NULL AND date(created_at) = date(?)
+              AND strategy_id NOT IN (SELECT id FROM auto_strategies)
+        )
+    """, (today, today))
     result = cursor.fetchone()[0]
     conn.close()
     return result

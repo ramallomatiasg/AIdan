@@ -2641,7 +2641,15 @@ async def mt5_status():
 
     account = mt5.get_account_info()
     positions = mt5.check_positions()
-    daily_pnl = get_mt5_daily_pnl()
+    # v3.40.13: broker-truth primero (deals MT5 del dia AR, comisiones incluidas);
+    # fallback al calculo DB si MT5 no puede responder.
+    daily_pnl = None
+    try:
+        daily_pnl = mt5.get_daily_pnl()
+    except Exception:
+        daily_pnl = None
+    if daily_pnl is None:
+        daily_pnl = get_mt5_daily_pnl()
 
     return JSONResponse({"status": "success", "data": {
         "connected": mt5.connected,

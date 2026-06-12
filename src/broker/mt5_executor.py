@@ -131,6 +131,43 @@ class MT5Executor:
             self.logger.debug(f"MT5 account_info: {e}")
         return None
 
+    def get_daily_pnl(self):
+        """v3.40.13 — P&L neto del dia AR segun el BROKER (deals reales, comisiones
+        de entrada y salida incluidas). Reemplaza la suma sobre auto_strategies del
+        dashboard: esa tabla es un buffer rotativo y al archivarse los trades el
+        numero quedaba sin sentido (11 Jun: mostraba +6.87 en un dia de -30 porque
+        los perdedores ya estaban purgados y quedaban los ganadores).
+        Devuelve None si no se puede calcular (el caller usa fallback DB)."""
+        if not self.connected or not self._mt5:
+            return None
+        try:
+            import time as _t
+            from datetime import datetime as _dt, timedelta as _td
+            from src.common.db import now_ar
+            tick = self._mt5.symbol_info_tick("EURUSD")
+            if not tick or not getattr(tick, 'time', 0):
+                return None
+            # Offset servidor-vs-UTC derivado en vivo del tick (robusto a DST del broker),
+            # redondeado a 30min. AR = UTC-3.
+            offset_s = round((tick.time - _t.time()) / 1800.0) * 1800
+            deals = self._mt5.history_deals_get(_dt.now() - _td(days=4), _dt.now() + _td(days=2))
+            if deals is None:
+                return None
+            today_ar = now_ar().date()
+            total = 0.0
+            seen = False
+            for d in deals:
+                if d.magic != MAGIC_NUMBER:
+                    continue
+                ar_dt = _dt.utcfromtimestamp(d.time - offset_s) - _td(hours=3)
+                if ar_dt.date() == today_ar:
+                    total += d.profit + d.swap + d.commission
+                    seen = True
+            return round(total, 2) if seen else 0.0
+        except Exception as e:
+            self.logger.debug(f"MT5 get_daily_pnl: {e}")
+            return None
+
     def calculate_lot_size(self, sl_pips):
         from src.common.db import get_mt5_config
         config = get_mt5_config()
