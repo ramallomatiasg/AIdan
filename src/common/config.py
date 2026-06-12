@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.40.13"
+APP_VERSION = "3.40.14"
 
 class Config:
     VERSION = APP_VERSION
@@ -150,6 +150,12 @@ class Config:
     # sin subgrupo salvable. Es ~la mitad de los trades de AIdan (los que sangran).
     # MODE: off | shadow (registra "habria saltado" sin actuar, DEFAULT) | active (saltea).
     SKIP_BOUNCE_ENTRY = (os.getenv("SKIP_BOUNCE_ENTRY", "shadow") or "shadow").lower()
+
+    # v3.40.14 — Event window (conciencia de eventos en la ejecucion). off | shadow
+    # (DEFAULT: etiqueta cada ejecucion con proximidad al evento + loguea que bloquearia,
+    # SIN bloquear) | active (bloquea senales ciegas/viejas dentro de la ventana del evento
+    # — NO activar sin data del shadow). Ventanas: HIGH 15min antes/30 despues; MED 5/15.
+    EVENT_WINDOW_MODE = (os.getenv("EVENT_WINDOW_MODE", "shadow") or "shadow").lower()
 
     # v3.40.4 — Calendar (straddle pre-news) mode. El trigger 'calendar' nunca opero (0/325):
     # el feed FF se auto-baneo (hammering -> 429) y ademas el straddle esta roto (anti-

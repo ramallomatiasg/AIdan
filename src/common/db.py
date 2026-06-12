@@ -527,6 +527,28 @@ def init_db():
         )
     """)
 
+    # v3.40.14 — Event window log: proximidad a eventos del calendario en CADA ejecucion
+    # (clasificacion en el momento). Base para medir "operar eventos bien" + escudo shadow.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS event_window_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER,
+            trigger_type TEXT,
+            direction TEXT,
+            stale_mins REAL,             -- edad de la senal al ejecutar (fill tardio = retry)
+            mins_to_next REAL,
+            next_event TEXT,
+            next_impact TEXT,
+            mins_since_prev REAL,
+            prev_event TEXT,
+            prev_impact TEXT,
+            in_window INTEGER,           -- 1 si cae dentro de la ventana del evento
+            would_block INTEGER,         -- 1 si el escudo (en active) lo habria bloqueado
+            mode TEXT,                   -- shadow | active
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.36.0 — Live Position Manager log (Fase 1).
     # Registra cada decision del gestor (HOLD/CLOSE_*) por posicion. En modo 'log'
     # solo registra (executed=0) para shadow validation; en 'active' executed=1.
@@ -2042,6 +2064,26 @@ def log_calendar_shadow(event_name, event_impact, direction, entry_price,
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (event_name, event_impact, direction, entry_price, stop_loss,
               take_profit, confidence, minutes_until, now_ar()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def log_event_window(strategy_id, trigger_type, direction, stale_mins, prox, would_block, mode):
+    """v3.40.14 — Persiste la proximidad a eventos en el momento de la ejecucion."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            INSERT INTO event_window_log
+                (strategy_id, trigger_type, direction, stale_mins, mins_to_next, next_event,
+                 next_impact, mins_since_prev, prev_event, prev_impact, in_window,
+                 would_block, mode, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (strategy_id, trigger_type, direction, stale_mins,
+              prox.get('mins_to_next'), prox.get('next_event'), prox.get('next_impact'),
+              prox.get('mins_since_prev'), prox.get('prev_event'), prox.get('prev_impact'),
+              1 if prox.get('in_window') else 0, 1 if would_block else 0, mode, now_ar()))
         conn.commit()
         conn.close()
     except Exception:

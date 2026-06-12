@@ -1022,6 +1022,49 @@ class AIdan:
                         except Exception as _be:
                             logger.debug(f"bounce-entry check #{sid}: {_be}")
 
+                    # v3.40.14 — Conciencia de eventos (SHADOW por default): etiqueta CADA
+                    # ejecucion (normal y retry — ambas pasan por aca) con su proximidad al
+                    # evento HIGH/MEDIUM mas cercano del calendario (revivido v3.40.4) y
+                    # marca que habria bloqueado el escudo: senal CIEGA (structure/m15/h1/smc,
+                    # que no saben de eventos) o VIEJA (>10min, caso #625: el retry ejecuto
+                    # una senal de 27min en el primer minuto del spike) dentro de la ventana.
+                    # news/pre_planned/calendar dentro de la ventana NO se marcan (son las
+                    # jugadas de evento por diseno). En shadow solo loguea, NUNCA bloquea.
+                    _ew_mode = (getattr(Config, 'EVENT_WINDOW_MODE', 'shadow') or 'shadow').lower()
+                    if _ew_mode != 'off':
+                        try:
+                            from src.common.event_window import get_event_proximity
+                            _prox = get_event_proximity()
+                            if _prox:
+                                _stale_mins = None
+                                try:
+                                    import sqlite3 as _sq_ew
+                                    from datetime import datetime as _ew_dt
+                                    from src.common.db import now_ar as _ew_now
+                                    _cn = _sq_ew.connect(DB_PATH)
+                                    _r = _cn.execute("SELECT created_at FROM auto_strategies WHERE id=?", (sid,)).fetchone()
+                                    _cn.close()
+                                    if _r and _r[0]:
+                                        _c0 = _ew_dt.strptime(str(_r[0]).split('.')[0].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                                        _stale_mins = round((_ew_now() - _c0).total_seconds() / 60.0, 1)
+                                except Exception:
+                                    _stale_mins = None
+                                _blind = (trigger_type or 'structure') in ('structure', 'm15_structure', 'h1_structure', 'smc')
+                                _would_block = bool(_prox.get('in_window') and (_blind or (_stale_mins or 0) > 10))
+                                try:
+                                    from src.common.db import log_event_window
+                                    log_event_window(sid, trigger_type, direction, _stale_mins, _prox, _would_block, _ew_mode)
+                                except Exception:
+                                    pass
+                                if _would_block:
+                                    _ev_name = _prox.get('next_event') if (_prox.get('mins_to_next') or 9e9) <= (_prox.get('mins_since_prev') or 9e9) else _prox.get('prev_event')
+                                    if _ew_mode == 'active':
+                                        logger.info(f"Event-window [ACTIVE]: skip #{sid} {trigger_type or 'structure'} dentro de ventana de '{_ev_name}' (stale={_stale_mins}min)")
+                                        return None
+                                    logger.info(f"Event-window [SHADOW]: #{sid} {trigger_type or 'structure'} habria sido bloqueado — ventana de '{_ev_name}' (stale={_stale_mins}min)")
+                        except Exception as _ewe:
+                            logger.debug(f"event-window check #{sid}: {_ewe}")
+
                     # v3.28.0 Spread guardian
                     try:
                         from src.common.slippage_tracker import is_spread_acceptable
