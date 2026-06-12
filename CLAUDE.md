@@ -550,6 +550,8 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 
 ## Glosario de patrones observados
 
+> 🔄 **Plan de mejora continua del "cerebro"**: `docs/mejora_continua.md` — el loop semanal (medir → gate → shadow → activar UNO → re-medir), el backlog de ideas rankeado por evidencia, el calendario de checkpoints hasta el 17 Jul y los criterios de "ganar". Acordado 12 Jun tras el veredicto "entra mal, no tarde". **Revisar y actualizar en cada checkpoint.**
+
 > 📋 **Playbook de regímenes de mercado**: `docs/market_playbook.md` — registro vivo de los tipos de mercado (lateral muerto, tendencia alineada, ranging/chop, conflicto M5-vs-HTF, falling knife, news stale, volatilidad extrema) y cómo debería accionar AIdan en cada uno. Marca evidencia vs hipótesis-a-verificar. Actualizar en cada checkpoint.
 
 - **Expiry-loss**: trade direccionalmente correcto que cierra por timeout antes de hit TP. Frecuente en M5 con expiry 15min.
