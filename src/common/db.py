@@ -527,6 +527,18 @@ def init_db():
         )
     """)
 
+    # v3.40.16 — Auditoria del path calendar-straddle: el 12 Jun hubo 2 eventos
+    # elegibles y calendar_shadow_log quedo en 0 filas sin forma de saber por que
+    # (4 salidas silenciosas + sin logs a archivo). Cada salida ahora se registra.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS calendar_debug_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stage TEXT,
+            detail TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.40.14 — Event window log: proximidad a eventos del calendario en CADA ejecucion
     # (clasificacion en el momento). Base para medir "operar eventos bien" + escudo shadow.
     cursor.execute("""
@@ -2064,6 +2076,19 @@ def log_calendar_shadow(event_name, event_impact, direction, entry_price,
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (event_name, event_impact, direction, entry_price, stop_loss,
               take_profit, confidence, minutes_until, now_ar()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def log_calendar_debug(stage, detail=''):
+    """v3.40.16 — Persiste cada salida/avance del path calendar-straddle (eran
+    silenciosas e imposibles de forensear: AIdan no persiste logs a archivo)."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("INSERT INTO calendar_debug_log (stage, detail, created_at) VALUES (?, ?, ?)",
+                     (stage, str(detail)[:300], now_ar()))
         conn.commit()
         conn.close()
     except Exception:

@@ -67,12 +67,14 @@ bounce (en shadow, no concluyente — el loop evitó un error), bias rezagado
    SHADOW: etiquetar cada señal con su régimen → en 2-3 semanas medir WR por
    régimen × trigger → si "m15 en chop = 20% WR, n>30, gate pasa" → bloquear
    esa celda. Ataca el "CUÁNDO" directamente con el método que ya funciona.
-7. **Métrica de agotamiento ("¿cuánto ya corrió el precio?")** — el tema que
-   rima en TODOS los hallazgos (SIM A, bias-confirmado 22% WR, conf 90
-   invertida): cuando todo está alineado, ya es tarde. Medible retrospectivo
-   con broker-truth: pips recorridos en la dirección de la señal en los 30-60min
-   previos al entry → WR por bucket. Si confirma → feature/gate de "entrada
-   tardía". Sumar al script de sospechosos.
+7. ~~**Métrica de agotamiento ("¿cuánto ya corrió el precio?")**~~ ✅ MEDIDA 12 Jun
+   → **DESPRIORIZADA**: ningún bucket de run-up crudo separa del baseline en la
+   medición limpia (n=617 broker-truth). Bonus metodológico: el único bucket
+   "significativo" (56% WR, p=0.010) era **lookahead de la vela en formación**
+   — regla nueva permanente: toda medición retrospectiva sobre velas corta
+   ≥300s antes del entry. El agotamiento que rima en los hallazgos es de
+   ALINEACIÓN DE INDICADORES REZAGADOS (no de precio crudo) → solo medible con
+   etiquetado en-el-momento; queda en backlog sin prioridad.
 8. **Exportar el patrón de `smc` a `structure`** — smc es el ÚNICO trigger +EV
    (PF 1.14) y es el paciente (zona + confirmación); structure es el ansioso
    (persigue el breakout) y el mayor sangrador (−$158). Hipótesis: exigirle a
@@ -117,7 +119,7 @@ bounce (en shadow, no concluyente — el loop evitó un error), bias rezagado
 
 | Fecha | Decisiones |
 |---|---|
-| **19 Jun** | 1er read del cooldown (n chico, solo sanity). Activar shadow del detector de régimen (idea 6). Sumar métrica de agotamiento (idea 7) al script. |
+| **19 Jun** | 1er read del cooldown (n chico, solo sanity). Activar shadow del detector de régimen (idea 6). Calendar: ¿escribió con la instrumentación v3.40.16? Reconciliar universos lifetime + query canónica del censo limpio. Decisión mt5_filled_at + #632 (pnl NULL). |
 | **26 Jun** | Veredicto PM (2 sem de re-baseline): ¿avg_win subió? Keep/revert. Cooldown: 2 semanas de skips — ¿los skipeados eran perdedores? (medible: qué pasó después de cada skip). |
 | **3 Jul** | Jugada de eventos (3 sem de event_window_log + calendar shadow). Primer intento de calibración si hay ~150 limpios. |
 | **10 Jul** | Régimen: ¿hay celdas régimen×trigger bloqueables? (3 sem de shadow). |

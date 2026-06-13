@@ -870,6 +870,18 @@ class AIdan:
 
             # Calendar pre-news: track already-traded events across cycles
             _traded_calendar_events = set()
+            # v3.40.16 — throttle de la auditoria del path calendar (1 log por etapa+evento)
+            _cal_dbg_seen = set()
+            def _cal_dbg(stage, detail='', key=None):
+                try:
+                    _k = key or stage
+                    if _k in _cal_dbg_seen:
+                        return
+                    _cal_dbg_seen.add(_k)
+                    from src.common.db import log_calendar_debug
+                    log_calendar_debug(stage, detail)
+                except Exception:
+                    pass
 
             # MT5 Executor initialization
             mt5_exec = None
@@ -1926,6 +1938,10 @@ class AIdan:
                             cal_json = cal_resp.json()
                             cal_events = cal_json if isinstance(cal_json, list) else cal_json.get('events', cal_json.get('data', []))
                             utc_now = _cal_dt.now(_cal_tz.utc)
+                            # v3.40.16: si el cache del /calendar sirve un intento vacio justo en la
+                            # ventana de un evento, antes era invisible — 1 log por hora como maximo
+                            if not cal_events:
+                                _cal_dbg('feed_empty', '/calendar respondio 200 con 0 eventos', key=f"fe_{utc_now.strftime('%d%H')}")
                             entry_rules = get_entry_rules_summary()
 
                             for evt in cal_events:
@@ -1962,6 +1978,7 @@ class AIdan:
                                     evt_name = evt.get('event', 'Unknown Event')
                                     evt_currency = evt.get('currency', '')
                                     logger.info(f"[{iteration}] Calendar: {evt_name} ({evt_impact}) in {minutes_until:.0f}min - preparing straddle")
+                                    _cal_dbg('detected', f"{evt_name} ({evt_impact}) in {minutes_until:.0f}min", key=f"det_{evt_key}")
 
                                     # Get market state
                                     ms = tech.get_market_state()
@@ -1969,6 +1986,8 @@ class AIdan:
                                     support = ms.get('support', 0)
                                     resistance = ms.get('resistance', 0)
                                     if price <= 0 or support <= 0 or resistance <= 0:
+                                        # v3.40.16: salida que era SILENCIOSA (sospechosa del 0-filas del 12 Jun)
+                                        _cal_dbg('sr_zero', f"{evt_name}: price={price} S={support} R={resistance}", key=f"sr0_{evt_key}")
                                         continue
 
                                     from src.common.db import get_active_profile
@@ -1993,6 +2012,7 @@ class AIdan:
                                     # AutoTuner block: skip if calendar setup type has poor win rate
                                     if tuner.is_setup_blocked('calendar'):
                                         logger.info(f"AutoTuner: blocking calendar straddle for {evt_name}, setup type blocked")
+                                        _cal_dbg('autotuner_block', evt_name, key=f"at_{evt_key}")
                                         _traded_calendar_events.add(evt_key)
                                         continue
 
@@ -2037,6 +2057,7 @@ class AIdan:
                                         est_spread = session_info['spread_est']
                                         if est_spread > adaptive['sl_pips'] * 0.50:
                                             logger.info(f"Spread gate: skipping calendar {direction}, spread {est_spread:.1f}p > 50% of SL {adaptive['sl_pips']:.1f}p")
+                                            _cal_dbg('spread_gate', f"{evt_name} {direction} spread={est_spread:.1f}p SL={adaptive['sl_pips']:.1f}p", key=f"sp_{evt_key}_{direction}")
                                             continue
 
                                         # Adjust entry price for spread
@@ -2109,6 +2130,7 @@ class AIdan:
                                         # Min confidence gate: skip if below profile threshold after all adjustments
                                         if conf < base_conf:
                                             logger.info(f"Min confidence gate: skipping calendar {direction}, conf {conf} < profile min {base_conf}")
+                                            _cal_dbg('minconf_gate', f"{evt_name} {direction} conf={conf}<{base_conf}", key=f"mc_{evt_key}_{direction}")
                                             continue
 
                                         # FAST PATH: create strategy + MT5 order FIRST, Gemma audits async
@@ -2173,6 +2195,7 @@ class AIdan:
 
                                 except Exception as evt_err:
                                     logger.error(f"Calendar event processing error: {evt_err}")
+                                    _cal_dbg('exception', f"{evt_err}", key=f"exc_{iteration}")
                                     continue
                         else:
                             logger.debug(f"[{iteration}] Calendar endpoint returned {cal_resp.status_code}")
