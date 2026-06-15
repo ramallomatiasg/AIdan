@@ -60,7 +60,8 @@ bounce (en shadow, no concluyente — el loop evitó un error), bias rezagado
 | 5 | Bounce-skip | **SHADOW** | cuando n limpio alcance |
 
 ### Próximas a entrar (en orden — UNA por semana como máximo)
-6. **Detector de régimen en vivo → gate por régimen** ← LA GRANDE del corto plazo.
+6. ~~**Detector de régimen en vivo → gate por régimen**~~ ⏸️ MEDIDO 14 Jun (barrido exhaustivo broker-truth) → **NO justificado todavía**: ninguna celda régimen×trigger separa del baseline con n≥25 y CI sin cruzar. La única que pasó el gate (tendencia×vol-baja, p=0.027) era régimen×VOL (no ×trigger) y FRÁGIL al lookahead (caía a p=0.07 con cutoff −360s). Construirlo ahora = edificar sobre evidencia que no existe. **Señal marginal débil**: vol baja rinde peor que vol alta (32% vs 41%, ambas rozan p~0.057 pero cruzan) → si algo, apunta a un ATR-floor más alto, NO a un detector completo. **Plan corregido**: etiquetar régimen EN VIVO (en el momento del entry, shadow) y re-medir ~17 Jul con ~300 limpios; recién ahí decidir. Tool: `tools/measure_regime_x_trigger.py` (env CUT_BEFORE_S para el test de lookahead).
+   *Detalle original (la idea, si la data limpia la resucita):* **Detector de régimen en vivo → gate por régimen.**
    El playbook documenta 8 regímenes y el sangrado viene de chop/whipsaw, pero
    AIdan no SABE en qué régimen está. Construir un clasificador mecánico simple
    (ATR relativo, % de velas alternantes, distancia a eventos) y correrlo en
