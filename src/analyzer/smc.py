@@ -174,6 +174,7 @@ class ConfirmationEngine:
                 htf_zones.append(z)
 
         # Check if price is at a relevant zone
+        is_reversal = False  # v3.40.17: flag explícito del reversal-en-zona
         active_zone = self._find_active_zone(price, htf_zones, htf_bias)
         # If no zone in preferred direction, try opposite (reversal from zone)
         if not active_zone:
@@ -187,6 +188,7 @@ class ConfirmationEngine:
                 else:
                     # Flip bias to follow the zone
                     htf_bias = opposite_bias
+                    is_reversal = True
 
         if not active_zone:
             return []
@@ -219,6 +221,8 @@ class ConfirmationEngine:
             'direction': direction,
             'confidence': conf,
             'htf_trend': htf_bias,
+            'htf_bias': htf_bias,   # v3.40.17: alias — el gate lo leia con este nombre (clave inexistente hasta ahora)
+            'reversal': is_reversal,  # v3.40.17: True si se flipeo el bias en zona opuesta (bias debil)
             'zone': active_zone,
             'confirmation': confirmation,
             'reason': (

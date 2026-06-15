@@ -452,7 +452,6 @@ class TechnicalAnalyzer:
             """Calculate confidence 100% from market conditions — NO hardcoded bases.
             Every point of confidence is earned from real market factors.
             signal_direction: 'CALL' or 'PUT' — used for trend/HTF alignment scoring."""
-            import random
             conf = 40  # Conservative starting point — must earn confidence from real factors
 
             # ── 1. Setup-specific market alignment (0 to +20) ──

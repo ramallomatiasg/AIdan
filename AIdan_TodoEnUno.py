@@ -2566,6 +2566,14 @@ class AIdan:
                                 break
                             direction = setup['direction']
                             conf = setup['confidence']
+                            # v3.40.17: reversal-en-zona (bias HTF flipeado) — hasta ahora estaba
+                            # MUERTO por un bug de clave (el gate leia 'htf_bias' inexistente -> caia
+                            # al bias original -> el filtro HTF lo bloqueaba siempre). Arreglado el
+                            # alias, ahora pasaria a operar. Lo dejamos APAGADO explicitamente (vivo
+                            # idéntico) hasta medirlo: es contra-tendencia, sin evidencia aun.
+                            if setup.get('reversal'):
+                                logger.info(f"SMC reversal {direction} detectado (bias debil, zona opuesta) — DESACTIVADO pendiente de medicion")
+                                continue
                             ms = tech.get_market_state()
                             price = ms.get('price', 0)
                             if price <= 0:
