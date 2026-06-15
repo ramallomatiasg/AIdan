@@ -48,6 +48,21 @@ bounce (en shadow, no concluyente — el loop evitó un error), bias rezagado
 
 ---
 
+## Research externo (14 Jun — workflow web, 3 frentes)
+
+**Broker: NO cambiar.** IC Markets Raw ya es de los más baratos (~0.8p all-in MT5). El ~85% del costo es INHERENTE al scalping de movimientos chicos, no del broker. Fusion Markets ZERO ahorraría ~0.30p/trade (misma lib MT5) pero NO vuelve rentable un PF 0.55-0.75. → anotar para cuenta real, no prioridad.
+
+**Conclusión dura (coincide con nuestra data):** el scalping M5 retail casi nunca paga costos (~0.6-1% de cuentas rentables; hace falta ~47% WR para break-even, AIdan está en 37%). No hacemos nada raro — **el formato M5 es la trampa**. Los pocos retail rentables hacen lo que ya tenemos a mano: **subir de timeframe** (H1 drag 2% vs M5 17% — backtest propio) + validación dura (= nuestra metodología). **El futuro es H1/M15 + wins más grandes, no pulir M5.**
+
+**Ideas nuevas que entran al backlog (ranked):**
+- **H1/M15 como track PRINCIPAL** (no experimento paralelo) — palanca #1, ya construido, solo falta darle peso + juntar n. → al checkpoint 17 Jul (decisión estructural).
+- **Exits asimétricos / R:R dinámico** (partial a 1R + trail ATR) para subir avg-win — el Position Manager ya da la infra. Ataca el problema #1 (avg win 4p vs 6p necesario) sin tocar la entrada.
+- **tick_volume MT5** como filtro de falso breakout (SHADOW, gratis, ya viene en la vela; NO usar en ventana de evento).
+- **Distancia a números redondos** (x.x000/x.x050) — feature + padear SL (SHADOW; evidencia académica Osler/NY Fed; EXPLICA el slippage de #625).
+- **Momentum post-release** = LA jugada de evento (no straddle) — refuerza la decisión del 3 Jul.
+
+**Descartar:** order book/DOM (no existe en forex OTC retail), straddle de noticias, market-making/HFT (sin infra de latencia), multi-par (baja varianza, no da edge), hour-gates, "más alineado = mejor" (contradice SIM A), más ML a n actual.
+
 ## Las ideas, rankeadas por evidencia (el backlog del cerebro)
 
 ### YA en el pipeline (corriendo o activado)
