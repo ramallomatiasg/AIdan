@@ -1422,24 +1422,33 @@ class TechnicalAnalyzer:
                     structural_tp_pips = round(candidate_tp, 1)
 
         # ATR-based TP cap (fallback)
-        # Research consensus (2026): M5 scalping profitable R:R = 1:1 to 1:1.5 with 55-65% WR
-        # TP cap = ATR*2 is realistic for M5 (vs ATR*3 which was too ambitious)
+        # v3.40.18 — TP cap ESCALADO POR TIMEFRAME/EXPIRY. Antes era fijo ATR*2,
+        # calibrado solo para M5 (15min) y aplicado IGUAL a M15/H1 -> recortaba su TP a
+        # R:R ~1:1.2 (verificado: H1 100p->48p, M15 60p->18p). Mas expiry = mas velas de
+        # runway = TP alcanzable mayor. Cap_mult crece con el expiry (M5 2.25x, M15 2.75x,
+        # H1 5x). Bounds: piso R:R 1.2 (NUNCA peor que antes), techo R:R 2.5, y nunca mas
+        # que el TP nominal del profile. El SL/riesgo NO cambia, solo crece el objetivo.
         if atr > 0:
             atr_floor = max(atr, 2.0)
-            tp_cap = round(atr_floor * 2.0, 1)
-            min_rr = 1.2  # allow lower R:R if market is tight; research accepts 1:1 for high-WR scalping
+            expiry_min = profile.get('expiry_minutes', 15)
+            cap_mult = min(max(2.0 + expiry_min / 60.0, 2.0), 5.0)
+            tp_cap = round(atr_floor * cap_mult, 1)
+            min_rr = 1.2  # piso: nunca peor que el comportamiento previo
+            max_rr = 2.5  # techo de sanidad: no apuntar a R:R inalcanzable
             tp_min = round(final_sl * min_rr, 1)
+            tp_max = round(final_sl * max_rr, 1)
             original_tp = final_tp
             # Priority: use structural TP if available and within reasonable bound (<= 2x cap)
             if structural_tp_pips is not None and structural_tp_pips <= tp_cap * 2:
                 final_tp = structural_tp_pips
                 method_tp = 'structural'
             else:
-                final_tp = min(final_tp, tp_cap)
-                final_tp = max(final_tp, tp_min)
+                # apuntar a lo ALCANZABLE (cap escalado), sin pasar el nominal; clamp R:R [1.2, 2.5]
+                final_tp = min(tp_cap, prof_tp)
+                final_tp = round(max(tp_min, min(final_tp, tp_max)), 1)
                 method_tp = 'atr_cap'
             if original_tp != final_tp:
-                self.logger.info(f"TP [{method_tp}]: original={original_tp}p -> {final_tp}p (ATR={atr_floor:.1f}p, SL={final_sl}p, R:R=1:{final_tp/max(final_sl,0.1):.1f})")
+                self.logger.info(f"TP [{method_tp}]: original={original_tp}p -> {final_tp}p (ATR={atr_floor:.1f}p, cap_mult={cap_mult:.2f}, SL={final_sl}p, R:R=1:{final_tp/max(final_sl,0.1):.1f})")
 
         method = 'atr_adaptive' if atr > 0 else 'profile'
         if supports or resistances:

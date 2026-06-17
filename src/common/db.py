@@ -1999,7 +1999,7 @@ def get_active_unexecuted_strategies():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, direction, entry_price, stop_loss, take_profit, confidence
+        SELECT id, direction, entry_price, stop_loss, take_profit, confidence, trigger_type
         FROM auto_strategies
         WHERE status = 'active'
           AND expires_at > ?
@@ -2007,8 +2007,11 @@ def get_active_unexecuted_strategies():
     """, (now_ar(),))
     rows = cursor.fetchall()
     conn.close()
+    # v3.40.18 — incluir trigger_type: el retry (AIdan _try_mt5_execute) lo necesita para
+    # aplicar el cap de lote pre_planned (0.05) en open_position; antes salia None -> cap muerto.
     return [{'id': r[0], 'direction': r[1], 'entry_price': r[2],
-             'stop_loss': r[3], 'take_profit': r[4], 'confidence': r[5]} for r in rows]
+             'stop_loss': r[3], 'take_profit': r[4], 'confidence': r[5],
+             'trigger_type': r[6]} for r in rows]
 
 
 def get_strategies_with_open_mt5():
