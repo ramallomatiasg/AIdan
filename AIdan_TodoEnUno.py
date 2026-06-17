@@ -3616,7 +3616,10 @@ class AIdan:
         # avg_loss baja de $3.36 a ~$2.45 → WR break-even baja de 53.6% a 47.4%.
         TRAILING_ENABLED = True
         BE_TRIGGER = 0.50       # Cuando price va +50% del TP -> mover SL a BE
-        BE_OFFSET_PIPS = 0.5    # SL queda en entry + 0.5p (cubrir comision)
+        # v3.40.19 BUGFIX: 0.5p NO cubria la comision real (~0.7p round-turn IC Markets Raw
+        # + spread de salida ~0.1p = ~0.8p) -> el "break-even" cerraba NETO negativo (-0.20
+        # observado en #658). Subido a 1.0p para que el BE cierre neto >=0, como dice el nombre.
+        BE_OFFSET_PIPS = 1.0    # SL queda 1.0p a favor: cubre comision ~0.8p + margen -> neto >=0
         TRAIL_START = 0.80      # Cuando price va +80% del TP -> empezar trail
         TRAIL_PIPS = 3.0        # Trail SL queda 3p detras del HWM
         TRAIL_DIST = TRAIL_PIPS * 0.0001
@@ -3898,11 +3901,18 @@ class AIdan:
                     executed = 0
                     if is_close and mode == 'active':
                         try:
-                            closed_px = mt5.close_strategy_position(sid)
-                            if closed_px:
+                            # v3.40.19: pedir el flag did_send -> executed=1 SOLO si el PM
+                            # realmente mando la orden. Si la posicion ya estaba cerrada por
+                            # TP/SL, did_send=False -> no atribuir el cierre al PM (no ensuciar
+                            # la lectura del experimento: "cerre yo" vs "ya estaba cerrado").
+                            closed_px, did_send = mt5.close_strategy_position(sid, return_sent_flag=True)
+                            if did_send and closed_px:
                                 executed = 1
                                 _logger.info(f"PositionManager CLOSE [{decision.action}] #{sid} "
                                              f"ticket#{ticket} @ {closed_px} — {decision.reason}")
+                            elif closed_px:
+                                _logger.info(f"PositionManager [{decision.action}] #{sid} — ya estaba "
+                                             f"cerrada por TP/SL @ {closed_px} (no la cerro el PM)")
                         except Exception as ce:
                             _logger.error(f"PositionManager close error #{sid}: {ce}")
                     elif is_close:

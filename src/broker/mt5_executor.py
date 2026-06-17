@@ -857,11 +857,20 @@ class MT5Executor:
             except Exception as e:
                 self.logger.error(f"MT5 instant eval error #{sid}: {e}")
 
-    def close_strategy_position(self, strategy_id):
+    def close_strategy_position(self, strategy_id, return_sent_flag=False):
         """Close the MT5 position associated with a strategy after auto-evaluation.
-        Returns close_price (float) on success, None on failure."""
+        Returns close_price (float) on success, None on failure.
+
+        v3.40.19: con return_sent_flag=True devuelve (price, did_send) — did_send=True
+        SOLO si esta funcion mando una orden de cierre; False si la posicion YA estaba
+        cerrada por TP/SL (devuelve el precio del deal sin haber operado). Lo usa el PM
+        para no marcar executed=1 sobre cierres que no hizo (contaminaba el log del
+        experimento PM). Los callers existentes (sin el flag) reciben el float de siempre."""
+        def _ret(price, sent):
+            return (price, sent) if return_sent_flag else price
+
         if not self.connected or not self._mt5:
-            return None
+            return _ret(None, False)
 
         from src.common.db import get_strategies_with_open_mt5
         open_strats = get_strategies_with_open_mt5()
@@ -881,14 +890,14 @@ class MT5Executor:
                     for deal in deals:
                         if deal.entry == 1:  # entry=1 means close deal
                             self.logger.info(f"MT5 position #{ticket} already closed by TP/SL @ {deal.price:.5f}")
-                            return deal.price
-                return None
+                            return _ret(deal.price, False)  # NO mandamos orden: ya estaba cerrada
+                return _ret(None, False)
 
             p = position[0]
             close_type = self._mt5.ORDER_TYPE_SELL if p.type == 0 else self._mt5.ORDER_TYPE_BUY
             tick = self._mt5.symbol_info_tick(p.symbol)
             if not tick:
-                return None
+                return _ret(None, False)
             close_price = tick.bid if p.type == 0 else tick.ask
 
             request = {
@@ -908,11 +917,11 @@ class MT5Executor:
             result = self._mt5.order_send(request)
             if result and result.retcode == self._mt5.TRADE_RETCODE_DONE:
                 self.logger.info(f"MT5 auto-close: strategy #{strategy_id} ticket #{ticket} closed @ {close_price:.5f}")
-                return close_price
+                return _ret(close_price, True)  # cierre REAL enviado por nosotros
             else:
                 self.logger.error(f"MT5 auto-close failed: strategy #{strategy_id} retcode={result.retcode if result else 'None'}")
-                return None
-        return None
+                return _ret(None, False)
+        return _ret(None, False)
 
     def close_all_positions(self):
         if not self.connected or not self._mt5:
