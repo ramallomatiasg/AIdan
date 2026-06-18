@@ -32,7 +32,16 @@ Bot de trading automático EUR/USD scalping M5, integrado con MetaTrader 5 (cuen
 - [ ] **Lun 15 Jun** — revisar `calendar_debug_log` con el primer evento: ¿el straddle shadow escribió, o el stage dice dónde muere? Si sigue 0 → debug dirigido.
 - [x] ✅ **Detector de régimen MEDIDO 14 Jun → NO se construye** (barrido exhaustivo): ninguna celda régimen×trigger pasó el gate; la única que pasó era régimen×vol y frágil al lookahead. Plan corregido: etiquetar en vivo y re-medir ~17 Jul. (En lugar de construir el detector esta semana.)
 - [ ] **Semana 15-19 Jun** — (régimen despriorizado, ver arriba) seguir acumulando data limpia; opcional: etiquetar régimen en vivo en shadow si se quiere seguir la pista.
-- [ ] **Vie 19 Jun (mini-checkpoint)** — 1ra lectura cooldown · PM intermedio · calendar · reconciliar universos lifetime · query canónica del censo · decisión mt5_filled_at + #632 · **DECISIÓN GRUPO B** (escalar constantes por ATR/TF): es LÓGICA no bug (cambia qué dispara), no se puede medir retro (data M15/H1 destruida por avg_range_pips=0), toca el cerebro de M5 producción → el user (17 Jun) decidió esperar a hoy. Opción propuesta: modelar el escalado **M15/H1-only con M5 CONGELADO**, medido hacia adelante. Decidir: modelar+activar o seguir esperando data limpia.
+- [ ] **Vie 19 Jun — CHECKPOINT COMPLETO (el user pidió 17 Jun: "revisar TODO sin excepciones, empezar a meter mano y corregir").** Revisar c/u CON DATA y decidir corrección, sin parquear por defecto:
+  1. **Cooldown** (1ra lectura, v3.40.15): ¿los skipeados eran perdedores? (medible: qué pasó tras cada skip). Re-correr `measure_entry_suspects.py`.
+  2. **PM** intermedio (camino al veredicto 26 jun): ¿avg_win subió? + confirmar que el log quedó limpio tras el fix executed=1 (v3.40.19).
+  3. **TP escalado por TF (v3.40.18)** 1ra lectura: ¿los TP más grandes ayudan, o en chop bancan menos wins chicos? Data desde 17 jun.
+  4. **🔴 SESGO DIRECCIONAL (hallazgo 17 Jun, PRIORIDAD)**: 15-17 jun casi TODO PUT, **3 días en rojo (~−$31; 17 jun 1W/7L −$12.35, 8/8 PUT)**. ¿Régimen real (EUR/USD bajó parejo) o le vendimos al rebote/chop (= sesgo bajista pegado, "todo aligned = entrada tardía")? Medir bias vs deriva real (sospechoso B de `measure_entry_suspects.py`). Si es patrón real (no ruido n chico) → meter mano.
+  5. **GRUPO B** (escalar constantes por ATR/TF — vol 10/4, breakout 7p, prox 12-15p, cluster 5p, SL floor): es LÓGICA no bug, no medible retro (data M15/H1 destruida por avg_range_pips=0), toca el cerebro de M5. Opción: modelar **M15/H1-only con M5 CONGELADO**, medido hacia adelante. DECIDIR: modelar+activar o esperar data limpia.
+  6. **calendar**: ¿escribió con la instrumentación v3.40.16? (revisar `calendar_debug_log`).
+  7. **Universos lifetime** sin reconciliar (broker vs DB vs balance) + query canónica del censo limpio.
+  8. **mt5_filled_at** (edad desde fill, obs #625) + **#632** (pnl NULL): decisión.
+  9. **Repasar el resto de NOTAS sin excepción**: SMC reversal (medición pendiente, hoy apagado), demand/supply enforce, trend-desync MA9/21 vs MTF, feedback de aprendizaje muerto (±15 sobre tablas no pobladas → calibración limpia), deudas técnicas (lock cierre PM, evaluation gap news LLM).
 - [ ] **Vie 26 Jun (CHECKPOINT)** — veredicto PM (keep/revert) + **1er intento de calibración empírica** (~150 limpios) + 2da lectura cooldown.
 - [ ] **Vie 3 Jul** — decidir la jugada de eventos (straddle vs momentum post-release vs skip) con el shadow acumulado.
 - [ ] **Vie 10 Jul** — régimen: ¿celdas régimen×trigger bloqueables?
