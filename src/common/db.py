@@ -534,6 +534,23 @@ def init_db():
         )
     """)
 
+    # v3.40.20 — Level-quality log: tagea CADA señal de structure que se ejecuta con la
+    # cantidad de toques de su nivel (calidad), EN EL MOMENTO. Join por strategy_id a
+    # trade_archive -> medir WR de nivel-validado (>=2 toques) vs ruido. Plan B (mejora
+    # TODOS los setups de structure si calidad separa). NO cambia comportamiento.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS level_quality_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER,
+            setup_type TEXT,
+            direction TEXT,
+            key_level REAL,
+            level_touches INTEGER,
+            confidence REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.40.4 — Calendar shadow log: el straddle que 'calendar' generaria (ambas patas) SIN operar.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS calendar_shadow_log (
@@ -2104,6 +2121,22 @@ def log_pullback_shadow(direction, setup_type, entry_price, key_level, level_tou
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (direction, setup_type, entry_price, key_level, level_touches, rsi,
               htf_bias, m5_trend, confidence, snap, now_ar()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def log_level_quality(strategy_id, setup_type, direction, key_level, level_touches, confidence):
+    """v3.40.20 — Tagea una señal de structure ejecutada con la calidad de su nivel (toques).
+    Join por strategy_id a trade_archive para medir WR por calidad. NO cambia comportamiento."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("""
+            INSERT INTO level_quality_log
+                (strategy_id, setup_type, direction, key_level, level_touches, confidence, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (strategy_id, setup_type, direction, key_level, level_touches, confidence, now_ar()))
         conn.commit()
         conn.close()
     except Exception:

@@ -1119,6 +1119,17 @@ class TechnicalAnalyzer:
                 self.logger.info(f"Entry quality gates: blocked {blocked}/{gates_pre} signal(s) (exhaustion/body)")
             signals = gates_filtered
 
+        # v3.40.20 — tag CADA señal con la calidad de su nivel (toques) EN EL MOMENTO.
+        # No cambia nada del comportamiento: solo enriquece el dict para que el scan loop
+        # lo loguee y midamos si nivel-validado (>=2 toques, como SMC) separa WR. Es la
+        # medición del "plan B" (calidad de nivel) sobre TODA la señal de structure.
+        for _s in signals:
+            try:
+                _kl = _s.get('key_level')
+                _s['level_touches'] = level_touches(_kl) if _kl else 0
+            except Exception:
+                _s['level_touches'] = 0
+
         if signals:
             self.logger.info(f"Structure scanner: {len(signals)} signals detected")
         return signals

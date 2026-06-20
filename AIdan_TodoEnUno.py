@@ -2504,6 +2504,13 @@ class AIdan:
                                 if sid:
                                     strategies_created += 1
                                     cycle_signals.append({'source': 'structure', 'direction': direction, 'confidence': conf})
+                                    # v3.40.20 — tag calidad de nivel (plan B) EN EL MOMENTO; join por sid a trade_archive
+                                    try:
+                                        from src.common.db import log_level_quality
+                                        log_level_quality(sid, sig.get('setup_type', 'structure'), direction,
+                                                          sig.get('key_level'), sig.get('level_touches', 0), conf)
+                                    except Exception:
+                                        pass
                                     logger.info(f"Structure strategy #{sid}: {direction} @ {price:.5f} | {sig['setup_type']} | {sig['reason'][:60]} (audit pending)")
                                     _try_mt5_execute(sid, direction, price, sl, tp, conf)
 
