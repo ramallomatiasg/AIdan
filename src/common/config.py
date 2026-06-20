@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.40.19"
+APP_VERSION = "3.40.20"
 
 class Config:
     VERSION = APP_VERSION
@@ -164,6 +164,16 @@ class Config:
     # SIN bloquear) | active (bloquea senales ciegas/viejas dentro de la ventana del evento
     # — NO activar sin data del shadow). Ventanas: HIGH 15min antes/30 despues; MED 5/15.
     EVENT_WINDOW_MODE = (os.getenv("EVENT_WINDOW_MODE", "shadow") or "shadow").lower()
+
+    # v3.40.20 — Pullback-QUALITY entry (experimento). El "pullback puro" ya existe
+    # (trend_continuation) y PIERDE (n=103, 28% WR, -$153) por disparar sobre niveles de
+    # RUIDO. La data dice que el edge real es la CALIDAD DEL NIVEL (por eso SMC es +EV).
+    # Este detector exige nivel VALIDADO (>=2 toques, como SMC) + vela de rechazo, en
+    # downtrend (vender el rally) / uptrend (comprar el dip). off / shadow / active:
+    #   shadow (DEFAULT) = loguea a pullback_shadow_log con candle snapshot, NO opera,
+    #     M5 vivo 100% intacto (no appendea a signals). Se mide FORWARD (sin re-sim SL/TP).
+    #   active = opera (SOLO tras validacion forward + gate de significancia). NO usar a ciegas.
+    PULLBACK_ENTRY_MODE = (os.getenv("PULLBACK_ENTRY_MODE", "shadow") or "shadow").lower()
 
     # v3.40.4 — Calendar (straddle pre-news) mode. El trigger 'calendar' nunca opero (0/325):
     # el feed FF se auto-baneo (hammering -> 429) y ademas el straddle esta roto (anti-

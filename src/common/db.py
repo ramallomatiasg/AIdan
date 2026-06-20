@@ -511,6 +511,29 @@ def init_db():
         )
     """)
 
+    # v3.40.20 — Pullback-quality shadow: el setup que el detector pullback_quality generaria
+    # SIN operar. Guarda candle snapshot para scoring FORWARD (movimiento real posterior, sin
+    # re-simular SL/TP). outcome_pips lo rellena tools/score_pullback_shadow.py de a noche.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pullback_shadow_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            direction TEXT,
+            setup_type TEXT,
+            entry_price REAL,
+            key_level REAL,
+            level_touches INTEGER,
+            rsi REAL,
+            htf_bias TEXT,
+            m5_trend TEXT,
+            confidence REAL,
+            candles_snapshot TEXT,
+            outcome_pips REAL DEFAULT NULL,
+            outcome_price REAL DEFAULT NULL,
+            scored_at TIMESTAMP DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.40.4 — Calendar shadow log: el straddle que 'calendar' generaria (ambas patas) SIN operar.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS calendar_shadow_log (
@@ -2060,6 +2083,27 @@ def log_bounce_decision(strategy_id, direction, trigger_type, candle_open,
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (strategy_id, direction, trigger_type, candle_open, candle_close,
               1 if is_bounce else 0, mode, 1 if skipped else 0, now_ar()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def log_pullback_shadow(direction, setup_type, entry_price, key_level, level_touches,
+                        rsi, htf_bias, m5_trend, confidence, candles_snapshot):
+    """v3.40.20 — Persiste un setup pullback_quality en SHADOW (sin operar). El candle
+    snapshot permite el scoring FORWARD (movimiento real posterior), sin re-simular SL/TP."""
+    try:
+        import json as _json
+        conn = sqlite3.connect(DB_PATH)
+        snap = candles_snapshot if isinstance(candles_snapshot, str) else _json.dumps(candles_snapshot)
+        conn.execute("""
+            INSERT INTO pullback_shadow_log
+                (direction, setup_type, entry_price, key_level, level_touches, rsi,
+                 htf_bias, m5_trend, confidence, candles_snapshot, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (direction, setup_type, entry_price, key_level, level_touches, rsi,
+              htf_bias, m5_trend, confidence, snap, now_ar()))
         conn.commit()
         conn.close()
     except Exception:

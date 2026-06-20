@@ -448,6 +448,12 @@ class TechnicalAnalyzer:
             key = f"{round(level, 4)}_{direction}"
             self._triggered_levels[key] = time.time()
 
+        def level_touches(level, tol_pips=2.0):
+            # v3.40.20: cuantas velas (de las ~100 en scope) interactuaron con el nivel.
+            # >=2 toques = nivel VALIDADO (zona tipo-SMC) vs fractal de 2-vecinos = ruido.
+            tol = tol_pips * 0.0001
+            return sum(1 for _c in candles if (_c['low'] - tol) <= level <= (_c['high'] + tol))
+
         def dynamic_conf(_unused_base, setup_type, signal_direction=None):
             """Calculate confidence 100% from market conditions — NO hardcoded bases.
             Every point of confidence is earned from real market factors.
@@ -912,6 +918,71 @@ class TechnicalAnalyzer:
                             'key_level': nearest_res
                         })
                         mark_triggered(nearest_res, 'TREND_PUT')
+
+        # ── 7b. PULLBACK-QUALITY (v3.40.20, experimento SHADOW) ──
+        # Hipotesis: el rechazo-en-nivel pierde (trend_continuation n=103, 28% WR, -$153)
+        # porque dispara sobre niveles de RUIDO (fractal 2-vecinos). Exigir nivel VALIDADO
+        # (>=2 toques, como las zonas SMC = el unico +EV) + vela de rechazo confirmatoria,
+        # anclado al htf_bias (no al trend instantaneo). En downtrend = vender el rally;
+        # uptrend = comprar el dip. SHADOW: loguea sin appendear -> M5 vivo 100% intacto.
+        try:
+            from src.common.config import Config as _PBCfg
+            _pb_mode = (getattr(_PBCfg, 'PULLBACK_ENTRY_MODE', 'off') or 'off')
+        except Exception:
+            _pb_mode = 'off'
+        # Solo M5 por ahora (las subclases M15/H1 heredan esto; sus pips no escalan -> excluir)
+        if _pb_mode != 'off' and getattr(self, 'timeframe_label', 'M5') not in ('M15', 'H1'):
+            try:
+                _pb = None
+                if htf_bias == 'bearish' and trend == 'bearish' and ma_fast < ma_slow and resistances:
+                    _abv = [r for r in resistances if r >= price]
+                    _nr = min(_abv) if _abv else None
+                    if _nr is not None:
+                        _d = (_nr - price) * 10000
+                        _t = level_touches(_nr)
+                        _rng = prev1['high'] - prev1['low']
+                        _uw = prev1['high'] - max(prev1['open'], prev1['close'])
+                        if (0 <= _d <= 6 and _t >= 2 and prev1['close'] < prev1['open']
+                                and prev1['close'] < _nr and _rng > 0 and _uw >= 0.5 * _rng):
+                            _pb = ('PUT', 'pullback_quality_bear', _nr, _t)
+                if _pb is None and htf_bias == 'bullish' and trend == 'bullish' and ma_fast > ma_slow and supports:
+                    _bel = [s for s in supports if s <= price]
+                    _ns = max(_bel) if _bel else None
+                    if _ns is not None:
+                        _d = (price - _ns) * 10000
+                        _t = level_touches(_ns)
+                        _rng = prev1['high'] - prev1['low']
+                        _lw = min(prev1['open'], prev1['close']) - prev1['low']
+                        if (0 <= _d <= 6 and _t >= 2 and prev1['close'] > prev1['open']
+                                and prev1['close'] > _ns and _rng > 0 and _lw >= 0.5 * _rng):
+                            _pb = ('CALL', 'pullback_quality_bull', _ns, _t)
+                if _pb:
+                    _pbdir, _pbtype, _pblvl, _pbtch = _pb
+                    if not already_triggered(_pblvl, 'PBQ_' + _pbdir):
+                        mark_triggered(_pblvl, 'PBQ_' + _pbdir)
+                        _pbconf = dynamic_conf(70, _pbtype, _pbdir)
+                        if _pb_mode == 'shadow':
+                            # NO appendear -> M5 vivo intacto; loguear para medir FORWARD
+                            try:
+                                from src.common.db import log_pullback_shadow
+                                _snap = [{'o': c['open'], 'h': c['high'], 'l': c['low'], 'c': c['close']}
+                                         for c in candles[-5:]]
+                                log_pullback_shadow(_pbdir, _pbtype, round(price, 5), round(_pblvl, 5),
+                                                    _pbtch, round(rsi, 1), htf_bias, trend,
+                                                    round(_pbconf, 1), _snap)
+                            except Exception:
+                                pass
+                        elif _pb_mode == 'active' and _pbconf >= min_confidence:
+                            signals.append({
+                                'direction': _pbdir,
+                                'confidence': min(_pbconf, 85),
+                                'reason': (f"Pullback-calidad {_pbdir}: rechazo en nivel {_pblvl:.5f} "
+                                           f"({_pbtch} toques validado), tendencia {trend}/{htf_bias}."),
+                                'setup_type': _pbtype,
+                                'key_level': _pblvl
+                            })
+            except Exception as _pbe:
+                self.logger.debug(f"pullback_quality: {_pbe}")
 
         # ── 8. PRICE AT KEY LEVEL: DISABLED — 24% WR in 17 trades, worst performing setup ──
         # level_bounce and level_rejection removed based on statistical evidence
