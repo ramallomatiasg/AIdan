@@ -448,10 +448,13 @@ class TechnicalAnalyzer:
             key = f"{round(level, 4)}_{direction}"
             self._triggered_levels[key] = time.time()
 
-        def level_touches(level, tol_pips=2.0):
+        def level_touches(level, tol_pips=None):
             # v3.40.20: cuantas velas (de las ~100 en scope) interactuaron con el nivel.
             # >=2 toques = nivel VALIDADO (zona tipo-SMC) vs fractal de 2-vecinos = ruido.
-            tol = tol_pips * 0.0001
+            # v3.40.21: el tol ESCALA por ATR del track (M5 ~2p, M15/H1 proporcional al
+            # tamaño de su vela) -> mide calidad bien en los 3 timeframes (Grupo B en shadow).
+            _tp = tol_pips if tol_pips is not None else max(2.0, avg_range * 0.5)
+            tol = _tp * 0.0001
             return sum(1 for _c in candles if (_c['low'] - tol) <= level <= (_c['high'] + tol))
 
         def dynamic_conf(_unused_base, setup_type, signal_direction=None):
@@ -930,10 +933,13 @@ class TechnicalAnalyzer:
             _pb_mode = (getattr(_PBCfg, 'PULLBACK_ENTRY_MODE', 'off') or 'off')
         except Exception:
             _pb_mode = 'off'
-        # Solo M5 por ahora (las subclases M15/H1 heredan esto; sus pips no escalan -> excluir)
-        if _pb_mode != 'off' and getattr(self, 'timeframe_label', 'M5') not in ('M15', 'H1'):
+        # v3.40.21: corre en los 3 tracks (Grupo B en shadow). Las constantes en pips escalan
+        # por ATR del track -> no dispara fuera de fase en M15/H1. Sigue siendo shadow (no toca vivo).
+        if _pb_mode != 'off':
             try:
                 _pb = None
+                _pb_retest = max(6.0, avg_range * 1.5)  # retest dist escala por ATR (M5~6p, M15/H1 mayor)
+                _pb_tf = getattr(self, 'timeframe_label', 'M5')
                 if htf_bias == 'bearish' and trend == 'bearish' and ma_fast < ma_slow and resistances:
                     _abv = [r for r in resistances if r >= price]
                     _nr = min(_abv) if _abv else None
@@ -942,7 +948,7 @@ class TechnicalAnalyzer:
                         _t = level_touches(_nr)
                         _rng = prev1['high'] - prev1['low']
                         _uw = prev1['high'] - max(prev1['open'], prev1['close'])
-                        if (0 <= _d <= 6 and _t >= 2 and prev1['close'] < prev1['open']
+                        if (0 <= _d <= _pb_retest and _t >= 2 and prev1['close'] < prev1['open']
                                 and prev1['close'] < _nr and _rng > 0 and _uw >= 0.5 * _rng):
                             _pb = ('PUT', 'pullback_quality_bear', _nr, _t)
                 if _pb is None and htf_bias == 'bullish' and trend == 'bullish' and ma_fast > ma_slow and supports:
@@ -953,7 +959,7 @@ class TechnicalAnalyzer:
                         _t = level_touches(_ns)
                         _rng = prev1['high'] - prev1['low']
                         _lw = min(prev1['open'], prev1['close']) - prev1['low']
-                        if (0 <= _d <= 6 and _t >= 2 and prev1['close'] > prev1['open']
+                        if (0 <= _d <= _pb_retest and _t >= 2 and prev1['close'] > prev1['open']
                                 and prev1['close'] > _ns and _rng > 0 and _lw >= 0.5 * _rng):
                             _pb = ('CALL', 'pullback_quality_bull', _ns, _t)
                 if _pb:
@@ -967,7 +973,7 @@ class TechnicalAnalyzer:
                                 from src.common.db import log_pullback_shadow
                                 _snap = [{'o': c['open'], 'h': c['high'], 'l': c['low'], 'c': c['close']}
                                          for c in candles[-5:]]
-                                log_pullback_shadow(_pbdir, _pbtype, round(price, 5), round(_pblvl, 5),
+                                log_pullback_shadow(_pbdir, _pbtype + '_' + _pb_tf, round(price, 5), round(_pblvl, 5),
                                                     _pbtch, round(rsi, 1), htf_bias, trend,
                                                     round(_pbconf, 1), _snap)
                             except Exception:

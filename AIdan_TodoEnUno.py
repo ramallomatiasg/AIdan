@@ -3409,6 +3409,14 @@ class AIdan:
                                                 entry_context=_m15_ctx,
                                             )
                                             if _m15_sid:
+                                                # v3.40.21 — tag calidad de nivel (Grupo B en shadow) para M15
+                                                try:
+                                                    from src.common.db import log_level_quality
+                                                    log_level_quality(_m15_sid, _top.get('setup_type', 'm15_structure'),
+                                                                      _m15_dir, _top.get('key_level'),
+                                                                      _top.get('level_touches', 0), _m15_conf)
+                                                except Exception:
+                                                    pass
                                                 # v3.35.0 — ML confidence predictor para m15_structure (AUC 0.625 en test)
                                                 _m15_exec_conf = _m15_conf
                                                 try:
@@ -3539,6 +3547,14 @@ class AIdan:
                                                 entry_context=_h1_ctx,
                                             )
                                             if _h1_sid:
+                                                # v3.40.21 — tag calidad de nivel (Grupo B en shadow) para H1
+                                                try:
+                                                    from src.common.db import log_level_quality
+                                                    log_level_quality(_h1_sid, _h1_top.get('setup_type', 'h1_structure'),
+                                                                      _h1_dir, _h1_top.get('key_level'),
+                                                                      _h1_top.get('level_touches', 0), _h1_conf)
+                                                except Exception:
+                                                    pass
                                                 logger.info(f"H1 strategy #{_h1_sid}: {_h1_dir} conf={_h1_conf} SL={_h1_adapt['sl_pips']:.1f}p TP={_h1_adapt['tp_pips']:.1f}p price={_h1_price:.5f} expiry={H1_PROFILE['expiry_minutes']}min")
                                                 _try_mt5_execute(_h1_sid, _h1_dir, _h1_price, _h1_sl, _h1_tp, _h1_conf, track='h1')
                                             else:
