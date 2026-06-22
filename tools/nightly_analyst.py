@@ -582,25 +582,44 @@ def main():
         print(json.dumps(stats, indent=2, default=str))
         return 0
 
-    # 4. Load prompt + invoke
-    try:
-        prompt = _load_prompt(kind, model_id)
-    except Exception as e:
-        logger.error(f"Prompt load error: {e}")
-        return 1
+    # 4. Invoke con FALLBACK DE RUNTIME (v3.40.26).
+    # Antes: si el modelo elegido fallaba EN LA INVOCACION (ej. claude CLI 401 de auth),
+    # hacia return 1 y moria — el fallback solo existia en la SELECCION (binario presente).
+    # Ahora: si el elegido falla, cae a Groq -> Ollama (Groq tiene keys hardcodeadas).
+    def _invoke_kind(_kind, _mid):
+        _pr = _load_prompt(_kind, _mid)
+        if _kind == 'claude_cli':
+            return invoke_claude_cli(stats, _pr)
+        if _kind == 'groq':
+            return invoke_groq(stats, _pr, model_name=_mid)
+        if _kind == 'ollama':
+            return invoke_ollama(stats, _pr, model_name=_mid)
+        raise RuntimeError(f"Unknown model kind: {_kind}")
 
-    try:
-        if kind == 'claude_cli':
-            raw = invoke_claude_cli(stats, prompt)
-        elif kind == 'groq':
-            raw = invoke_groq(stats, prompt, model_name=model_id)
-        elif kind == 'ollama':
-            raw = invoke_ollama(stats, prompt, model_name=model_id)
-        else:
-            logger.error(f"Unknown model kind: {kind}")
-            return 1
-    except Exception as e:
-        logger.error(f"LLM invocation failed: {e}")
+    _chain = [(kind, model_id)]
+    if kind != 'groq' and _groq_available():
+        _chain.append(('groq', 'llama-3.3-70b-versatile'))
+    if kind != 'ollama':
+        try:
+            _chain.append(('ollama', Config.GEMMA_MODEL))
+        except Exception:
+            pass
+
+    raw = None
+    for _k, _m in _chain:
+        try:
+            raw = _invoke_kind(_k, _m)
+            if raw:
+                if (_k, _m) != (kind, model_id):
+                    logger.info(f"Fallback: {kind}/{model_id} fallo -> usando {_k}/{_m}")
+                    kind, model_id = _k, _m  # reflejar el modelo REAL en source/telegram
+                break
+        except Exception as e:
+            logger.error(f"LLM invocation failed ({_k}/{_m}): {e}")
+            raw = None
+            continue
+    if not raw:
+        logger.error("Todos los modelos del fallback fallaron (claude/groq/ollama)")
         return 1
 
     logger.info(f"LLM raw response ({len(raw)} chars): {raw[:200]}...")
