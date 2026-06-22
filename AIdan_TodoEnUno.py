@@ -1147,6 +1147,14 @@ class AIdan:
                         ticket = mt5_exec.open_position(sid, direction, entry_price, sl, tp, confidence, lot_multiplier=lot_mult, trigger_type=trigger_type)
                         if ticket:
                             logger.info(f"MT5 executed: ticket #{ticket} for strategy #{sid} (track={track}, lot_mult={lot_mult})")
+                            # v3.40.23 — aviso Telegram de APERTURA (con la confianza)
+                            try:
+                                from src.common.telegram_alerts import send_trade_open, is_configured
+                                if is_configured():
+                                    send_trade_open(sid, direction, trigger_type or track or 'structure',
+                                                    entry_price, confidence, sl, tp)
+                            except Exception as _toe:
+                                logger.debug(f"Telegram open alert skip: {_toe}")
                         return ticket
                     except Exception as e:
                         logger.error(f"MT5 execution error for #{sid}: {e}")

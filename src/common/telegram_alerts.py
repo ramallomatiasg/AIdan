@@ -81,6 +81,7 @@ def send_alert(message, level='INFO', silent=False):
         'CRITICAL': '🚨 *CRITICAL*\n',
         'WIN': '✅ *WIN*\n',
         'LOSS': '❌ *LOSS*\n',
+        'OPEN': '🔵 *ABRIÓ POSICIÓN*\n',
         'INFO': 'ℹ️ ',
         'WARN': '⚠️ *WARN*\n',
         'NEWS': '📰 ',
@@ -112,11 +113,29 @@ def send_alert(message, level='INFO', silent=False):
         return False
 
 
-def send_trade_result(strategy_id, direction, trigger_type, pnl, conf, balance=None):
-    """Helper para enviar resultado de trade. Auto-formato según win/loss."""
+def send_trade_open(strategy_id, direction, trigger_type, entry_price, confidence,
+                    sl_price=None, tp_price=None):
+    """v3.40.23 — Aviso de APERTURA de posición. La CONFIANZA va acá (no en el resultado)."""
+    msg = f"#{strategy_id} {direction} `{trigger_type}` (conf {confidence:.0f})\n"
+    try:
+        msg += f"Entrada: {entry_price:.5f}"
+        if sl_price and tp_price:
+            slp = abs(entry_price - sl_price) * 10000
+            tpp = abs(tp_price - entry_price) * 10000
+            msg += f"  |  SL {slp:.0f}p · TP {tpp:.0f}p"
+    except Exception:
+        pass
+    return send_alert(msg, level='OPEN')
+
+
+def send_trade_result(strategy_id, direction, trigger_type, pnl, conf=None, balance=None):
+    """Helper para enviar resultado de trade. Auto-formato según win/loss.
+    v3.40.23: 'PnL' -> 'Ganancias'; la confianza se MOVIÓ al aviso de apertura
+    (send_trade_open) — el resultado ya no la muestra. `conf` queda como param
+    opcional para no romper callers existentes (no se usa)."""
     level = 'WIN' if pnl > 0 else 'LOSS' if pnl < 0 else 'INFO'
-    msg = f"#{strategy_id} {direction} `{trigger_type}` (conf {conf:.0f})\n"
-    msg += f"PnL: ${pnl:+.2f}"
+    msg = f"#{strategy_id} {direction} `{trigger_type}`\n"
+    msg += f"Ganancias: ${pnl:+.2f}"
     if balance is not None:
         msg += f"  |  Balance: ${balance:.2f}"
     return send_alert(msg, level=level)
