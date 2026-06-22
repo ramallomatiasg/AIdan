@@ -127,6 +127,7 @@ class TelegramBot:
         cmd = text.split()[0].lower().split('@')[0]  # /cmd@bot -> /cmd
         if cmd == '/status': self._cmd_status()
         elif cmd == '/track': self._cmd_track()
+        elif cmd in ('/posiciones', '/pos', '/abiertas'): self._cmd_positions()
         elif cmd == '/recent': self._cmd_recent()
         elif cmd == '/pause': self._cmd_pause()
         elif cmd == '/resume': self._cmd_resume()
@@ -137,7 +138,8 @@ class TelegramBot:
     def _cmd_help(self):
         self._send(
             "*AIdan bot* — comandos:\n\n"
-            "/status — Balance + daily PnL + posiciones\n"
+            "/status — Balance + PnL del día + posiciones\n"
+            "/posiciones — Abiertas ahora: gana/pierde y cuánto\n"
             "/track — Stats Triple Track (M5/M15/H1)\n"
             "/recent — Ultimas 5 estrategias\n"
             "/pause — Pausa MT5 trading\n"
@@ -172,6 +174,34 @@ class TelegramBot:
         else:
             lines.append("MT5: desconectado")
         self._send("\n".join(lines))
+
+    def _cmd_positions(self):
+        """v3.40.25 — Posiciones abiertas AHORA con P&L flotante (gana/pierde y cuánto)."""
+        mt5_exec = self.mt5_provider() if self.mt5_provider else None
+        if not (mt5_exec and mt5_exec.is_ready() and mt5_exec._mt5):
+            self._send("MT5: desconectado"); return
+        try:
+            import re as _re
+            positions = mt5_exec._mt5.positions_get(symbol='EURUSD') or []
+            if not positions:
+                self._send("Sin posiciones abiertas."); return
+            lines = ["*Posiciones abiertas*"]
+            total = 0.0
+            for p in positions:
+                total += p.profit
+                _dir = 'CALL' if p.type == 0 else 'PUT'
+                _m = _re.search(r'AIdan #(\d+)', p.comment or '')
+                _sid = _m.group(1) if _m else '?'
+                pips = ((p.price_current - p.price_open) if p.type == 0
+                        else (p.price_open - p.price_current)) * 10000
+                _ico = '🟢' if p.profit >= 0 else '🔴'
+                lines.append(f"{_ico} #{_sid} {_dir}  ${p.profit:+.2f} ({pips:+.1f}p)")
+                lines.append(f"   {p.price_open:.5f} → {p.price_current:.5f} · lote {p.volume}")
+            _tico = '🟢' if total >= 0 else '🔴'
+            lines.append(f"\n{_tico} *Total flotante: ${total:+.2f}*")
+            self._send("\n".join(lines))
+        except Exception as e:
+            self._send(f"Error: {e}")
 
     def _cmd_track(self):
         try:
