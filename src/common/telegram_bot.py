@@ -155,15 +155,18 @@ class TelegramBot:
                 info = mt5_exec._mt5.account_info() if mt5_exec._mt5 else None
                 if info:
                     lines.append(f"Balance: ${info.balance:.2f}")
-                    lines.append(f"Equity: ${info.equity:.2f}")
-                    lines.append(f"Free margin: ${info.margin_free:.2f}")
-                    daily = info.balance - 1000.0  # baseline
-                    lines.append(f"Total PnL: ${daily:+.2f}")
+                # v3.40.24: PnL del DIA (broker-truth, deals del dia AR con comision),
+                # NO el total historico (balance-1000). Sin equity/free-margin (pedido del user).
+                try:
+                    _dp = mt5_exec.get_daily_pnl()
+                    lines.append(f"PnL del día: ${_dp:+.2f}")
+                except Exception:
+                    pass
                 positions = mt5_exec._mt5.positions_get(symbol='EURUSD')
                 lines.append(f"Posiciones abiertas: {len(positions) if positions else 0}")
                 # Kill switch (instance attribute)
                 kill = getattr(mt5_exec, 'kill_switch', False)
-                lines.append(f"Trading: {'PAUSADO (kill switch)' if kill else 'ACTIVO'}")
+                lines.append(f"Status: {'OFF ⏸ (kill switch)' if kill else 'ON ✅'}")
             except Exception as e:
                 lines.append(f"MT5 error: {e}")
         else:
