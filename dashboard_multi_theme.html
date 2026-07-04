@@ -7,37 +7,38 @@
     <style>
         /* ===== CSS VARIABLES - DARK THEME (Clean Minimal + Neon Glow) ===== */
         :root {
-            --bg-primary: #0a0a0a;
-            --bg-secondary: #111111;
-            --bg-card: #111111;
-            --bg-card-hover: #161616;
-            --bg-input: #0e0e0e;
-            --border: #1a1a1a;
-            --border-light: #252525;
-            --text-primary: #e8ecf2;
-            --text-secondary: #999;
-            --text-muted: #555;
-            --accent-blue: #4f8ff7;
-            --accent-blue-dim: rgba(79, 143, 247, 0.1);
-            --accent-green: #00f5a0;
-            --accent-green-dim: rgba(0, 245, 160, 0.08);
-            --accent-red: #ff4466;
-            --accent-red-dim: rgba(255, 68, 102, 0.08);
-            --accent-yellow: #ffcc00;
-            --accent-yellow-dim: rgba(255, 204, 0, 0.08);
-            --accent-purple: #a78bfa;
-            --accent-cyan: #00f5d4;
-            --shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+            /* v3.41 redesign: paleta calma azul-negro, acentos desaturados, glow apagado */
+            --bg-primary: #0a0d13;
+            --bg-secondary: #0e121c;
+            --bg-card: #151b2a;
+            --bg-card-hover: #1a2233;
+            --bg-input: #161d2c;
+            --border: #222b40;
+            --border-light: #2c3650;
+            --text-primary: #e7ebf3;
+            --text-secondary: #8a94ac;
+            --text-muted: #56607a;
+            --accent-blue: #5b8cff;
+            --accent-blue-dim: rgba(91, 140, 255, 0.12);
+            --accent-green: #36d399;
+            --accent-green-dim: rgba(54, 211, 153, 0.10);
+            --accent-red: #ff5d73;
+            --accent-red-dim: rgba(255, 93, 115, 0.10);
+            --accent-yellow: #f7b955;
+            --accent-yellow-dim: rgba(247, 185, 85, 0.10);
+            --accent-purple: #9b7bff;
+            --accent-cyan: #35d0c8;
+            --shadow: 0 14px 32px -18px rgba(0, 0, 0, 0.7);
             --shadow-glow: none;
             --radius: 14px;
             --radius-sm: 10px;
-            --transition: all 0.3s ease;
-            /* Neon glow tokens */
-            --glow-blue: 0 0 8px rgba(79,143,247,0.4), 0 0 20px rgba(79,143,247,0.15);
-            --glow-green: 0 0 8px rgba(0,245,160,0.4), 0 0 20px rgba(0,245,160,0.15);
-            --glow-red: 0 0 8px rgba(255,68,102,0.4), 0 0 20px rgba(255,68,102,0.15);
-            --glow-cyan: 0 0 8px rgba(0,245,212,0.4), 0 0 20px rgba(0,245,212,0.15);
-            --glow-yellow: 0 0 8px rgba(255,204,0,0.3), 0 0 20px rgba(255,204,0,0.1);
+            --transition: all 0.2s ease;
+            /* glow tokens suavizados (un solo halo tenue, no doble neón) */
+            --glow-blue: 0 0 6px rgba(91,140,255,0.22);
+            --glow-green: 0 0 6px rgba(54,211,153,0.22);
+            --glow-red: 0 0 6px rgba(255,93,115,0.22);
+            --glow-cyan: 0 0 6px rgba(53,208,200,0.22);
+            --glow-yellow: 0 0 6px rgba(247,185,85,0.2);
         }
 
         /* ===== LIGHT THEME ===== */
@@ -80,8 +81,8 @@
 
         /* ===== HEADER ===== */
         .header {
-            background: rgba(10,10,10,0.92);
-            border-bottom: 1px solid #1a1a1a;
+            background: rgba(10,13,19,0.88);
+            border-bottom: 1px solid var(--border);
             padding: 0 28px;
             height: 52px;
             display: flex;
@@ -102,7 +103,6 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             letter-spacing: -0.5px;
-            filter: drop-shadow(0 0 8px rgba(0,245,212,0.3));
         }
 
         .logo-sub {
@@ -126,7 +126,7 @@
             transition: var(--transition);
             line-height: 1;
         }
-        .theme-toggle:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); box-shadow: 0 0 10px rgba(0,245,212,0.15); }
+        .theme-toggle:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
 
         .status-indicator {
             display: flex; align-items: center; gap: 6px;
@@ -654,6 +654,162 @@
         @media (max-width: 768px) {
             .tab-nav { padding: 0 10px; }
         }
+
+        /* ===== v3.41 PULIDO GLOBAL (solo estilos — no toca estructura ni JS) ===== */
+        /* 1) mata el glow neón en TODOS los números/badges (el grueso del ruido) */
+        * { text-shadow: none !important; }
+        /* 2) números alineados en columnas */
+        body { font-variant-numeric: tabular-nums; }
+        /* 3) hover-lift sutil en las cards */
+        @media (prefers-reduced-motion: no-preference) {
+            .card { transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
+            .card:hover { transform: translateY(-2px); border-color: var(--border-light); }
+        }
+        /* 4) scrollbar más fino y acorde a la paleta */
+        ::-webkit-scrollbar { width: 9px; height: 9px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 5px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        /* 5) foco accesible */
+        input:focus-visible, select:focus-visible, button:focus-visible,
+        a:focus-visible, textarea:focus-visible {
+            outline: 2px solid var(--accent-cyan); outline-offset: 1px;
+        }
+        /* 6) Chrome autofill -> mantener fondo oscuro (arregla el panel Config MT5) */
+        input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus {
+            -webkit-text-fill-color: var(--text-primary);
+            -webkit-box-shadow: 0 0 0 100px var(--bg-input) inset;
+            box-shadow: 0 0 0 100px var(--bg-input) inset;
+            caret-color: var(--text-primary);
+            transition: background-color 9999s ease 0s;
+        }
+
+        /* ===== v3.42 FASE 2: reestructura tab Estrategias ===== */
+        #autoStrategiesGrid { display: block; }
+        .es-head { display:flex; align-items:center; gap:12px; margin:6px 0 12px; }
+        .es-head h3 { margin:0; font-size:14px; font-weight:700; letter-spacing:-.01em; color:var(--text-primary); }
+        .es-head .cnt { font-family:ui-monospace,monospace; font-size:11px; font-weight:700; color:var(--accent-cyan);
+            background:var(--accent-green-dim); border:1px solid var(--border-light); padding:2px 9px; border-radius:999px; }
+        .es-head .maxp { font-size:11px; color:var(--text-muted); }
+        /* signal cards grid (multi-señal) */
+        .es-signals { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; margin-bottom:22px; }
+        .es-sig { position:relative; background:var(--bg-card); border:1px solid var(--border); border-radius:13px;
+            padding:15px 16px 13px; overflow:hidden; cursor:pointer; transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+        .es-sig:hover { transform:translateY(-3px); border-color:var(--border-light); box-shadow:0 14px 30px -18px rgba(0,0,0,.7); }
+        .es-sig .edge { position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--edgec,var(--accent-green)); }
+        .es-sig-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+        .es-sig-dir { display:flex; align-items:center; gap:8px; }
+        .es-sig-dir .tg { font-family:ui-monospace,monospace; font-size:16px; font-weight:700; color:var(--edgec); }
+        .es-trk { font-family:ui-monospace,monospace; font-size:10px; font-weight:700; letter-spacing:.04em; padding:2px 7px; border-radius:6px; }
+        .es-ring-w { position:relative; width:38px; height:38px; flex:none; }
+        .es-ring { width:38px; height:38px; border-radius:50%;
+            background:conic-gradient(var(--edgec) calc(var(--p,0)*1%), #23304a 0);
+            -webkit-mask:radial-gradient(closest-side,transparent 66%,#000 67%); mask:radial-gradient(closest-side,transparent 66%,#000 67%); }
+        .es-ring-w b { position:absolute; inset:0; display:grid; place-items:center; font-family:ui-monospace,monospace; font-size:11px; font-weight:700; color:var(--text-primary); }
+        .es-lv { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-bottom:11px; }
+        .es-lv > div { background:var(--bg-input); border:1px solid var(--border); border-radius:7px; padding:6px 8px; }
+        .es-lv .k { font-size:8.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--text-muted); }
+        .es-lv .v { font-family:ui-monospace,monospace; font-size:12px; font-weight:600; margin-top:2px; color:var(--text-primary); }
+        .es-sig-foot { display:flex; align-items:center; justify-content:space-between; padding-top:10px; border-top:1px solid var(--border); }
+        .es-sig-foot .pl { font-family:ui-monospace,monospace; font-size:14px; font-weight:700; }
+        .es-sig-foot .meta { font-family:ui-monospace,monospace; font-size:10px; color:var(--text-muted); }
+        /* closed table */
+        .es-table { border:1px solid var(--border); border-radius:13px; overflow:hidden; background:var(--bg-card); }
+        .es-trow { display:grid; grid-template-columns:16px 78px 64px 1fr 64px 128px 96px; align-items:center; gap:12px;
+            padding:0 15px; min-height:46px; border-bottom:1px solid var(--border); transition:background .14s; }
+        .es-trow:last-child { border-bottom:0; }
+        .es-trow.h { min-height:32px; background:var(--bg-secondary); }
+        .es-trow.row { cursor:pointer; }
+        .es-trow.row:hover { background:var(--bg-card-hover); }
+        .es-trow .stripe { width:3px; height:22px; border-radius:3px; }
+        .es-th { font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); font-weight:600; }
+        .es-cd { display:flex; align-items:center; gap:6px; font-family:ui-monospace,monospace; font-size:12.5px; font-weight:600; }
+        .es-px { font-family:ui-monospace,monospace; font-size:12px; color:var(--text-muted); }
+        .es-px b { color:var(--text-primary); font-weight:500; }
+        .es-pips { font-family:ui-monospace,monospace; font-size:12.5px; font-weight:600; text-align:right; }
+        .es-reason { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-secondary); }
+        .es-rdot { width:6px; height:6px; border-radius:50%; flex:none; }
+        .es-tpnl { font-family:ui-monospace,monospace; font-size:13px; font-weight:700; text-align:right; }
+        /* chart dentro del modal de detalle */
+        #tradeDetailChart { width:100%; height:300px; margin-top:6px; border-radius:8px; overflow:hidden; }
+        @media (max-width:760px){ .es-signals{grid-template-columns:1fr} }
+
+        /* v3.44: hero card — cuando hay UNA sola señal activa, con chart embebido */
+        .es-hero { position:relative; background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:18px 20px; margin-bottom:22px; cursor:pointer; transition:border-color .18s ease; }
+        .es-hero:hover { border-color:var(--border-light); }
+        .es-hero-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+        .es-hero-dir { display:flex; align-items:center; gap:10px; }
+        .es-hero-dir .tg { font-family:ui-monospace,monospace; font-size:19px; font-weight:700; }
+        .es-hero-dir .meta { font-size:11px; color:var(--text-muted); font-family:ui-monospace,monospace; }
+        .es-hero-badge { font-family:ui-monospace,monospace; font-size:10px; font-weight:700; color:var(--accent-green); background:var(--accent-green-dim); border:1px solid var(--border-light); padding:3px 10px; border-radius:999px; }
+        .es-hero-body { display:flex; gap:22px; align-items:center; margin-bottom:14px; }
+        .es-hero-ring-w { position:relative; width:96px; height:96px; flex:none; }
+        .es-hero-ring { width:100%; height:100%; border-radius:50%; background:conic-gradient(var(--edgec) calc(var(--p,0)*1%), #23304a 0); -webkit-mask:radial-gradient(closest-side,transparent 70%,#000 71%); mask:radial-gradient(closest-side,transparent 70%,#000 71%); }
+        .es-hero-ring-w .c { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+        .es-hero-ring-w b { font-family:ui-monospace,monospace; font-size:25px; font-weight:700; line-height:1; }
+        .es-hero-ring-w span { font-size:9px; letter-spacing:.11em; color:var(--text-muted); text-transform:uppercase; margin-top:3px; }
+        .es-hero-lv { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; flex:1; }
+        .es-hero-lv > div { background:var(--bg-input); border:1px solid var(--border); border-radius:9px; padding:9px 12px; }
+        .es-hero-lv .k { font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); }
+        .es-hero-lv .v { font-family:ui-monospace,monospace; font-size:14px; font-weight:600; margin-top:4px; }
+        .es-hero-chart { width:100%; height:340px; margin-bottom:12px; border-radius:9px; overflow:hidden; cursor:default; }
+        .es-hero-foot { display:flex; align-items:baseline; gap:10px; padding-top:12px; border-top:1px solid var(--border); font-family:ui-monospace,monospace; font-size:12px; color:var(--text-muted); }
+        .es-hero-foot .pl { font-size:16px; font-weight:700; }
+
+        /* ===== v3.43 FASE 2b: MT5 panel / Aprendizaje / Filtros / Tracks / SMC ===== */
+        .es-mt5 { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; padding:14px 16px; margin-bottom:14px; }
+        .es-mt5-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+        .es-mt5-left { display:flex; align-items:center; gap:10px; }
+        .es-mt5-right { display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-family:ui-monospace,monospace; font-size:12px; color:var(--text-secondary); }
+        .es-mt5-right b { color:var(--text-primary); font-weight:600; }
+        .es-kill { padding:6px 13px; border-radius:8px; border:1px solid var(--accent-red); background:var(--accent-red-dim); color:var(--accent-red); font-size:11px; font-weight:700; letter-spacing:.04em; cursor:pointer; transition:.16s; }
+        .es-kill:hover { filter:brightness(1.3); }
+        .es-cfg summary { cursor:pointer; font-size:12px; color:var(--accent-cyan); font-weight:600; padding-top:10px; list-style:none; user-select:none; }
+        .es-cfg summary::-webkit-details-marker { display:none; }
+        .es-cfg summary::before { content:"› "; }
+        .es-cfg[open] summary::before { content:"⌄ "; }
+        .es-cfg-grid { display:flex; gap:12px; flex-wrap:wrap; margin-top:10px; align-items:end; }
+        .es-fld { display:flex; flex-direction:column; gap:4px; min-width:0; }
+        .es-fld label { font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); font-weight:600; }
+        .es-fld input { padding:6px 9px; border-radius:7px; border:1px solid var(--border); background:var(--bg-input); color:var(--text-primary); font-size:13px; font-family:ui-monospace,monospace; }
+        .es-btn { padding:6px 14px; border-radius:7px; border:1px solid var(--accent-cyan); background:transparent; color:var(--accent-cyan); font-size:12px; font-weight:700; cursor:pointer; transition:.16s; }
+        .es-btn:hover { background:var(--accent-blue-dim); }
+
+        .es-learn { display:flex; align-items:center; gap:10px; background:var(--bg-card); border:1px solid var(--border); border-radius:13px; padding:12px 16px; margin-bottom:16px; font-size:13px; flex-wrap:wrap; }
+        .es-learn b { font-size:13px; font-weight:700; color:var(--text-primary); }
+
+        .es-filters { display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+        .es-filters h3 { margin:0; font-size:14px; font-weight:700; color:var(--text-primary); }
+        .es-seg { display:flex; gap:0; border:1px solid var(--border); border-radius:9px; overflow:hidden; }
+        .es-perf { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+
+        .es-tracks { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:16px; }
+        .es-track { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; padding:15px 16px; border-top:2px solid var(--tc); }
+        .es-track .th { display:flex; align-items:center; justify-content:space-between; margin-bottom:2px; }
+        .es-track .th .t { font-size:13px; font-weight:700; color:var(--tc); }
+        .es-track .th .tf { font-family:ui-monospace,monospace; font-size:10px; font-weight:700; color:var(--text-muted); }
+        .es-track .role { font-size:10.5px; color:var(--text-muted); margin-bottom:12px; }
+        .es-track .big { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:10px; }
+        .es-track .big .pnl { font-family:ui-monospace,monospace; font-size:19px; font-weight:700; }
+        .es-track .big .wr { text-align:right; }
+        .es-track .big .wr b { font-family:ui-monospace,monospace; font-size:14px; font-weight:600; display:block; color:var(--text-primary); }
+        .es-track .big .wr span { font-size:10px; color:var(--text-muted); }
+        .es-track .row { display:flex; justify-content:space-between; font-size:11.5px; padding:3px 0; color:var(--text-secondary); }
+        .es-track .row b { color:var(--text-primary); font-family:ui-monospace,monospace; font-weight:600; }
+        .es-verdict { font-size:11.5px; color:var(--text-muted); text-align:center; margin:-4px 0 18px; font-family:ui-monospace,monospace; }
+
+        .es-smc { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; padding:16px 18px; margin-bottom:18px; }
+        .es-smc-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+        .es-smc-head h3 { margin:0; font-size:13px; font-weight:700; color:var(--text-primary); }
+        .es-smc-banner { display:inline-flex; align-items:center; gap:9px; background:var(--accent-green-dim); border:1px solid var(--border-light); border-radius:999px; padding:5px 14px; margin-bottom:14px; font-size:12px; font-weight:700; }
+        .es-smc-tf { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+        .es-tf-card { display:flex; align-items:center; gap:12px; background:var(--bg-input); border:1px solid var(--border); border-radius:9px; padding:11px 15px; }
+        .es-tf-card .n { width:30px; flex:none; font-size:11px; font-weight:700; color:var(--text-muted); letter-spacing:.04em; }
+        .es-tf-card [id$="Trend"] { font-size:14px !important; font-weight:700; margin:0 !important; white-space:nowrap; min-width:96px; }
+        .es-tf-card [id$="Detail"] { flex:1; text-align:right; font-size:10px !important; color:var(--text-muted); line-height:1.3; font-family:ui-monospace,monospace; }
+        /* v3.44: calmar los conteos de la stats-bar — solo los WR quedan coloreados (semánticos) */
+        #statNews, #statAlerts, #statHour { color: var(--text-primary) !important; }
+        @media (max-width:900px){ .es-tracks{grid-template-columns:1fr} .es-smc-tf{grid-template-columns:1fr} }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -965,80 +1121,59 @@
 <div style="padding:12px;">
 
     <!-- MT5 Panel -->
-    <div id="mt5Panel" style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;padding:14px;margin-bottom:14px;display:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-            <div style="display:flex;align-items:center;gap:10px;">
+    <div id="mt5Panel" class="es-mt5" style="display:none;">
+        <div class="es-mt5-row">
+            <div class="es-mt5-left">
                 <span id="mt5StatusDot" style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;"></span>
                 <span id="mt5StatusText" style="font-weight:700;color:var(--text-primary);font-size:14px;">MT5 Offline</span>
                 <span id="mt5AccountBadge" style="font-size:12px;color:var(--text-muted);"></span>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                <span id="mt5Balance" style="font-size:13px;color:var(--text-muted);"></span>
-                <span id="mt5DailyPnl" style="font-size:13px;font-weight:600;"></span>
-                <span id="mt5Positions" style="font-size:13px;color:var(--text-muted);"></span>
-                <button id="mt5KillBtn" onclick="mt5Toggle()" style="padding:4px 12px;border-radius:6px;border:1px solid #ef4444;background:transparent;color:#ef4444;font-size:12px;font-weight:600;cursor:pointer;">KILL SWITCH</button>
+            <div class="es-mt5-right">
+                <span id="mt5Balance"></span>
+                <span id="mt5DailyPnl"></span>
+                <span id="mt5Positions"></span>
+                <button id="mt5KillBtn" class="es-kill" onclick="mt5Toggle()">KILL SWITCH</button>
             </div>
         </div>
         <!-- MT5 Config (collapsible) -->
-        <details style="margin-top:10px;">
-            <summary style="cursor:pointer;font-size:13px;color:var(--accent-cyan);user-select:none;">Configuracion MT5</summary>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;align-items:end;">
-                <div style="display:flex;flex-direction:column;gap:2px;">
-                    <label style="font-size:11px;color:var(--text-muted);">Account</label>
-                    <input id="mt5InputAccount" type="text" style="width:100px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:2px;">
-                    <label style="font-size:11px;color:var(--text-muted);">Password</label>
-                    <input id="mt5InputPassword" type="password" style="width:120px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:2px;">
-                    <label style="font-size:11px;color:var(--text-muted);">Server</label>
-                    <input id="mt5InputServer" type="text" style="width:150px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;" value="ICMarketsSC-Demo">
-                </div>
-                <button onclick="mt5Connect()" style="padding:4px 14px;border-radius:6px;border:1px solid var(--accent-cyan);background:transparent;color:var(--accent-cyan);font-size:12px;font-weight:600;cursor:pointer;">Conectar</button>
+        <details class="es-cfg">
+            <summary>Configuracion MT5</summary>
+            <div class="es-cfg-grid">
+                <div class="es-fld"><label>Account</label><input id="mt5InputAccount" type="text" style="width:100px" autocomplete="off"></div>
+                <div class="es-fld"><label>Password</label><input id="mt5InputPassword" type="password" style="width:120px" autocomplete="new-password"></div>
+                <div class="es-fld"><label>Server</label><input id="mt5InputServer" type="text" style="width:150px" autocomplete="off" value="ICMarketsSC-Demo"></div>
+                <button onclick="mt5Connect()" class="es-btn">Conectar</button>
             </div>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;align-items:end;">
-                <div style="display:flex;flex-direction:column;gap:2px;">
-                    <label style="font-size:11px;color:var(--text-muted);">Risk %</label>
-                    <input id="mt5RiskPercent" type="number" step="0.1" min="0.1" max="5" style="width:70px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;" value="1.0">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:2px;">
-                    <label style="font-size:11px;color:var(--text-muted);">Max Posiciones</label>
-                    <input id="mt5MaxPositions" type="number" min="1" max="10" style="width:70px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;" value="3">
-                </div>
-                <div style="display:flex;flex-direction:column;gap:2px;">
-                    <label style="font-size:11px;color:var(--text-muted);">Lot Max</label>
-                    <input id="mt5MaxLot" type="number" step="0.01" min="0.01" max="1" style="width:70px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;" value="0.10">
-                </div>
-                <button onclick="mt5SaveConfig()" style="padding:4px 14px;border-radius:6px;border:1px solid var(--accent-cyan);background:transparent;color:var(--accent-cyan);font-size:12px;font-weight:600;cursor:pointer;">Guardar</button>
+            <div class="es-cfg-grid">
+                <div class="es-fld"><label>Risk %</label><input id="mt5RiskPercent" type="number" step="0.1" min="0.1" max="5" style="width:70px" value="1.0"></div>
+                <div class="es-fld"><label>Max Posiciones</label><input id="mt5MaxPositions" type="number" min="1" max="10" style="width:70px" value="3"></div>
+                <div class="es-fld"><label>Lot Max</label><input id="mt5MaxLot" type="number" step="0.01" min="0.01" max="1" style="width:70px" value="0.10"></div>
+                <button onclick="mt5SaveConfig()" class="es-btn">Guardar</button>
             </div>
         </details>
     </div>
 
     <!-- Shared Learning Panel -->
-    <div id="sharedLearningPanel" style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;padding:14px;margin-bottom:14px;">
-        <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-size:16px;font-weight:700;color:var(--text-primary);">&#x1F9E0; Aprendizaje Compartido</span>
-            <span id="slStatusDot" style="width:10px;height:10px;border-radius:50%;background:#6b7280;display:inline-block;"></span>
-            <span id="slStatusText" style="font-size:12px;color:var(--text-muted);">No configurado</span>
-            <span id="slStats" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
-            <button onclick="slSyncNow()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent-purple,#9b59b6);background:transparent;color:var(--accent-purple,#9b59b6);font-size:11px;font-weight:600;cursor:pointer;">Sync Ahora</button>
-            <span id="slMessage" style="font-size:12px;"></span>
-        </div>
+    <div id="sharedLearningPanel" class="es-learn">
+        <b>🧠 Aprendizaje Compartido</b>
+        <span id="slStatusDot" style="width:10px;height:10px;border-radius:50%;background:#6b7280;display:inline-block;"></span>
+        <span id="slStatusText" style="font-size:12px;color:var(--text-muted);">No configurado</span>
+        <span id="slStats" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
+        <button onclick="slSyncNow()" class="es-btn" style="border-color:var(--accent-purple,#9b59b6);color:var(--accent-purple,#9b59b6);">Sync Ahora</button>
+        <span id="slMessage" style="font-size:12px;"></span>
     </div>
 
     <!-- Performance bar -->
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
-        <span style="font-size:16px;font-weight:700;color:var(--text-primary);">&#x1F3AF; Estrategias Auto-Generadas</span>
-        <span style="display:none;">Max 6</span>
+    <div class="es-filters">
+        <h3>🎯 Estrategias Auto-Generadas</h3>
         <span id="structureStatus" style="display:none;"></span>
         <!-- Strategy filter toggle -->
-        <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden;font-size:14px;" id="stratFilterBar">
+        <div class="es-seg" id="stratFilterBar">
             <button class="strat-filter-btn active" data-filter="all" onclick="setStratFilter('all')">Todas</button>
             <button class="strat-filter-btn" data-filter="active" onclick="setStratFilter('active')">Activas</button>
             <button class="strat-filter-btn" data-filter="closed" onclick="setStratFilter('closed')">Cerradas</button>
         </div>
-        <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:8px;overflow:hidden;font-size:14px;" id="triggerFilterBar">
+        <div class="es-seg" id="triggerFilterBar">
             <button class="strat-filter-btn trigger-filter active" data-trigger="all" onclick="setTriggerFilter('all')">Todas</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="news" onclick="setTriggerFilter('news')">&#x1F4F0; News</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="structure" onclick="setTriggerFilter('structure')">&#x1F4CA; Estructura</button>
@@ -1046,81 +1181,70 @@
             <button class="strat-filter-btn trigger-filter" data-trigger="calendar" onclick="setTriggerFilter('calendar')">&#x1F4C5; Calendario</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="pattern" onclick="setTriggerFilter('pattern')">&#x1F56F; Patron</button>
             <button class="strat-filter-btn trigger-filter" data-trigger="pre_planned" onclick="setTriggerFilter('pre_planned')">&#x1F4CB; Planificadas</button>
-            <button class="strat-filter-btn trigger-filter" data-trigger="m15" onclick="setTriggerFilter('m15')" title="Track B experimental (M15 timeframe)" style="background:linear-gradient(135deg,#fbbf24,#d97706);color:#000;font-weight:700;border-left:2px solid #d97706;">&#x23F0; M15 (beta)</button>
-            <button class="strat-filter-btn trigger-filter" data-trigger="h1" onclick="setTriggerFilter('h1')" title="Track C experimental (H1 timeframe)" style="background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:700;border-left:2px solid #7c3aed;">&#x1F310; H1 (beta)</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="m15" onclick="setTriggerFilter('m15')" title="Track B experimental (M15 timeframe)" style="background:linear-gradient(135deg,#f7b955,#d97706);color:#000;font-weight:700;">&#x23F0; M15 (beta)</button>
+            <button class="strat-filter-btn trigger-filter" data-trigger="h1" onclick="setTriggerFilter('h1')" title="Track C experimental (H1 timeframe)" style="background:linear-gradient(135deg,#9b7bff,#7c3aed);color:#fff;font-weight:700;">&#x1F310; H1 (beta)</button>
         </div>
-        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;" id="stratPerfBar">
+        <div class="es-perf" id="stratPerfBar">
             <button onclick="generateReport()" id="reportBtn" style="background:var(--accent-purple,#9b59b6);color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;" title="Subir reporte diario a Google Sheets">Reporte</button>
             <span class="stat-chip">Win Rate <span id="stratWR">0%</span></span>
             <span class="stat-chip">W/L/BE <span id="stratWL">0/0/0</span></span>
-            <span class="stat-chip" id="m15StatChip" style="display:none;background:linear-gradient(135deg,#fbbf24,#d97706);color:#000;font-weight:700;" title="Track B M15 (paralelo experimental)">&#x23F0; M15 <span id="m15Stats">0W/0L</span></span>
-            <span class="stat-chip" id="h1StatChip" style="display:none;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:700;" title="Track C H1 (paralelo experimental)">&#x1F310; H1 <span id="h1Stats">0W/0L</span></span>
+            <span class="stat-chip" id="m15StatChip" style="display:none;background:linear-gradient(135deg,#f7b955,#d97706);color:#000;font-weight:700;" title="Track B M15 (paralelo experimental)">&#x23F0; M15 <span id="m15Stats">0W/0L</span></span>
+            <span class="stat-chip" id="h1StatChip" style="display:none;background:linear-gradient(135deg,#9b7bff,#7c3aed);color:#fff;font-weight:700;" title="Track C H1 (paralelo experimental)">&#x1F310; H1 <span id="h1Stats">0W/0L</span></span>
         </div>
     </div>
 
     <!-- v3.19.0 Day 5: Migration alert banner (visible solo cuando M15 supera M5 significativamente) -->
-    <div id="trackMigrationBanner" style="display:none;background:linear-gradient(135deg,#fbbf24,#d97706);color:#000;padding:10px 14px;border-radius:8px;margin-bottom:10px;font-weight:700;font-size:14px;border:2px solid #92400e;box-shadow:0 2px 8px rgba(217,119,6,0.3);"></div>
+    <div id="trackMigrationBanner" style="display:none;background:linear-gradient(135deg,#f7b955,#d97706);color:#000;padding:10px 14px;border-radius:8px;margin-bottom:10px;font-weight:700;font-size:14px;border:2px solid #92400e;box-shadow:0 2px 8px rgba(217,119,6,0.3);"></div>
 
     <!-- v3.19.0 Track Comparison Panel (M5 vs M15) - hidden until M15 has data -->
-    <div id="trackComparePanel" style="display:none;background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;margin-bottom:14px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
-            <div id="trackACard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #22c55e;">
-                <div style="font-weight:700;font-size:17px;color:#22c55e;margin-bottom:6px;">TRACK A &mdash; M5 (produccion)</div>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:16px;" id="trackAStats">
-                    <div>Trades: <span id="taTotal">-</span></div>
-                    <div>WR: <span id="taWR">-</span></div>
-                    <div>PnL: <span id="taPnL">-</span></div>
-                    <div>Avg W: <span id="taWin">-</span></div>
-                    <div>Avg L: <span id="taLoss">-</span></div>
-                </div>
+    <div id="trackComparePanel" style="display:none;">
+        <div class="es-tracks">
+            <div id="trackACard" class="es-track" style="--tc:var(--accent-green)">
+                <div class="th"><span class="t">TRACK A — M5</span><span class="tf">PROD</span></div>
+                <div class="role">Scalping rápido · producción</div>
+                <div class="big"><span class="pnl" id="taPnL">-</span><span class="wr"><b id="taWR">-</b><span><span id="taTotal">-</span> trades</span></span></div>
+                <div class="row"><span>Avg win</span><b id="taWin">-</b></div>
+                <div class="row"><span>Avg loss</span><b id="taLoss">-</b></div>
             </div>
-            <div id="trackBCard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #d97706;">
-                <div style="font-weight:700;font-size:17px;color:#d97706;margin-bottom:6px;">&#x23F0; TRACK B &mdash; M15 (experimental)</div>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:16px;" id="trackBStats">
-                    <div>Trades: <span id="tbTotal">-</span></div>
-                    <div>WR: <span id="tbWR">-</span></div>
-                    <div>PnL: <span id="tbPnL">-</span></div>
-                    <div>Avg W: <span id="tbWin">-</span></div>
-                    <div>Avg L: <span id="tbLoss">-</span></div>
-                </div>
+            <div id="trackBCard" class="es-track" style="--tc:var(--accent-yellow)">
+                <div class="th"><span class="t">⏰ TRACK B — M15</span><span class="tf">BETA</span></div>
+                <div class="role">Sostenido · experimental</div>
+                <div class="big"><span class="pnl" id="tbPnL">-</span><span class="wr"><b id="tbWR">-</b><span><span id="tbTotal">-</span> trades</span></span></div>
+                <div class="row"><span>Avg win</span><b id="tbWin">-</b></div>
+                <div class="row"><span>Avg loss</span><b id="tbLoss">-</b></div>
             </div>
-            <div id="trackCCard" style="background:var(--bg-primary);border-radius:6px;padding:10px;border-left:3px solid #7c3aed;">
-                <div style="font-weight:700;font-size:17px;color:#7c3aed;margin-bottom:6px;">&#x1F310; TRACK C &mdash; H1 (experimental)</div>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:16px;" id="trackCStats">
-                    <div>Trades: <span id="tcTotal">-</span></div>
-                    <div>WR: <span id="tcWR">-</span></div>
-                    <div>PnL: <span id="tcPnL">-</span></div>
-                    <div>Avg W: <span id="tcWin">-</span></div>
-                    <div>Avg L: <span id="tcLoss">-</span></div>
-                </div>
+            <div id="trackCCard" class="es-track" style="--tc:var(--accent-purple)">
+                <div class="th"><span class="t">🌐 TRACK C — H1</span><span class="tf">BETA</span></div>
+                <div class="role">Macro · experimental</div>
+                <div class="big"><span class="pnl" id="tcPnL">-</span><span class="wr"><b id="tcWR">-</b><span><span id="tcTotal">-</span> trades</span></span></div>
+                <div class="row"><span>Avg win</span><b id="tcWin">-</b></div>
+                <div class="row"><span>Avg loss</span><b id="tcLoss">-</b></div>
             </div>
         </div>
-        <div id="trackVerdict" style="margin-top:8px;padding:6px 10px;background:var(--bg-primary);border-radius:6px;font-size:13px;color:var(--text-muted);">
-            Esperando data de Track B (M15)...
-        </div>
+        <div id="trackVerdict" class="es-verdict">Esperando data de Track B (M15)...</div>
     </div>
 
     <!-- SMC Multi-Timeframe Panel -->
-    <div id="smcPanel" style="background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;margin-bottom:14px;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-            <span style="font-weight:700;font-size:16px;color:var(--text-primary);">&#x1F4CA; MULTI-TEMPORALIDAD (SMC)</span>
-            <span id="smcConfirmationBadge" style="font-size:16px;font-weight:700;padding:3px 10px;border-radius:10px;background:#555;color:#fff;">SIN DATOS</span>
+    <div id="smcPanel" class="es-smc">
+        <div class="es-smc-head">
+            <h3>📊 Multi-temporalidad (SMC)</h3>
+            <span id="smcConfirmationBadge" style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:10px;background:#555;color:#fff;">SIN DATOS</span>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;" id="smcTimeframes">
-            <div class="smc-tf-card" id="smc-H1" style="background:var(--bg-primary);border-radius:6px;padding:8px;text-align:center;border:1px solid var(--border-color);">
-                <div style="font-weight:700;font-size:16px;color:var(--text-primary);">H1</div>
-                <div id="smcH1Trend" style="font-size:22px;margin:2px 0;">—</div>
-                <div id="smcH1Detail" style="font-size:16px;color:var(--text-muted);line-height:1.3;"></div>
+        <div class="es-smc-tf" id="smcTimeframes">
+            <div class="es-tf-card" id="smc-H1">
+                <div class="n">H1</div>
+                <div id="smcH1Trend" style="font-size:16px;font-weight:700;margin:4px 0;">—</div>
+                <div id="smcH1Detail" style="font-size:11px;color:var(--text-muted);line-height:1.3;font-family:ui-monospace,monospace;"></div>
             </div>
-            <div class="smc-tf-card" id="smc-M15" style="background:var(--bg-primary);border-radius:6px;padding:8px;text-align:center;border:1px solid var(--border-color);">
-                <div style="font-weight:700;font-size:16px;color:var(--text-primary);">M15</div>
-                <div id="smcM15Trend" style="font-size:22px;margin:2px 0;">—</div>
-                <div id="smcM15Detail" style="font-size:16px;color:var(--text-muted);line-height:1.3;"></div>
+            <div class="es-tf-card" id="smc-M15">
+                <div class="n">M15</div>
+                <div id="smcM15Trend" style="font-size:16px;font-weight:700;margin:4px 0;">—</div>
+                <div id="smcM15Detail" style="font-size:11px;color:var(--text-muted);line-height:1.3;font-family:ui-monospace,monospace;"></div>
             </div>
-            <div class="smc-tf-card" id="smc-M5" style="background:var(--bg-primary);border-radius:6px;padding:8px;text-align:center;border:1px solid var(--border-color);">
-                <div style="font-weight:700;font-size:16px;color:var(--text-primary);">M5</div>
-                <div id="smcM5Trend" style="font-size:22px;margin:2px 0;">—</div>
-                <div id="smcM5Detail" style="font-size:16px;color:var(--text-muted);line-height:1.3;"></div>
+            <div class="es-tf-card" id="smc-M5">
+                <div class="n">M5</div>
+                <div id="smcM5Trend" style="font-size:16px;font-weight:700;margin:4px 0;">—</div>
+                <div id="smcM5Detail" style="font-size:11px;color:var(--text-muted);line-height:1.3;font-family:ui-monospace,monospace;"></div>
             </div>
         </div>
         <div id="smcZonesInfo" style="display:none;"></div>
@@ -1998,6 +2122,32 @@
         return chart;
     }
 
+    // v3.44: helper compartido — elige candles para el chart (snapshot congelado o live cutoff)
+    function _pickChartCandles(s) {
+        let cc = null;
+        if (s.candles_snapshot && s.candles_snapshot.length > 0) {
+            cc = s.candles_snapshot.map(c => {
+                let ts = c.time || c.t || 0;
+                if (typeof ts === 'string' && ts.includes('-')) ts = Math.floor(new Date(ts + 'Z').getTime() / 1000);
+                else ts = parseInt(ts) || 0;
+                return { time: ts, open: c.open ?? c.o, high: c.high ?? c.h, low: c.low ?? c.l, close: c.close ?? c.c };
+            }).filter(c => c.time > 0);
+            if (cc.length > 3) {
+                const flat = cc.filter(c => c.high === c.low).length;
+                if (flat / cc.length > 0.4) cc = null; // discard bad snapshot, use live fallback
+            }
+        }
+        if (!cc && cachedCandles && cachedCandles.length > 0) {
+            cc = cachedCandles;
+            if (s.created_at && s.status !== 'active') {
+                const createdTs = Math.floor(new Date(s.created_at).getTime() / 1000);
+                const frozen = cachedCandles.filter(c => c.time <= createdTs + 300);
+                if (frozen.length >= 5) cc = frozen;
+            }
+        }
+        return cc;
+    }
+
     async function loadStructureStatus() {
         try {
             const res = await fetch(`${API_BASE}/structure-status`);
@@ -2195,169 +2345,143 @@
             // v3.29.0: cache para Trade Detail modal
             _allStrategiesCache = filtered;
 
-            grid.innerHTML = filtered.map(s => {
-                const dirColor = s.direction === 'CALL' ? 'var(--accent-green)' : 'var(--accent-red)';
-                const dirBg = s.direction === 'CALL' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)';
-                const isPaused = s.status === 'paused';
-                const isExpired = !isPaused && (s.status === 'expired' || (s.expires_at && new Date(s.expires_at) < new Date()));
-                const isAutoEval = s.status === 'auto_win' || s.status === 'auto_loss' || s.status === 'auto_break_even';
-                const autoTag = isAutoEval ? ' <span style="font-size:11px;color:var(--text-muted);font-style:italic;">(auto)</span>' : '';
-                const statusBadge = s.result
-                    ? (s.result === 'win'
-                        ? '<span style="color:var(--accent-green);font-weight:700;">&#x2705; WIN' + autoTag + '</span>'
-                        : s.result === 'break_even'
-                        ? '<span style="color:#eab308;font-weight:700;">&#x1F7E1; BE' + autoTag + '</span>'
-                        : s.result === 'loss'
-                        ? '<span style="color:var(--accent-red);font-weight:700;">&#x274C; LOSS' + autoTag + '</span>'
-                        : '<span style="color:var(--text-muted);">&#x23ED; SKIP</span>')
-                    : isPaused
-                    ? '<span style="color:#eab308;font-size:16px;font-weight:700;">&#x23F8; PAUSADA</span>'
-                    : isExpired
-                    ? '<span style="color:var(--text-muted);font-size:16px;">&#x23F3; Evaluando...</span>'
-                    : s.status === 'planned'
-                    ? '<span style="color:#a78bfa;font-size:16px;font-weight:700;">&#x1F4CB; PLANIFICADA</span>'
-                    : '<span style="color:var(--accent-green);font-size:16px;">&#x25CF; ACTIVA</span>';
-                const _safeDate = (str) => { try { const d = new Date(String(str).replace(' ', 'T')); return isNaN(d.getTime()) ? null : d; } catch { return null; } };
-                const _fmtTime = (d) => d ? d.toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
-                const isPlanned = s.status === 'planned';
-                const isPrePlan = s.trigger_type === 'pre_planned';
-                const createdDate = _safeDate(s.created_at);
-                const eventDate = s.event_time ? _safeDate(s.event_time) : null;
-                // v3.31.5 — Bug UI: pre-plans ejecutadas mostraban created_at (ayer 5pm)
-                // en vez de event_time (horario real del evento). Fix: priorizar event_time
-                // SIEMPRE que exista, independiente del status (planned/active/auto_*).
-                const timeStr = eventDate ? _fmtTime(eventDate) : _fmtTime(createdDate);
-                const expiresDate = _safeDate(s.expires_at);
-                const expiresStr = _fmtTime(expiresDate);
-                // v3.40.7 — pre-plans: la activacion es ~5min antes del evento (activate_due_planned_strategies minutes_before=5)
-                const activateDate = (isPlanned && eventDate) ? new Date(eventDate.getTime() - 5*60000) : null;
-                const activateStr = _fmtTime(activateDate);
-                // Tag de evento + creación: mostrar fecha del evento si es pre-plan
-                const eventTimeTag = isPrePlan && eventDate ? `<span style="font-size:12px;color:#a78bfa;margin-left:4px;" title="Generado: ${createdDate ? createdDate.toLocaleString('es-AR') : '-'}\nEvento: ${eventDate.toLocaleString('es-AR')}">📅 ${eventDate.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'})}</span>` : '';
-                const expiryTag = !s.result && !isPlanned && expiresStr ? `<span style="font-size:12px;color:var(--text-muted);margin-left:4px;" title="Expira a las ${expiresStr} (${s.expiry_minutes || '?'}min)">⏱ ${expiresStr}</span>` : '';
-                const opacity = isExpired && !s.result ? '0.6' : '1';
-                const chartId = 'strat-chart-' + s.id;
+            // ── v3.42: split activas / cerradas + render compacto (charts movidos al modal) ──
+            const _isAct = (s) => (s.status === 'active' || s.status === 'paused' || s.status === 'planned') && !s.result;
+            const _safeDate = (str) => { try { const d = new Date(String(str).replace(' ', 'T')); return isNaN(d.getTime()) ? null : d; } catch { return null; } };
+            const _fmtTime = (d) => d ? d.toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
+            const _badge = (tt) => {
+                tt = tt || 'news';
+                if (tt.startsWith('m15_')) return { label:'M15', color:'#f7b955', bg:'rgba(247,185,85,.12)' };
+                if (tt.startsWith('h1_'))  return { label:'H1',  color:'#9b7bff', bg:'rgba(155,123,255,.12)' };
+                if (tt === 'smc')        return { label:'SMC',  color:'#e040fb', bg:'rgba(224,64,251,.12)' };
+                if (tt === 'structure')  return { label:'M5',   color:'var(--accent-green)', bg:'var(--accent-green-dim)' };
+                if (tt === 'calendar')   return { label:'CAL',  color:'#f97316', bg:'rgba(249,115,22,.12)' };
+                if (tt === 'pre_planned')return { label:'PLAN', color:'#a78bfa', bg:'rgba(167,139,250,.12)' };
+                if (tt === 'pattern')    return { label:'PAT',  color:'var(--accent-yellow)', bg:'var(--accent-yellow-dim)' };
+                return { label:'NEWS', color:'var(--accent-cyan)', bg:'var(--accent-green-dim)' };
+            };
+            const _resultOf = (s) => s.result || (s.status==='auto_win'?'win':s.status==='auto_loss'?'loss':s.status==='auto_break_even'?'break_even':null);
 
-                // Vote button states
-                const btnState = (r) => s.result === r ? 'active' : (s.result ? 'disabled' : '');
+            const activeList = filtered.filter(_isAct);
+            const closedList = filtered.filter(s => !_isAct(s));
+            let html = '';
 
-                // MT5 badge
-                let mt5Badge = '';
-                if (s.mt5_ticket && s.mt5_status === 'filled') {
-                    mt5Badge = `<span style="background:rgba(59,130,246,0.2);color:#3b82f6;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;">MT5 #${s.mt5_ticket} | ${s.mt5_lot} lot</span>`;
-                } else if (s.mt5_status === 'closed' && s.mt5_pnl != null) {
-                    const pnlColor = s.mt5_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
-                    mt5Badge = `<span style="background:rgba(${s.mt5_pnl >= 0 ? '34,197,94' : '239,68,68'},0.15);color:${pnlColor};padding:2px 8px;border-radius:6px;font-size:16px;font-weight:800;">${s.mt5_pnl >= 0 ? '+' : ''}$${s.mt5_pnl.toFixed(2)}</span>`;
-                } else if (s.mt5_status === 'error') {
-                    mt5Badge = '<span style="background:rgba(234,179,8,0.15);color:#eab308;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:700;">MT5 Error</span>';
-                }
-
-                return `<div class="card strategy-card" data-sid="${s.id}" onclick="_cardClick(event, ${s.id})" style="opacity:${opacity};border-left:3px solid ${dirColor};min-width:700px;cursor:pointer;" title="Click para ver detalle">
-                    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px 6px;">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <span style="background:${dirBg};color:${dirColor};padding:3px 10px;border-radius:6px;font-weight:800;font-size:16px;">${s.direction}</span>
-                            ${statusBadge}
-                            ${eventTimeTag}
-                            ${mt5Badge}
+            // ── ACTIVAS: 1 sola = hero con chart embebido; varias = grid de fichas compactas ──
+            const heroEligible = activeList.length === 1 && activeList[0].entry_price && !(activeList[0].status === 'planned' && activeList[0].entry_price === 0);
+            if (activeList.length) {
+                html += `<div class="es-head"><h3>Posiciones activas</h3><span class="cnt">${activeList.length}</span><span class="maxp">máx 4</span></div>`;
+                if (heroEligible) {
+                    const s = activeList[0];
+                    const isCall = s.direction === 'CALL';
+                    const edge = isCall ? 'var(--accent-green)' : 'var(--accent-red)';
+                    const b = _badge(s.trigger_type);
+                    const t = _fmtTime(_safeDate(s.event_time) || _safeDate(s.created_at));
+                    const tk = (s.mt5_ticket ? `#${s.mt5_ticket}` : '') + (s.mt5_lot ? ` · ${s.mt5_lot} lot` : '');
+                    let footPl = s.mt5_pnl != null
+                        ? `<span class="pl" style="color:${s.mt5_pnl>=0?'var(--accent-green)':'var(--accent-red)'}">${s.mt5_pnl>=0?'+':''}$${s.mt5_pnl.toFixed(2)}</span>`
+                        : `<span class="pl" style="color:var(--text-secondary)">● activa</span>`;
+                    html += `<div class="es-hero" style="--edgec:${edge}" onclick="_cardClick(event, ${s.id})" title="Click para ver detalle">
+                        <div class="es-hero-top">
+                            <div class="es-hero-dir"><span class="tg" style="color:${edge}">${isCall?'↑':'↓'} ${s.direction}</span>
+                                <span class="es-trk" style="color:${b.color};background:${b.bg}">${b.label}</span>
+                                <span class="meta">score ${s.impact_score}</span></div>
+                            <span class="es-hero-badge">&#x25CF; EN VIVO · #${s.mt5_ticket || s.id}</span>
                         </div>
-                        <div style="text-align:right;">
-                            <span style="font-size:16px;color:var(--accent-cyan);">Conf: ${s.confidence.toFixed(1)}%</span>
-                            <span style="font-size:16px;color:var(--text-muted);margin-left:6px;">Score: ${s.impact_score}</span>
+                        <div class="es-hero-body">
+                            <div class="es-hero-ring-w"><div class="es-hero-ring" style="--p:${Math.round(s.confidence)}"></div>
+                                <div class="c"><b>${Math.round(s.confidence)}</b><span>confianza</span></div></div>
+                            <div class="es-hero-lv">
+                                <div><div class="k">Entrada</div><div class="v">${s.entry_price.toFixed(5)}</div></div>
+                                <div><div class="k">Stop</div><div class="v" style="color:var(--accent-red)">${s.stop_loss.toFixed(5)}</div></div>
+                                <div><div class="k">Objetivo</div><div class="v" style="color:var(--accent-green)">${s.take_profit.toFixed(5)}</div></div>
+                            </div>
                         </div>
-                    </div>
-                    <div id="${chartId}" style="width:100%;height:450px;"></div>
-                    <div style="padding:6px 12px;display:flex;justify-content:space-between;font-size:16px;">
-                        ${isPlanned && s.entry_price === 0 ? `
-                        <span>&#x1F7E6; Entry: <strong style="color:#a78bfa;">Pendiente</strong></span>
-                        <span style="color:var(--accent-green);">&#x1F7E9; TP: <strong style="color:#a78bfa;">+${s.tp_pips || '?'}p</strong></span>
-                        <span style="color:var(--accent-red);">&#x1F7E5; SL: <strong style="color:#a78bfa;">-${s.sl_pips || '?'}p</strong></span>
-                        ` : `
-                        <span>&#x1F7E6; Entry: <strong>${s.entry_price.toFixed(5)}</strong></span>
-                        <span style="color:var(--accent-green);">&#x1F7E9; TP: <strong>${s.take_profit.toFixed(5)}</strong></span>
-                        <span style="color:var(--accent-red);">&#x1F7E5; SL: <strong>${s.stop_loss.toFixed(5)}</strong></span>
-                        `}
-                    </div>
-                    ${isPlanned && s.planning_reasoning ? `<div style="padding:4px 12px;font-size:13px;color:#a78bfa;border-top:1px solid var(--border-color);font-style:italic;">
-                        <strong>AI Reasoning:</strong> ${escapeHtml(s.planning_reasoning).substring(0, 300)}
-                        ${s.entry_strategy ? ' | Estrategia: <strong>' + escapeHtml(s.entry_strategy) + '</strong>' : ''}
-                        ${s.risk_level ? ' | Riesgo: <strong>' + escapeHtml(s.risk_level) + '</strong>' : ''}
-                    </div>` : ''}
-                    <div style="padding:4px 12px;font-size:16px;color:var(--text-secondary);border-top:1px solid var(--border-color);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <span style="white-space:nowrap;color:var(--accent-yellow);font-weight:700;font-size:17px;">${isPlanned ? `&#x23F0; Se activa ~${activateStr} <span style="color:var(--text-muted);font-weight:400;font-size:14px;">&middot; evento ${timeStr}</span>` : `&#x23F0; ${timeStr}${(expiresStr && !s.result) ? ` <span style="color:var(--text-muted);font-weight:400;">&rarr;</span> &#x1F3C1; ${expiresStr}` : ''}`}</span>
-                        ${'' /* v3.40.2: chip de profile_name (⚙ ...) removido — clutter, no aporta */}
-                        ${(() => {
-                            const tt = s.trigger_type || 'news';
-                            // M15 Track B - badge dorado distintivo
-                            if (tt.startsWith('m15_')) {
-                                const sub = tt === 'm15_structure' ? 'STRUCT' : (tt === 'm15_smc' ? 'SMC' : tt.replace('m15_','').toUpperCase());
-                                return '<span style="background:linear-gradient(135deg,#fbbf24,#d97706);color:#000;padding:1px 8px;border-radius:8px;font-size:16px;font-weight:700;" title="Track B experimental">&#x23F0; M15 ' + sub + '</span>';
-                            }
-                            // H1 Track C - badge violeta distintivo
-                            if (tt.startsWith('h1_')) {
-                                const sub = tt === 'h1_structure' ? 'STRUCT' : tt.replace('h1_','').toUpperCase();
-                                return '<span style="background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;padding:1px 8px;border-radius:8px;font-size:16px;font-weight:700;" title="Track C experimental">&#x1F310; H1 ' + sub + '</span>';
-                            }
-                            return ({
-                                smc: '<span style="background:#e040fb;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F9E0; SMC</span>',
-                                structure: '<span style="background:var(--accent-green,#22c55e);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CA; ESTRUCTURA</span>',
-                                calendar: '<span style="background:#f97316;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4C5; CALENDARIO</span>',
-                                pattern: '<span style="background:var(--accent-yellow,#eab308);color:#000;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F56F; PATRON</span>',
-                                pre_planned: '<span style="background:#a78bfa;color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4CB; PRE-PLAN</span>'
-                            }[tt] || '<span style="background:var(--accent-blue);color:#fff;padding:1px 6px;border-radius:8px;font-size:16px;font-weight:700;">&#x1F4F0; NEWS</span>');
-                        })()}
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(s.news_title)}">${escapeHtml((s.news_title||'').replace(/^\s*\[[^\]]*\]\s*/,''))}</span>
-                    </div>
-                    ${'' /* v3.40.6: botones Win/Loss/Skip/Pausar removidos — AIdan auto-evalua y el Position Manager gestiona */}
-                </div>`;
-            }).join('');
-
-            // Render charts — use setTimeout to ensure layout is complete before reading clientWidth
-            setTimeout(() => {
-                for (const s of filtered) {
-                    let chartCandles = null;
-
-                    // 1. Use saved snapshot (frozen at creation time)
-                    if (s.candles_snapshot && s.candles_snapshot.length > 0) {
-                        // Convert compact format {o,h,l,c,t} to LW format {time,open,high,low,close}
-                        chartCandles = s.candles_snapshot.map(c => {
-                            let ts = c.time || c.t || 0;
-                            if (typeof ts === 'string' && ts.includes('-')) {
-                                ts = Math.floor(new Date(ts + 'Z').getTime() / 1000);
-                            } else {
-                                ts = parseInt(ts) || 0;
-                            }
-                            return {
-                                time: ts,
-                                open: c.open ?? c.o,
-                                high: c.high ?? c.h,
-                                low: c.low ?? c.l,
-                                close: c.close ?? c.c
-                            };
-                        }).filter(c => c.time > 0);
-                        // Check if snapshot has bad data (many flat candles = Yahoo garbage)
-                        if (chartCandles.length > 3) {
-                            const flat = chartCandles.filter(c => c.high === c.low).length;
-                            if (flat / chartCandles.length > 0.4) {
-                                chartCandles = null; // discard bad snapshot, use live fallback
-                            }
+                        <div class="es-hero-chart" id="strat-chart-${s.id}" onclick="event.stopPropagation()"></div>
+                        <div class="es-hero-foot">${footPl}<span>${tk}${(tk&&t)?' · ':''}${t}</span></div>
+                    </div>`;
+                } else {
+                    html += '<div class="es-signals">' + activeList.map(s => {
+                        const isCall = s.direction === 'CALL';
+                        const edge = isCall ? 'var(--accent-green)' : 'var(--accent-red)';
+                        const b = _badge(s.trigger_type);
+                        const pend = (s.status === 'planned' && s.entry_price === 0);
+                        const entry = pend ? '—' : s.entry_price.toFixed(5);
+                        const sl = pend ? `-${s.sl_pips||'?'}p` : s.stop_loss.toFixed(5);
+                        const tp = pend ? `+${s.tp_pips||'?'}p` : s.take_profit.toFixed(5);
+                        let foot;
+                        if (s.mt5_pnl != null) {
+                            const pc = s.mt5_pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                            foot = `<span class="pl" style="color:${pc}">${s.mt5_pnl>=0?'+':''}$${s.mt5_pnl.toFixed(2)}</span>`;
+                        } else {
+                            const lbl = s.status==='planned' ? '📋 planificada' : (s.status==='paused' ? '⏸ pausada' : '● activa');
+                            foot = `<span class="meta" style="color:var(--text-secondary)">${lbl}</span>`;
                         }
-                    }
-                    // 2. Fallback: use live MT5 candles when no snapshot or bad snapshot
-                    if (!chartCandles && cachedCandles && cachedCandles.length > 0) {
-                        chartCandles = cachedCandles;
-                        if (s.created_at && s.status !== 'active') {
-                            const createdTs = Math.floor(new Date(s.created_at).getTime() / 1000);
-                            const cutoff = createdTs + 300;
-                            const frozen = cachedCandles.filter(c => c.time <= cutoff);
-                            if (frozen.length >= 5) chartCandles = frozen;
-                        }
-                    }
-
-                    if (chartCandles && chartCandles.length > 0) {
-                        renderStrategyChart('strat-chart-' + s.id, chartCandles, s);
-                    }
+                        const t = _fmtTime(_safeDate(s.event_time) || _safeDate(s.created_at));
+                        const tk = (s.mt5_ticket ? `#${String(s.mt5_ticket).slice(-5)}` : '') + (s.mt5_lot ? ` · ${s.mt5_lot}` : '');
+                        return `<div class="es-sig" style="--edgec:${edge}" onclick="_cardClick(event, ${s.id})" title="Click para ver detalle + gráfico">
+                            <span class="edge"></span>
+                            <div class="es-sig-top">
+                                <div class="es-sig-dir"><span class="tg">${isCall?'↑':'↓'} ${s.direction}</span>
+                                    <span class="es-trk" style="color:${b.color};background:${b.bg}">${b.label}</span></div>
+                                <div class="es-ring-w"><div class="es-ring" style="--p:${Math.round(s.confidence)}"></div><b>${Math.round(s.confidence)}</b></div>
+                            </div>
+                            <div class="es-lv">
+                                <div><div class="k">Entr.</div><div class="v">${entry}</div></div>
+                                <div><div class="k">SL</div><div class="v" style="color:var(--accent-red)">${sl}</div></div>
+                                <div><div class="k">TP</div><div class="v" style="color:var(--accent-green)">${tp}</div></div>
+                            </div>
+                            <div class="es-sig-foot">${foot}<span class="meta">${tk}${(tk&&t)?' · ':''}${t}</span></div>
+                        </div>`;
+                    }).join('') + '</div>';
                 }
-            }, 150);
+            }
+
+            // ── CERRADAS: tabla ──
+            if (closedList.length) {
+                html += `<div class="es-head"><h3>Cerradas</h3><span class="cnt">${closedList.length}</span></div>`;
+                html += `<div class="es-table"><div class="es-trow h">
+                    <span></span><span class="es-th">Dirección</span><span class="es-th">Track</span>
+                    <span class="es-th">Entrada → Salida</span><span class="es-th" style="text-align:right">Pips</span>
+                    <span class="es-th">Resultado</span><span class="es-th" style="text-align:right">P&L</span></div>`;
+                html += closedList.map(s => {
+                    const isCall = s.direction === 'CALL';
+                    const dcol = isCall ? 'var(--accent-green)' : 'var(--accent-red)';
+                    const b = _badge(s.trigger_type);
+                    const r = _resultOf(s);
+                    const stripe = r==='win' ? 'var(--accent-green)' : r==='loss' ? 'var(--accent-red)' : 'var(--text-muted)';
+                    const rlabel = r==='win' ? 'Ganó' : r==='loss' ? 'Perdió' : r==='break_even' ? 'Break-even' : r==='skip' ? 'Skip' : 'Evaluando';
+                    const exit = s.mt5_close_price ? s.mt5_close_price.toFixed(5) : '—';
+                    let pips = '';
+                    if (s.mt5_close_price && s.entry_price) {
+                        const p = (s.mt5_close_price - s.entry_price) * 10000 * (isCall?1:-1);
+                        pips = `<span style="color:${p>=0?'var(--accent-green)':'var(--accent-red)'}">${p>=0?'+':''}${p.toFixed(1)}</span>`;
+                    }
+                    const pnl = s.mt5_pnl != null
+                        ? `<span style="color:${s.mt5_pnl>=0?'var(--accent-green)':'var(--accent-red)'}">${s.mt5_pnl>=0?'+':''}$${s.mt5_pnl.toFixed(2)}</span>`
+                        : '<span style="color:var(--text-muted)">—</span>';
+                    return `<div class="es-trow row" onclick="_cardClick(event, ${s.id})" title="Click para ver detalle + gráfico">
+                        <span class="stripe" style="background:${stripe}"></span>
+                        <span class="es-cd" style="color:${dcol}">${isCall?'↑':'↓'} ${s.direction}</span>
+                        <span class="es-trk" style="color:${b.color};background:${b.bg}">${b.label}</span>
+                        <span class="es-px"><b>${s.entry_price?s.entry_price.toFixed(5):'—'}</b> → <b>${exit}</b></span>
+                        <span class="es-pips">${pips}</span>
+                        <span class="es-reason"><span class="es-rdot" style="background:${stripe}"></span> ${rlabel}</span>
+                        <span class="es-tpnl">${pnl}</span>
+                    </div>`;
+                }).join('') + '</div>';
+            }
+
+            grid.style.display = 'block';  // v3.42: override inline grid (760px cols) → layout apilado
+            grid.innerHTML = html;
+
+            // v3.44: chart embebido solo en modo hero (1 sola señal activa)
+            if (heroEligible) {
+                const s = activeList[0];
+                setTimeout(() => {
+                    const cc = _pickChartCandles(s);
+                    if (cc && cc.length) renderStrategyChart('strat-chart-' + s.id, cc, s);
+                }, 150);
+            }
 
             // Update perf stats
             loadStrategyPerformance();
@@ -2440,13 +2564,16 @@
 
             document.getElementById('taTotal').textContent = ta.total || 0;
             document.getElementById('taWR').textContent = (ta.win_rate || 0) + '%';
+            const _pc = v => (v||0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
             document.getElementById('taPnL').textContent = fmtPnL(ta.sum_pnl || 0);
+            document.getElementById('taPnL').style.color = _pc(ta.sum_pnl);
             document.getElementById('taWin').textContent = ta.avg_win_pips ? fmtPips(ta.avg_win_pips) : '-';
             document.getElementById('taLoss').textContent = ta.avg_loss_pips ? fmtPips(ta.avg_loss_pips) : '-';
 
             document.getElementById('tbTotal').textContent = tb.total || 0;
             document.getElementById('tbWR').textContent = (tb.win_rate || 0) + '%';
             document.getElementById('tbPnL').textContent = fmtPnL(tb.sum_pnl || 0);
+            document.getElementById('tbPnL').style.color = _pc(tb.sum_pnl);
             document.getElementById('tbWin').textContent = tb.avg_win_pips ? fmtPips(tb.avg_win_pips) : '-';
             document.getElementById('tbLoss').textContent = tb.avg_loss_pips ? fmtPips(tb.avg_loss_pips) : '-';
 
@@ -2454,6 +2581,7 @@
             document.getElementById('tcTotal').textContent = tc.total || 0;
             document.getElementById('tcWR').textContent = (tc.win_rate || 0) + '%';
             document.getElementById('tcPnL').textContent = fmtPnL(tc.sum_pnl || 0);
+            document.getElementById('tcPnL').style.color = _pc(tc.sum_pnl);
             document.getElementById('tcWin').textContent = tc.avg_win_pips ? fmtPips(tc.avg_win_pips) : '-';
             document.getElementById('tcLoss').textContent = tc.avg_loss_pips ? fmtPips(tc.avg_loss_pips) : '-';
 
@@ -2865,6 +2993,9 @@
         const title = document.getElementById('tradeDetailTitle');
         const body = document.getElementById('tradeDetailBody');
         if (!modal) return;
+        // v3.44.2: el modal vive dentro de #tab-dashboard; en otras tabs ese ancestro está
+        // display:none y colapsa el modal a 0×0 (chart invisible). Reparentar al body lo arregla.
+        if (modal.parentElement !== document.body) document.body.appendChild(modal);
         modal.style.display = 'flex';
         // Find in cache
         const s = _allStrategiesCache.find(x => x.id === strategyId);
@@ -2880,7 +3011,8 @@
         const fmtP = v => v == null ? '-' : (v >= 0 ? '+' : '') + Number(v).toFixed(2);
         const result = s.status === 'auto_win' ? 'WIN' : s.status === 'auto_loss' ? 'LOSS' : (s.result ? s.result.toUpperCase() : 'PENDING');
         const resultColor = result === 'WIN' ? 'var(--accent-green)' : result === 'LOSS' ? 'var(--accent-red)' : 'var(--text-muted)';
-        let html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">`;
+        let html = `<div id="tradeDetailChart"></div>`;
+        html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">`;
         html += `<div><strong>Result:</strong> <span style="color:${resultColor};font-weight:700;">${result}</span></div>`;
         html += `<div><strong>PnL:</strong> $${fmtP(s.mt5_pnl)}</div>`;
         html += `<div><strong>Direction:</strong> ${s.direction}</div>`;
@@ -2923,6 +3055,11 @@
             html += `<div style="font-size:11px;color:var(--text-muted);">MT5 ticket: ${s.mt5_ticket} | Lot: ${s.mt5_lot || '-'}</div>`;
         }
         body.innerHTML = html;
+        // v3.42: chart dentro del modal (se movió desde la card)
+        setTimeout(() => {
+            const cc = _pickChartCandles(s);
+            if (cc && cc.length) renderStrategyChart('tradeDetailChart', cc, s);
+        }, 60);
     }
 
     function closeTradeDetail() {
