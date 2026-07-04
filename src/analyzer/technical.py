@@ -990,6 +990,74 @@ class TechnicalAnalyzer:
             except Exception as _pbe:
                 self.logger.debug(f"pullback_quality: {_pbe}")
 
+        # ── 7c. FADE-EN-CHOP (v3.45.0, experimento SHADOW) ──
+        # Checkpoint 3-Jul (data limpia n=123): el breakout MUERE en el chop (ATR 3-8p: 16% WR,
+        # -$124, el 57% de los SL-hit) y GANA en expansion (ATR>8p: 46-54% WR). En chop el
+        # breakout es falso -> la logica correcta es la INVERSA: fadear el extremo de un nivel
+        # VALIDADO (>=2 toques) con vela de rechazo. PUT en resistencia / CALL en soporte, en
+        # AMBAS direcciones SIN exigir htf (es rango, no tendencia). SHADOW: loguea sin appendear
+        # -> vivo 100% intacto. Se mide FORWARD (fav Y adverso). NO se ancla a htf a proposito.
+        try:
+            from src.common.config import Config as _FCCfg
+            _fc_mode = (getattr(_FCCfg, 'FADE_CHOP_MODE', 'off') or 'off')
+            _fc_lo = getattr(_FCCfg, 'FADE_CHOP_ATR_MIN', 3.0)
+            _fc_hi = getattr(_FCCfg, 'FADE_CHOP_ATR_MAX', 8.0)
+        except Exception:
+            _fc_mode, _fc_lo, _fc_hi = 'off', 3.0, 8.0
+        # Solo dispara en el regimen chop (donde el breakout no tiene edge). El ATR se loguea
+        # crudo con cada candidato -> la banda exacta se puede re-tunear con la data forward.
+        if _fc_mode != 'off' and _fc_lo <= avg_range <= _fc_hi:
+            try:
+                _fc_tf = getattr(self, 'timeframe_label', 'M5')
+                _fc_prox = max(6.0, avg_range * 1.5)
+                _fc_cands = []
+                _rng = prev1['high'] - prev1['low']
+                if _rng > 0:
+                    _uw = prev1['high'] - max(prev1['open'], prev1['close'])  # mecha superior
+                    _lw = min(prev1['open'], prev1['close']) - prev1['low']   # mecha inferior
+                    # PUT: fade del rechazo en resistencia validada
+                    _abv = [r for r in resistances if r >= price]
+                    _nr = min(_abv) if _abv else None
+                    if _nr is not None:
+                        _d = (_nr - price) * 10000
+                        _t = level_touches(_nr)
+                        if 0 <= _d <= _fc_prox and _t >= 2 and _uw >= 0.4 * _rng:
+                            _fc_cands.append(('PUT', 'fade_chop_res', _nr, _t))
+                    # CALL: fade del rechazo en soporte validado
+                    _bel = [s for s in supports if s <= price]
+                    _ns = max(_bel) if _bel else None
+                    if _ns is not None:
+                        _d = (price - _ns) * 10000
+                        _t = level_touches(_ns)
+                        if 0 <= _d <= _fc_prox and _t >= 2 and _lw >= 0.4 * _rng:
+                            _fc_cands.append(('CALL', 'fade_chop_sup', _ns, _t))
+                for _fcdir, _fctype, _fclvl, _fctch in _fc_cands:
+                    if already_triggered(_fclvl, 'FCH_' + _fcdir):
+                        continue
+                    mark_triggered(_fclvl, 'FCH_' + _fcdir)
+                    _fcconf = dynamic_conf(60, _fctype, _fcdir)
+                    if _fc_mode == 'shadow':
+                        try:
+                            from src.common.db import log_fade_chop_shadow
+                            _snap = [{'o': c['open'], 'h': c['high'], 'l': c['low'], 'c': c['close']}
+                                     for c in candles[-5:]]
+                            log_fade_chop_shadow(_fcdir, _fctype + '_' + _fc_tf, round(price, 5),
+                                                 round(_fclvl, 5), _fctch, round(avg_range, 1),
+                                                 round(rsi, 1), htf_bias, trend, round(_fcconf, 1), _snap)
+                        except Exception:
+                            pass
+                    elif _fc_mode == 'active' and _fcconf >= min_confidence:
+                        signals.append({
+                            'direction': _fcdir,
+                            'confidence': min(_fcconf, 85),
+                            'reason': (f"Fade-chop {_fcdir}: rechazo en nivel {_fclvl:.5f} "
+                                       f"({_fctch} toques) en regimen chop (ATR {avg_range:.1f}p)."),
+                            'setup_type': _fctype,
+                            'key_level': _fclvl
+                        })
+            except Exception as _fce:
+                self.logger.debug(f"fade_chop: {_fce}")
+
         # ── 8. PRICE AT KEY LEVEL: DISABLED — 24% WR in 17 trades, worst performing setup ──
         # level_bounce and level_rejection removed based on statistical evidence
 

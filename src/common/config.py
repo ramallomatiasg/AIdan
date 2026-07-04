@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.40.25"
+APP_VERSION = "3.45.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -174,6 +174,21 @@ class Config:
     #     M5 vivo 100% intacto (no appendea a signals). Se mide FORWARD (sin re-sim SL/TP).
     #   active = opera (SOLO tras validacion forward + gate de significancia). NO usar a ciegas.
     PULLBACK_ENTRY_MODE = (os.getenv("PULLBACK_ENTRY_MODE", "shadow") or "shadow").lower()
+
+    # v3.45.0 — FADE-EN-CHOP (experimento SHADOW). Hallazgo del checkpoint 3-Jul (data limpia
+    # n=123): AIdan es breakout/momentum -> tiene edge REAL en expansion (ATR>8p: 46-54% WR, +EV)
+    # y muere en el CHOP (ATR 3-8p: 16% WR, -$124, p=0.0002, el 57% de los SL-hit). El breakout
+    # es FALSO en chop (serrucha, toca el stop). La logica correcta en chop es la INVERSA: fadear
+    # los extremos de un nivel VALIDADO (>=2 toques) con vela de rechazo -> PUT en resistencia,
+    # CALL en soporte, en AMBAS direcciones sin exigir htf (es rango, no tendencia). En vez de
+    # SACAR los ~58 trades de chop, convertirlos en trades de reversion. off / shadow / active:
+    #   shadow (DEFAULT) = loguea a fade_chop_shadow_log con candle snapshot, NO opera (vivo
+    #     100% intacto). Se mide FORWARD (fav Y adverso, sin re-sim SL/TP).
+    #   active = opera (SOLO tras validacion forward + gate de significancia). NO usar a ciegas.
+    FADE_CHOP_MODE = (os.getenv("FADE_CHOP_MODE", "shadow") or "shadow").lower()
+    # Banda de ATR (pips) que define el "chop" donde el breakout no tiene edge (medido 3-Jul).
+    FADE_CHOP_ATR_MIN = float(os.getenv("FADE_CHOP_ATR_MIN", "3.0"))
+    FADE_CHOP_ATR_MAX = float(os.getenv("FADE_CHOP_ATR_MAX", "8.0"))
 
     # v3.40.4 — Calendar (straddle pre-news) mode. El trigger 'calendar' nunca opero (0/325):
     # el feed FF se auto-baneo (hammering -> 429) y ademas el straddle esta roto (anti-

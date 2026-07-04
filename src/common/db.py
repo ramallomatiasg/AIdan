@@ -534,6 +534,31 @@ def init_db():
         )
     """)
 
+    # v3.45.0 — Fade-en-chop shadow: el setup de REVERSION que se dispararia en el regimen
+    # chop (ATR 3-8p, donde el breakout muere: 16% WR) SIN operar. Guarda candle snapshot +
+    # el ATR (regimen) para scoring FORWARD. El scorer mide excursion FAVORABLE Y ADVERSA
+    # (un fade puede ir a favor y darse vuelta -> hay que ver ambas), sin re-simular SL/TP.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fade_chop_shadow_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            direction TEXT,
+            setup_type TEXT,
+            entry_price REAL,
+            key_level REAL,
+            level_touches INTEGER,
+            avg_range REAL,
+            rsi REAL,
+            htf_bias TEXT,
+            m5_trend TEXT,
+            confidence REAL,
+            candles_snapshot TEXT,
+            outcome_fav_pips REAL DEFAULT NULL,
+            outcome_adv_pips REAL DEFAULT NULL,
+            scored_at TIMESTAMP DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.40.20 — Level-quality log: tagea CADA señal de structure que se ejecuta con la
     # cantidad de toques de su nivel (calidad), EN EL MOMENTO. Join por strategy_id a
     # trade_archive -> medir WR de nivel-validado (>=2 toques) vs ruido. Plan B (mejora
@@ -2120,6 +2145,27 @@ def log_pullback_shadow(direction, setup_type, entry_price, key_level, level_tou
                  htf_bias, m5_trend, confidence, candles_snapshot, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (direction, setup_type, entry_price, key_level, level_touches, rsi,
+              htf_bias, m5_trend, confidence, snap, now_ar()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def log_fade_chop_shadow(direction, setup_type, entry_price, key_level, level_touches,
+                         avg_range, rsi, htf_bias, m5_trend, confidence, candles_snapshot):
+    """v3.45.0 — Persiste un setup fade-en-chop en SHADOW (sin operar). Guarda el ATR (regimen)
+    + candle snapshot para el scoring FORWARD (excursion favorable Y adversa), sin re-sim SL/TP."""
+    try:
+        import json as _json
+        conn = sqlite3.connect(DB_PATH)
+        snap = candles_snapshot if isinstance(candles_snapshot, str) else _json.dumps(candles_snapshot)
+        conn.execute("""
+            INSERT INTO fade_chop_shadow_log
+                (direction, setup_type, entry_price, key_level, level_touches, avg_range, rsi,
+                 htf_bias, m5_trend, confidence, candles_snapshot, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (direction, setup_type, entry_price, key_level, level_touches, avg_range, rsi,
               htf_bias, m5_trend, confidence, snap, now_ar()))
         conn.commit()
         conn.close()
