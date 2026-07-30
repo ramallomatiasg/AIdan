@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.45.0"
+APP_VERSION = "3.47.1"
 
 class Config:
     VERSION = APP_VERSION
@@ -185,10 +185,21 @@ class Config:
     #   shadow (DEFAULT) = loguea a fade_chop_shadow_log con candle snapshot, NO opera (vivo
     #     100% intacto). Se mide FORWARD (fav Y adverso, sin re-sim SL/TP).
     #   active = opera (SOLO tras validacion forward + gate de significancia). NO usar a ciegas.
-    FADE_CHOP_MODE = (os.getenv("FADE_CHOP_MODE", "shadow") or "shadow").lower()
+    FADE_CHOP_MODE = (os.getenv("FADE_CHOP_MODE", "off") or "off").lower()
     # Banda de ATR (pips) que define el "chop" donde el breakout no tiene edge (medido 3-Jul).
     FADE_CHOP_ATR_MIN = float(os.getenv("FADE_CHOP_ATR_MIN", "3.0"))
     FADE_CHOP_ATR_MAX = float(os.getenv("FADE_CHOP_ATR_MAX", "8.0"))
+
+    # v3.46.0 — Tighten de entrada relativo-a-ATR (breakout/breakdown). El tope de distancia
+    # precio<->nivel deja de ser 7p fijo y pasa a ser min(breakout_dist_max, ATR*MULT). Medido
+    # con P&L REAL (level_quality_log JOIN trade_archive, 24-jul): la entrada PEGADA (<=0.5 ATR)
+    # rinde 58% WR (n=26, p=0.028, CI [39-74%] no cruza baseline) y la cola >1 ATR pierde (-$11.9).
+    # El cap a 1 ATR corta la cola perdedora dejando la zona que gana (<=1 ATR = +$42.5). Es
+    # MONOTONICO: nunca afloja vs hoy (min()), solo aprieta -> M5 (ATR chico) se aprieta a su ATR,
+    # m15/h1 (ATR grande) quedan en 7 (el motor no se toca). MULT=0 => apagado (comportamiento viejo).
+    BREAKOUT_DIST_ATR_MULT = float(os.getenv("BREAKOUT_DIST_ATR_MULT", "1.0"))
+    # Piso de la ventana (pips) para no colapsarla en ATR muy bajo (el ATR-gate ya bloquea <1.5p).
+    BREAKOUT_DIST_ATR_FLOOR = float(os.getenv("BREAKOUT_DIST_ATR_FLOOR", "2.0"))
 
     # v3.40.4 — Calendar (straddle pre-news) mode. El trigger 'calendar' nunca opero (0/325):
     # el feed FF se auto-baneo (hammering -> 429) y ademas el straddle esta roto (anti-

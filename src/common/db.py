@@ -1417,11 +1417,15 @@ def get_active_strategies(limit=6):
                 (f", s.risk_level" if has_risk else ", NULL") + \
                 (f", s.planned_sl_pips, s.planned_tp_pips" if has_plan_pips else ", NULL, NULL")
 
+    # v3.45.1 — mt5_close_price al FINAL para no correr los indices existentes (r[28])
+    has_close = 'mt5_close_price' in columns
+    close_col = ', s.mt5_close_price' if has_close else ', NULL'
+
     cursor.execute(f"""
         SELECT s.id, s.alert_id, s.news_title, s.direction, s.entry_price,
                s.stop_loss, s.take_profit, s.confidence, s.impact_score,
                s.expiry_minutes, s.status, s.created_at, s.expires_at,
-               sr.result {tt_col} {snap_col} {prof_col} {mt5_cols} {plan_cols}
+               sr.result {tt_col} {snap_col} {prof_col} {mt5_cols} {plan_cols} {close_col}
         FROM auto_strategies s
         LEFT JOIN strategy_results sr ON s.id = sr.strategy_id
         WHERE date(s.created_at) = date(?) OR s.status IN ('active', 'planned', 'paused')

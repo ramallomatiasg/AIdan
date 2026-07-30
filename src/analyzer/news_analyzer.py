@@ -640,6 +640,7 @@ Responde SOLO con JSON válido (sin markdown, sin ```json). Cada campo debe ser 
     "relevance_to_eurusd": "<DIRECTA|INDIRECTA|NINGUNA - explicar en 1 línea POR QUÉ afecta o no al par EUR/USD>",
     "impact_score": <NÚMERO 0-100>,
     "level": "<BAJA|MEDIA|ALTA|CRITICA>",
+    "stance": "<postura del actor relevante: HAWKISH|DOVISH|NEUTRAL — clasificar en PASO 3 ANTES de la dirección>",
     "should_operate": <true|false>,
     "direction": "<CALL|PUT|NEUTRAL>",
     "confidence": <NÚMERO 0-100 con 2 decimales>,
@@ -667,25 +668,34 @@ GUÍA DE SCORES (impact_score):
 - 20-44: Relación indirecta, impacto diluido
 - 0-19: Sin relación a EUR/USD
 
-DIRECCIÓN - REGLAS CLAVE (EUR/USD = EUR arriba / USD abajo):
-- Dato USA fuerte (mejor que consenso): USD sube → EUR/USD baja → PUT
-- Dato USA débil (peor que consenso): USD baja → EUR/USD sube → CALL
-- Dato Eurozona fuerte: EUR sube → EUR/USD sube → CALL
-- Dato Eurozona débil: EUR baja → EUR/USD baja → PUT
-- Fed hawkish (tasas altas más tiempo): USD sube → PUT
-- Fed dovish (recortes pronto): USD baja → CALL
-- ECB hawkish: EUR sube → CALL
-- ECB dovish: EUR baja → PUT
-- Risk-off (miedo, guerra, crisis): USD sube como refugio → PUT
-- Risk-on (optimismo, paz): USD baja → CALL
-- Si el dato es mixto o sin sorpresa clara → NEUTRAL
+PASO 3 - POSTURA (stance) — OBLIGATORIO, HACELO ANTES DE LA DIRECCIÓN:
+Clasificá al actor relevante (banco central o dato) como HAWKISH, DOVISH o NEUTRAL:
+- HAWKISH = A FAVOR de tasas MÁS ALTAS / subir / mantenerlas altas / no recortar / dato fuerte.
+- DOVISH  = EN CONTRA de subir / recortar / "paciencia" / "todavía no" / "no hay urgencia" / "menos
+            probable" / "demasiado pronto" / "no está claro el caso para subir" / "advierte contra subir" / dato débil.
+- NEUTRAL = mixto o sin sesgo claro.
+⚠️ REGLA CRÍTICA: que el título contenga "hike"/"rate"/"suba" NO lo hace HAWKISH. Leé si el actor
+   está A FAVOR o EN CONTRA de subir. Una frase que NIEGA o pospone la suba es DOVISH AUNQUE diga "hike".
+   Ejemplos:
+     "ECB doesn't see enough yet to warrant a rate hike" → EN CONTRA de subir ahora → DOVISH
+     "ECB sees smaller likelihood of further hike" → menos probable → DOVISH
+     "Too early to decide on rate hikes" → pospone → DOVISH
+     "ECB sees good case for a June hike" → A FAVOR → HAWKISH
+     "Fed will stay patient / no rush to hike" → EN CONTRA de subir ya → DOVISH
+     "Dollar jumps on Fed rate-hike bets" → mercado descuenta suba de la Fed → HAWKISH
 
-NEGACIONES (CUIDADO - frecuentemente mal interpretadas):
-La regla clave es: TASAS MÁS ALTAS = MONEDA MÁS FUERTE (rate differential).
-Si un funcionario habla de NO subir tasas / aún no hay evidencia para hike / paciencia:
-- ECB: "doesn't see enough yet to hike" / "no es momento de subir" / "más paciencia con tasas" / "rate cut still on the table" → ECB DOVISH → EUR débil → PUT
-- Fed: "doesn't see need to hike" / "patience on rates" / "rate cut still on the table" → Fed DOVISH → USD débil → CALL
-ATENCIÓN: la presencia de "rate hike" en el título NO es bullish per se. Si el contexto es "NO se va a subir todavía" eso es DOVISH (negativo para esa moneda).
+PASO 4 - DIRECCIÓN (mecánica, DERIVADA de la POSTURA del PASO 3). EUR/USD = EUR arriba / USD abajo:
+- ECB HAWKISH → EUR fuerte → EUR/USD SUBE → CALL
+- ECB DOVISH  → EUR débil  → EUR/USD BAJA → PUT
+- Fed HAWKISH → USD fuerte → EUR/USD BAJA → PUT
+- Fed DOVISH  → USD débil  → EUR/USD SUBE → CALL
+- Dato USA fuerte (mejor que consenso) → USD sube → PUT | Dato USA débil → CALL
+- Dato Eurozona fuerte → EUR sube → CALL | Dato Eurozona débil → PUT
+- Risk-off (miedo, guerra, crisis) → USD refugio → PUT | Risk-on (optimismo, paz) → CALL
+- stance NEUTRAL o sin sorpresa clara → direction NEUTRAL
+COHERENCIA OBLIGATORIA: la dirección DEBE seguir de la postura por esta tabla. Si clasificaste el
+ECB como DOVISH, la dirección NO puede ser CALL (dovish ECB = euro débil = PUT). Si clasificaste la
+Fed como DOVISH, la dirección NO puede ser PUT. Revisá esa coherencia postura↔dirección antes de responder.
 
 GUÍA DE CONFIDENCE:
 - 80-100: Dato con sorpresa clara vs consenso + mecanismo directo (ej: NFP +300K vs +180K esperado → PUT claro)

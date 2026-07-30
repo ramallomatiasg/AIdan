@@ -619,9 +619,44 @@ class MT5Executor:
                     update_mt5_ticket(sid, ticket, lot, 'filled', fill_price=fill_price)
                     self.logger.info(f"MT5 LIMIT FILLED: #{ticket} {direction} @ {fill_price:.5f} | Strategy #{sid}")
                 else:
-                    # Not pending, not a position — order expired or was cancelled
-                    update_mt5_ticket(sid, ticket, lot, 'expired')
-                    self.logger.info(f"MT5 LIMIT EXPIRED: #{ticket} {direction} — not filled within window | Strategy #{sid}")
+                    # v3.45.1 — positions_get vacio NO prueba que la orden expiro.
+                    # MT5 puede devolver [] de forma TRANSITORIA justo despues del fill
+                    # (glitch confirmado en #804: la posicion estaba viva pero positions_get
+                    # devolvio vacio -> se marcaba 'expired' -> el orphan detector la cerraba
+                    # a spread). Antes de marcar 'expired', confirmar con el historial: si la
+                    # orden figura FILLED o hay deals para el position id, es un fill real.
+                    filled_confirmed = False
+                    fill_px = None
+                    try:
+                        h_orders = self._mt5.history_orders_get(ticket=ticket)
+                        if h_orders:
+                            for ho in h_orders:
+                                if getattr(ho, 'state', None) == self._mt5.ORDER_STATE_FILLED:
+                                    filled_confirmed = True
+                                    fill_px = getattr(ho, 'price_open', None) or getattr(ho, 'price_current', None)
+                                    break
+                    except Exception:
+                        pass
+                    if not filled_confirmed:
+                        try:
+                            _deals = self._mt5.history_deals_get(position=ticket)
+                            if _deals and len(_deals) > 0:
+                                filled_confirmed = True
+                                for _d in _deals:
+                                    if getattr(_d, 'entry', None) == 0:  # entry deal
+                                        fill_px = _d.price
+                                        break
+                        except Exception:
+                            pass
+                    if filled_confirmed:
+                        update_mt5_ticket(sid, ticket, lot, 'filled', fill_price=fill_px)
+                        self.logger.warning(
+                            f"MT5 LIMIT fill confirmado via historial (positions_get transient-empty): "
+                            f"#{ticket} {direction} @ {fill_px if fill_px else '?'} | Strategy #{sid}")
+                    else:
+                        # Confirmado no-fill (historial vacio / cancelada) — recien ahora 'expired'
+                        update_mt5_ticket(sid, ticket, lot, 'expired')
+                        self.logger.info(f"MT5 LIMIT EXPIRED: #{ticket} {direction} — not filled within window | Strategy #{sid}")
         except Exception as e:
             self.logger.warning(f"MT5 sync_pending error: {e}")
 
@@ -644,14 +679,18 @@ class MT5Executor:
             all_positions = self._mt5.positions_get(group="*") or []
             aidan_positions = [p for p in all_positions if p.magic == MAGIC_NUMBER]
             tracked_tickets = {row[1] for row in open_strategies}  # set of tracked tickets
-            # Also include pending limit orders — they may have filled but sync_pending_orders
-            # hasn't run yet. Without this, the orphan detector closes freshly filled limits.
+            # v3.45.1 — Un ticket que pertenece a CUALQUIER estrategia (sin importar el
+            # status) NO es huerfano. Antes solo se protegian 'filled'+'pending' -> si un
+            # fill quedaba mal marcado 'expired'/'error' por un glitch transitorio de MT5
+            # (caso #804), el orphan detector cerraba la posicion VIVA a spread. Ahora se
+            # excluye todo ticket conocido; el orphan detector queda solo para posiciones
+            # con magic de AIdan que no tienen NINGUNA fila en la DB (huerfano real).
             try:
                 import sqlite3
                 from src.common.db import DB_PATH
                 _conn = sqlite3.connect(DB_PATH)
                 _cur = _conn.cursor()
-                _cur.execute("SELECT mt5_ticket FROM auto_strategies WHERE mt5_status = 'pending' AND mt5_ticket IS NOT NULL")
+                _cur.execute("SELECT mt5_ticket FROM auto_strategies WHERE mt5_ticket IS NOT NULL")
                 for _row in _cur.fetchall():
                     tracked_tickets.add(_row[0])
                 _conn.close()

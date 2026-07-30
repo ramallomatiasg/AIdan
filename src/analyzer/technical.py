@@ -677,6 +677,19 @@ class TechnicalAnalyzer:
             lower_wick = body_bot - candle['low']
             return max(upper_wick, lower_wick) / rng
 
+        # ── v3.46.0: tope de distancia al nivel relativo-a-ATR (tighten) ──
+        # min(fijo, ATR*MULT) con piso: NUNCA afloja vs el fijo (min() al final), solo aprieta.
+        # M5 (ATR chico) se aprieta a su ATR; m15/h1 (ATR grande) quedan en el fijo. Medido con
+        # P&L real 24-jul: <=0.5 ATR = 58% WR (p=0.028); >1 ATR pierde. MULT=0 => apagado.
+        from src.common.config import Config as _DistCfg
+        _dmult = _DistCfg.BREAKOUT_DIST_ATR_MULT
+        _dfloor = _DistCfg.BREAKOUT_DIST_ATR_FLOOR
+
+        def dist_cap(fixed):
+            if _dmult > 0 and avg_range > 0:
+                return min(fixed, max(avg_range * _dmult, _dfloor))
+            return fixed
+
         # ── 1. BREAKOUT above resistance (candle-close confirmed) ──
         # v3.13.0: max_dist tightened from 15 to 3 pips — breakouts >3p past level
         # are "stale" (price already moved, exhaustion). Empirical (29 historical):
@@ -688,7 +701,7 @@ class TechnicalAnalyzer:
             dist = (price - res) * 10000  # in pips
             # Require CLOSED candle above resistance (not just current price)
             candle_confirmed = prev1['close'] > res
-            if 0.3 < dist < tuner_params.get('breakout_dist_max', 7) and crossed_above(res) and candle_confirmed:
+            if 0.3 < dist < dist_cap(tuner_params.get('breakout_dist_max', 7)) and crossed_above(res) and candle_confirmed:
                 if not already_triggered(res, 'CALL'):
                     conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakout_resistance', 'CALL')
                     if trend == 'bullish':
@@ -715,7 +728,7 @@ class TechnicalAnalyzer:
         for sup in supports:
             dist = (sup - price) * 10000  # in pips
             candle_confirmed = prev1['close'] < sup
-            if 0.3 < dist < tuner_params.get('breakdown_dist_max', 7) and crossed_below(sup) and candle_confirmed:
+            if 0.3 < dist < dist_cap(tuner_params.get('breakdown_dist_max', 7)) and crossed_below(sup) and candle_confirmed:
                 if not already_triggered(sup, 'PUT'):
                     conf = dynamic_conf(tuner_params.get('conf_breakout', 70), 'breakdown_support', 'PUT')
                     if trend == 'bearish':

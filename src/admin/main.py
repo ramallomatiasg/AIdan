@@ -1500,6 +1500,7 @@ async def list_auto_strategies():
                 "mt5_lot": r[18] if len(r) > 18 else None,
                 "mt5_status": r[19] if len(r) > 19 else None,
                 "mt5_pnl": r[20] if len(r) > 20 else None,
+                "mt5_close_price": r[28] if len(r) > 28 else None,
                 # Pre-planner fields
                 "event_time": r[22] if len(r) > 22 else None,
                 "planning_reasoning": r[23] if len(r) > 23 else None,
@@ -1553,6 +1554,7 @@ async def list_auto_strategies():
                     "mt5_lot": None,
                     "mt5_status": "closed",
                     "mt5_pnl": ar[3],
+                    "mt5_close_price": ar[11],  # v3.45.1 — exit_price del archive
                     "from_archive": True,
                     "sl_pips": ar[14],
                     "tp_pips": ar[15],
