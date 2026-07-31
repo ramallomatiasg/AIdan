@@ -37,7 +37,7 @@ def main():
                 continue
             feats[tid] = {k: row.get(k, '') for k in ENRICHED_COLS}
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     cur.execute("""SELECT id, trigger_type, mt5_pnl, created_at,
@@ -73,7 +73,7 @@ def main():
     print(f"Wrote {OUT}: {n_written} rows, {len(out_cols)} cols")
     # resumen target
     import collections
-    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+    conn = sqlite3.connect(DB_PATH, timeout=15.0); cur = conn.cursor()
     cur.execute("SELECT COUNT(*), SUM(CASE WHEN mt5_pnl>0 THEN 1 ELSE 0 END) FROM trade_archive WHERE mt5_pnl IS NOT NULL")
     n, w_ = cur.fetchone(); conn.close()
     print(f"Target balance: {w_}/{n} wins = {w_/n*100:.1f}%")

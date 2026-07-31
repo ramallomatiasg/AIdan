@@ -35,7 +35,7 @@ DB_PATH = os.path.join(os.environ['APPDATA'], 'AIdan', 'state', 'financial_news.
 
 def load_trades(track='all'):
     """Carga trades del archive con features completos para backtesting."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     cur = conn.cursor()
 
     where_track = ''

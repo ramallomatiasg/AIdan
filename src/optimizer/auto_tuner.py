@@ -119,7 +119,7 @@ class AutoTuner:
 
     def _init_db_table(self):
         """Create optimizer_params table if it doesn't exist."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS optimizer_params (
@@ -147,7 +147,7 @@ class AutoTuner:
 
     def _load_params(self):
         """Load latest optimized params from DB, or use defaults."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         cursor = conn.cursor()
         try:
             cursor.execute("""
@@ -170,7 +170,7 @@ class AutoTuner:
             conn.close()
 
     def _get_iteration(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT MAX(iteration) FROM optimizer_params")
@@ -183,7 +183,7 @@ class AutoTuner:
 
     def _save_params(self, params, win_rate, total_trades, profit_factor):
         """Save optimized params to DB."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         cursor = conn.cursor()
         iteration = self._get_iteration() + 1
         now = datetime.now(TZ_AR).replace(tzinfo=None)
@@ -201,7 +201,7 @@ class AutoTuner:
 
     def is_setup_blocked(self, setup_type):
         """Check if a setup type is currently blocked due to poor performance."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT win_rate FROM blocked_setups WHERE setup_type = ?", (setup_type,))
@@ -214,7 +214,7 @@ class AutoTuner:
 
     def get_blocked_setups(self):
         """Get all currently blocked setup types."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         cursor = conn.cursor()
         try:
             cursor.execute("SELECT setup_type, win_rate, total_trades, reason FROM blocked_setups")
@@ -227,7 +227,7 @@ class AutoTuner:
 
     def _get_trade_history(self):
         """Get all evaluated trades with full context."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         cursor = conn.cursor()
         trades = []
         try:
@@ -350,7 +350,7 @@ class AutoTuner:
         min_trades = params.get('min_trades_to_block', 5)
         threshold = params.get('block_win_rate_threshold', 35)
 
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15.0)
         cursor = conn.cursor()
         now = datetime.now(TZ_AR).replace(tzinfo=None)
 

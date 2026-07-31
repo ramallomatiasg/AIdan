@@ -65,7 +65,7 @@ def _sig(rows, label, min_n=15):
 
 
 def main():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     conn.row_factory = sqlite3.Row
     data = _load(conn)
     print(f'Total joinable (touches>=2): {len(data)}')

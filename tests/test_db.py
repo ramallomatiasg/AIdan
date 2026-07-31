@@ -91,11 +91,18 @@ class TestAlertOperations:
         assert cursor.fetchone()[0] == 1
         conn.close()
 
-    def test_get_recent_alerts_filters_low_score(self, in_memory_db):
+    def test_get_recent_alerts_returns_low_score_too(self, in_memory_db):
+        """v3.48.0 — el test viejo asumia un filtro score<50 que YA NO EXISTE.
+
+        get_recent_alerts() dice explicito en su docstring: "Get ALL alerts from
+        today — no score filter, user sees everything". El cambio fue intencional
+        (el dashboard muestra todo); el test se habia quedado en la version vieja.
+        Verificado contra la implementacion, no es un bug.
+        """
         nid = self._seed_news(in_memory_db)
         add_alert(nid, 30, "BAJA", "Low", "None", "Skip", "keywords")
         results = get_recent_alerts()
-        assert len(results) == 0  # score < 50 filtered out
+        assert len(results) == 1
 
 
 # ── Stats ──
@@ -154,11 +161,28 @@ class TestAutoStrategies:
         assert len(strategies) <= 6
 
     def test_record_strategy_result(self, in_memory_db):
+        """v3.48.0 — el test viejo esperaba que get_strategy_performance() contara
+        el 'loss' escrito en strategy_results. Ya no: win/loss salen de
+        trade_archive (fuente persistente que sobrevive al cap de 6 strategies);
+        de strategy_results solo se leen los break_even. Comportamiento
+        intencional y verificado en db.py:get_strategy_performance — no es un bug.
+
+        Se testea lo que la funcion SI garantiza hoy: la fila queda registrada.
+        """
         self._seed(in_memory_db)
         sid = add_auto_strategy(1, "Test", "PUT", 1.08, 1.07, 1.09, 70, 80)
         record_strategy_result(sid, "loss")
+
+        conn = sqlite3.connect(in_memory_db)
+        row = conn.execute(
+            "SELECT result FROM strategy_results WHERE strategy_id = ?", (sid,)
+        ).fetchone()
+        conn.close()
+        assert row is not None and row[0] == "loss"
+
+        # trade_archive vacio => la stat agregada no cuenta este loss (por diseño)
         stats = get_strategy_performance()
-        assert stats["losses"] == 1
+        assert stats["losses"] == 0
 
 
 # ── Cleanup ──

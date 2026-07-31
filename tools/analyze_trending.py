@@ -49,7 +49,7 @@ def get_state(ts):
 
 
 try:
-    conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+    conn = sqlite3.connect(DB_PATH, timeout=15.0); c = conn.cursor()
     c.execute("""SELECT t.id, t.direction, t.result, t.mt5_pnl, t.pips, t.trigger_type,
         t.htf_bias, t.market_trend, t.created_at, t.setup_type
     FROM trade_archive t

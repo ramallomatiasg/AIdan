@@ -23,7 +23,7 @@ def main():
     from src.common.db import DB_PATH
     from src.optimizer.significance import verify_finding
     mt5 = connect_mt5()
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     c = conn.cursor()
     c.execute("""SELECT id, created_at, direction, entry_price, sl_pips, tp_pips, mt5_pnl
                  FROM trade_archive WHERE mt5_pnl IS NOT NULL AND entry_price>0

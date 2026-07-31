@@ -84,7 +84,7 @@ def main():
     parser.add_argument('--clear-existing', action='store_true', help='Borrar shadow_strategies viejos antes (recomendado para consistencia)')
     args = parser.parse_args()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     cur = conn.cursor()
 
     print("=" * 70)

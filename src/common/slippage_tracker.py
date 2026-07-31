@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def _ensure_table():
     try:
         from src.common.db import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS slippage_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +42,7 @@ def log_fill(strategy_id, expected_price, actual_price, direction, spread_pips=N
             slippage_pips = (actual_price - expected_price) * 10000
         else:
             slippage_pips = (expected_price - actual_price) * 10000
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         conn.execute("""
             INSERT INTO slippage_log
             (strategy_id, expected_price, actual_price, slippage_pips, spread_pips, direction)
@@ -79,7 +79,7 @@ def get_slippage_stats(days=7):
     try:
         _ensure_table()
         from src.common.db import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cur = conn.cursor()
         cur.execute("""
             SELECT COUNT(*),

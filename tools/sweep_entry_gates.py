@@ -58,7 +58,7 @@ def load_data(trigger_filter=None):
                 continue
 
     # 2. outcomes desde trade_archive — probamos join por id y por strategy_id
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     cur = conn.cursor()
     cur.execute("""SELECT id, strategy_id, mt5_pnl, trigger_type
                    FROM trade_archive WHERE mt5_pnl IS NOT NULL""")

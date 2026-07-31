@@ -29,11 +29,42 @@ import sys
 _BASE_DIR = _get_base_dir()
 DB_PATH = os.path.join(_BASE_DIR, "state", "financial_news.db")
 
+# v3.48.0 — punto unico de conexion a SQLite.
+# Antes habia 92 `_connect()` sueltos aca (+44 en el resto del repo),
+# sin timeout y sin WAL. Con ~5 threads concurrentes golpeando el mismo archivo
+# (scan loop, position manager 15s, trailing 1s, learning engine, FastAPI) un lock
+# tiraba `database is locked` en el acto y el error se lo comia alguno de los
+# except mudos -> escrituras perdidas sin rastro.
+#   - timeout=15s  -> es busy_timeout a nivel C: reintenta en vez de fallar.
+#   - WAL          -> los lectores dejan de bloquear al escritor (propiedad
+#                     PERSISTENTE del archivo: se setea una vez y queda).
+# synchronous se deja en el default (FULL): en una DB de trading la durabilidad
+# vale mas que los milisegundos.
+_WAL_READY = False
+
+def _connect(timeout=15.0):
+    """Conexion SQLite con busy_timeout + WAL. Usar SIEMPRE esta, no sqlite3.connect."""
+    global _WAL_READY
+    conn = sqlite3.connect(DB_PATH, timeout=timeout)
+    if not _WAL_READY:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            _WAL_READY = True
+        except Exception:
+            # Puede fallar si otro proceso tiene la DB tomada en ese instante.
+            # No es fatal: se reintenta en la proxima conexion.
+            pass
+    return conn
+
+
+# Alias publico para el resto del repo (admin, mt5_executor, etc.)
+connect = _connect
+
 def init_db():
     """Initialize database with required tables"""
     os.makedirs(os.path.join(_BASE_DIR, "state"), exist_ok=True)
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     
     # News table
@@ -808,7 +839,7 @@ def init_db():
 
 def add_news(url, title, summary, language, entities, tags, published_at=None):
     """Add news to database"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     try:
@@ -825,7 +856,7 @@ def add_news(url, title, summary, language, entities, tags, published_at=None):
 
 def get_unprocessed_news():
     """Get news that hasn't been analyzed yet"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     
     cursor.execute("""
@@ -841,7 +872,7 @@ def get_unprocessed_news():
 
 def mark_news_processed(news_id):
     """Mark news as processed"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("UPDATE news SET processed_at = ? WHERE id = ?", 
                    (now_ar(), news_id))
@@ -850,7 +881,7 @@ def mark_news_processed(news_id):
 
 def add_alert(news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method='keywords', should_operate=False, direction='NEUTRAL', confidence=50, price_at_alert=0):
     """Log an alert with detailed information including AI decision"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO alerts (news_id, impact_score, alert_level, explanation, eur_usd_impact, market_implications, analysis_method, should_operate, direction, confidence, alert_sent_at, price_at_alert)
@@ -861,7 +892,7 @@ def add_alert(news_id, impact_score, alert_level, explanation, eur_usd_impact, m
 
 def get_recent_alerts(limit=50):
     """Get ALL alerts from today — no score filter, user sees everything"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -883,7 +914,7 @@ def get_recent_alerts(limit=50):
 def has_recent_similar_strategy(direction, entry_price, trigger_type='structure', minutes=30):
     """Check if a similar strategy was already created recently (avoid duplicates).
     Similar = same direction, same trigger type, entry within 3 pips."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cutoff = now_ar() - timedelta(minutes=minutes)
     cursor.execute("""
@@ -903,7 +934,7 @@ def has_recent_similar_strategy(direction, entry_price, trigger_type='structure'
 def has_active_opposite_strategy(direction):
     """Check if there's an active strategy in the OPPOSITE direction.
     Prevents contradictory CALL+PUT at the same time."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     opposite = 'PUT' if direction == 'CALL' else 'CALL'
     cursor.execute("""
@@ -918,7 +949,7 @@ def has_active_opposite_strategy(direction):
 
 def get_alerts_pending_evaluation():
     """Get alerts with a directional prediction (CALL/PUT) older than 30 min that haven't been evaluated yet."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cutoff = now_ar() - timedelta(minutes=30)
     cursor.execute("""
@@ -940,7 +971,7 @@ def get_alerts_pending_evaluation():
 
 def auto_evaluate_alert(alert_id, result, exit_price, pips):
     """Record an auto-evaluated alert result directly on the alerts table."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         cursor.execute("""
@@ -954,7 +985,7 @@ def auto_evaluate_alert(alert_id, result, exit_price, pips):
 
 def get_stats():
     """Get system statistics"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     
     cursor.execute("SELECT COUNT(*) FROM news")
@@ -979,7 +1010,7 @@ def get_stats():
 
 def record_signal_result(alert_id, result, market_context=None):
     """Record whether a trading signal was correct, with optional market context"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         ctx = market_context or {}
@@ -1009,7 +1040,7 @@ def get_performance_stats(since=None):
         import os
         since = os.getenv('STATS_SINCE', '').strip() or None
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     if since:
         cursor.execute("SELECT COUNT(*) FROM signal_results WHERE result = 'win' AND recorded_at >= ?", (since,))
@@ -1039,7 +1070,7 @@ def get_performance_stats(since=None):
 
 def get_active_profile():
     """Get the active strategy profile config, or defaults"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT config FROM strategies WHERE is_active = 1 LIMIT 1")
@@ -1067,7 +1098,7 @@ def get_active_profile():
 
 def cleanup_old_data(hours=72):
     """Remove data older than specified hours"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     cutoff_date = now_ar() - timedelta(hours=hours)
@@ -1111,7 +1142,7 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
         import logging
         logging.getLogger('db').debug(f"meta-filter check err: {_ex}")
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         # Get cooldown + rate limit from active profile
@@ -1234,7 +1265,7 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
                         """, (
                             old_id, old_dir, old_result, old_entry, old_close, old_pips,
                             old_sl, old_tp, old_sl_pips, old_tp_pips, sl_hit, tp_hit,
-                            old_conf, old_impact, '', old_trigger,
+                            old_conf, old_impact, (old_trigger or ''), old_trigger,
                             '', '', 0, '', '', 0, '', 0, 0,
                             old_profile, old_mt5_pnl, old_title, old_created
                         ))
@@ -1379,7 +1410,7 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
 
 def get_active_strategies(limit=6):
     """Get recent auto-strategies with vote status"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     # Expire old ones first (but NOT paused strategies)
@@ -1439,7 +1470,7 @@ def get_active_strategies(limit=6):
 
 def record_strategy_result(strategy_id, result, market_context=None):
     """Record win/loss/skip for an auto-strategy with market context"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         ctx = market_context or {}
@@ -1472,7 +1503,7 @@ def get_strategy_performance(since=None):
         import os
         since = os.getenv('STATS_SINCE', '').strip() or None
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     # Primary: trade_archive (persistent, survives 6-cap deletes)
     if since:
@@ -1526,7 +1557,7 @@ def get_strategy_performance_by_track(since=None):
         import os
         since = os.getenv('STATS_SINCE', '').strip() or None
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
 
     def _stats_for_track(track):
@@ -1637,7 +1668,7 @@ def get_strategies_pending_evaluation():
     - no result in strategy_results
     - expiry was at least 1 minute ago (give price time to settle)
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cutoff = now_ar() - timedelta(minutes=1)
     cursor.execute("""
@@ -1658,7 +1689,7 @@ def get_strategies_pending_evaluation():
 
 def auto_evaluate_strategy(strategy_id, result, exit_price, pips, market_context=None):
     """Record an auto-evaluated strategy result."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         ctx = market_context or {}
@@ -1688,7 +1719,7 @@ def get_news_fetch_time(news_id):
     """Get the effective time of a news item in AR time.
     published_at is UTC (from RSS feeds), fetched_at is already AR time (from now_ar()).
     Convert published_at to AR (UTC-3) for consistent comparison."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT published_at, fetched_at FROM news WHERE id = ?
@@ -1716,7 +1747,7 @@ def get_news_fetch_time(news_id):
 def get_detailed_trade_history(limit=30):
     """Get individual trade history with full context for AI learning.
     Combines both signal_results and strategy_results."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     trades = []
 
@@ -1783,7 +1814,7 @@ def get_detailed_trade_history(limit=30):
 
 def get_unreported_trades(today_str):
     """Get trades that haven't been reported to Google Sheets yet (today only)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     trades = []
 
@@ -1853,7 +1884,7 @@ def mark_trades_reported(trades):
     """Mark trades as reported to Google Sheets so they aren't uploaded again."""
     if not trades:
         return
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     for t in trades:
         src = t.get('_src', '')
@@ -1872,7 +1903,7 @@ def mark_trades_reported(trades):
 def get_setup_win_rates():
     """Get win rate per setup_type for dynamic confidence adjustment.
     Returns dict: {setup_type: {wins, losses, total, win_rate}}"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     stats = {}
 
@@ -2009,7 +2040,7 @@ def get_learned_lessons():
 # ── MT5 helper functions ──
 
 def update_mt5_ticket(strategy_id, ticket, lot, status, fill_price=None):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         if fill_price is not None:
@@ -2027,7 +2058,7 @@ def update_mt5_ticket(strategy_id, ticket, lot, status, fill_price=None):
         conn.close()
 
 def update_mt5_close(strategy_id, pnl, close_price, status='closed'):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         cursor.execute("""
@@ -2046,7 +2077,7 @@ def get_mt5_daily_pnl():
     cierran el mismo dia AR salvo pre-plans overnight; archived_at NO sirve porque el
     cap-delete archiva dias despues). NOTA: fallback — el dashboard prefiere el
     calculo broker-truth de MT5Executor.get_daily_pnl()."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     today = now_ar()
     cursor.execute("""
@@ -2065,7 +2096,7 @@ def get_mt5_daily_pnl():
 
 def get_active_unexecuted_strategies():
     """Get active strategies that were never executed in MT5 (no ticket)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, direction, entry_price, stop_loss, take_profit, confidence, trigger_type
@@ -2084,7 +2115,7 @@ def get_active_unexecuted_strategies():
 
 
 def get_strategies_with_open_mt5():
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, mt5_ticket, direction, entry_price, stop_loss, take_profit,
@@ -2102,7 +2133,7 @@ def get_open_mt5_for_manager():
     """v3.36.0 — Posiciones abiertas con TODOS los campos que el Position Manager
     necesita (incluye trigger_type, expiry_minutes, created_at). Separado de
     get_strategies_with_open_mt5() para no alterar el shape que usa el trailing thread."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, mt5_ticket, direction, entry_price, stop_loss, take_profit,
@@ -2120,7 +2151,7 @@ def log_bounce_decision(strategy_id, direction, trigger_type, candle_open,
                         candle_close, is_bounce, mode, skipped=0):
     """v3.39.0 — Persiste la decision del filtro bounce-entry (shadow/active)."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         # v3.40.11: created_at explicito en AR (DEFAULT era UTC) — data limpia del shadow
         conn.execute("""
             INSERT INTO bounce_entry_log
@@ -2141,7 +2172,7 @@ def log_pullback_shadow(direction, setup_type, entry_price, key_level, level_tou
     snapshot permite el scoring FORWARD (movimiento real posterior), sin re-simular SL/TP."""
     try:
         import json as _json
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         snap = candles_snapshot if isinstance(candles_snapshot, str) else _json.dumps(candles_snapshot)
         conn.execute("""
             INSERT INTO pullback_shadow_log
@@ -2162,7 +2193,7 @@ def log_fade_chop_shadow(direction, setup_type, entry_price, key_level, level_to
     + candle snapshot para el scoring FORWARD (excursion favorable Y adversa), sin re-sim SL/TP."""
     try:
         import json as _json
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         snap = candles_snapshot if isinstance(candles_snapshot, str) else _json.dumps(candles_snapshot)
         conn.execute("""
             INSERT INTO fade_chop_shadow_log
@@ -2181,7 +2212,7 @@ def log_level_quality(strategy_id, setup_type, direction, key_level, level_touch
     """v3.40.20 — Tagea una señal de structure ejecutada con la calidad de su nivel (toques).
     Join por strategy_id a trade_archive para medir WR por calidad. NO cambia comportamiento."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         conn.execute("""
             INSERT INTO level_quality_log
                 (strategy_id, setup_type, direction, key_level, level_touches, confidence, created_at)
@@ -2197,7 +2228,7 @@ def log_calendar_shadow(event_name, event_impact, direction, entry_price,
                         stop_loss, take_profit, confidence, minutes_until):
     """v3.40.4 — Persiste la senal de straddle que 'calendar' generaria en shadow (sin operar)."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         # v3.40.11: created_at explicito en AR (DEFAULT era UTC)
         conn.execute("""
             INSERT INTO calendar_shadow_log
@@ -2216,7 +2247,7 @@ def log_calendar_debug(stage, detail=''):
     """v3.40.16 — Persiste cada salida/avance del path calendar-straddle (eran
     silenciosas e imposibles de forensear: AIdan no persiste logs a archivo)."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         conn.execute("INSERT INTO calendar_debug_log (stage, detail, created_at) VALUES (?, ?, ?)",
                      (stage, str(detail)[:300], now_ar()))
         conn.commit()
@@ -2228,7 +2259,7 @@ def log_calendar_debug(stage, detail=''):
 def log_event_window(strategy_id, trigger_type, direction, stale_mins, prox, would_block, mode):
     """v3.40.14 — Persiste la proximidad a eventos en el momento de la ejecucion."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         conn.execute("""
             INSERT INTO event_window_log
                 (strategy_id, trigger_type, direction, stale_mins, mins_to_next, next_event,
@@ -2251,7 +2282,7 @@ def log_position_manager_decision(strategy_id, ticket, mode, action, reason,
                                   executed=0):
     """v3.36.0 — Persiste una decision del Position Manager para audit/shadow."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         # v3.40.11: created_at explicito en AR (el DEFAULT CURRENT_TIMESTAMP era UTC,
         # ~3h corrido vs auto_strategies -> confundia todo forense). Filas previas quedan UTC.
         conn.execute("""
@@ -2269,7 +2300,7 @@ def log_position_manager_decision(strategy_id, ticket, mode, action, reason,
 
 def update_mt5_trailing_step(strategy_id, step):
     """Update the trailing SL step for a strategy. Sets be_triggered=1 when step >= 1."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.execute("UPDATE auto_strategies SET mt5_trailing_step = ? WHERE id = ?", (step, strategy_id))
     if step >= 1:
         conn.execute("UPDATE auto_strategies SET be_triggered = 1 WHERE id = ?", (strategy_id,))
@@ -2279,7 +2310,7 @@ def update_mt5_trailing_step(strategy_id, step):
 
 def update_mt5_trailing_data(strategy_id, step, high_water=None):
     """Update trailing step + high water mark. Sets be_triggered=1 when step >= 1."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.execute("UPDATE auto_strategies SET mt5_trailing_step = ? WHERE id = ?", (step, strategy_id))
     if high_water is not None:
         conn.execute("UPDATE auto_strategies SET mt5_high_water = ? WHERE id = ?", (high_water, strategy_id))
@@ -2291,7 +2322,7 @@ def update_mt5_trailing_data(strategy_id, step, high_water=None):
 
 def mark_be_triggered(strategy_id):
     """Mark a strategy as having reached breakeven (trailing SL moved to BE)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.execute("UPDATE auto_strategies SET be_triggered = 1 WHERE id = ?", (strategy_id,))
     conn.commit()
     conn.close()
@@ -2303,7 +2334,7 @@ def add_planned_strategy(news_title, direction, confidence, sl_pips, tp_pips,
     """Add a pre-planned strategy (status='planned') for a future event.
     Entry/exit prices are set to 0 — they'll be calculated at activation time.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         # Dedup: skip if planned strategy with same event already exists (any direction)
@@ -2366,7 +2397,7 @@ def activate_due_planned_strategies(minutes_before=5):
     Also: track direction by event_time slot to ensure only ONE direction
     activates per time window (first-come wins).
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         now = datetime.now(timezone.utc)
@@ -2432,7 +2463,7 @@ def activate_due_planned_strategies(minutes_before=5):
 
 def get_planned_strategies():
     """Get all planned strategies for dashboard display."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
@@ -2451,7 +2482,7 @@ def toggle_strategy_pause(strategy_id):
     - If paused → restored to original status
     Returns new status string or None if strategy not found / not pausable.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT status, paused_from_status FROM auto_strategies WHERE id = ?", (strategy_id,))
@@ -2485,7 +2516,7 @@ def toggle_strategy_pause(strategy_id):
 
 def get_evaluated_open_mt5():
     """Get strategies that were evaluated/expired but MT5 position still marked as filled."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, status, mt5_ticket
@@ -2499,7 +2530,7 @@ def get_evaluated_open_mt5():
 
 def get_mt5_pnl_for_strategy(strategy_id):
     """Get MT5 P&L and lot for a strategy (if position was closed by MT5 TP/SL or sync)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT mt5_pnl, mt5_lot, mt5_close_price
@@ -2513,7 +2544,7 @@ def get_mt5_pnl_for_strategy(strategy_id):
     return None
 
 def get_mt5_config():
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("SELECT risk_percent, max_positions, max_lot FROM mt5_config WHERE id = 1")
     row = cursor.fetchone()
@@ -2523,7 +2554,7 @@ def get_mt5_config():
     return {'risk_percent': 1.0, 'max_positions': 3, 'max_lot': 0.10}
 
 def update_mt5_config(risk_percent=None, max_positions=None, max_lot=None):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     current = get_mt5_config()
     cursor.execute("""
@@ -2543,7 +2574,7 @@ def update_mt5_config(risk_percent=None, max_positions=None, max_lot=None):
 def archive_trade(strategy_id, result, exit_price, pips, context=None):
     """Archive a completed trade with enriched context for learning."""
     ctx = context or {}
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         # Check not already archived
@@ -2565,6 +2596,25 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             conn.close()
             return
         direction, entry, sl, tp, conf, impact, trigger, title, profile, created, mt5_pnl, fill_price, entry_ctx_json = row
+
+        # v3.48.0 — setup_type: cadena de fallback en UN solo lugar (cubre los 3 callers).
+        # Antes quedaba '' en el 100% de las filas (546/546 NULL) porque ningun caller lo
+        # copiaba del entry_context. Orden: lo que pase el caller > snapshot de entrada >
+        # trigger_type (nunca vacio). Sin esto mueren el blend historico de dynamic_conf,
+        # block_setup_type y adjust_setup_confidence.
+        _setup_type = ctx.get('setup_type') or ''
+        if not _setup_type and entry_ctx_json:
+            try:
+                import json as _j
+                _ec = _j.loads(entry_ctx_json)
+                if isinstance(_ec, str):   # filas viejas doble-encodeadas (v3.40.11)
+                    _ec = _j.loads(_ec)
+                if isinstance(_ec, dict):
+                    _setup_type = _ec.get('setup_type') or ''
+            except Exception:
+                pass
+        if not _setup_type:
+            _setup_type = trigger or ''
 
         # Use fill_price (actual MT5 execution price) for SL/TP distance calculation
         # entry_price is the signal price; fill_price is where the order actually filled
@@ -2614,7 +2664,7 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
         """, (
             strategy_id, direction, result, ref_price, exit_price, pips,
             sl, tp, sl_pips, tp_pips, sl_hit, tp_hit,
-            conf, impact, ctx.get('setup_type', ''), trigger,
+            conf, impact, _setup_type, trigger,
             ctx.get('market_trend', ''), ctx.get('trend_strength', ''),
             ctx.get('rsi_at_entry', 0), ctx.get('htf_bias', ''),
             ctx.get('volatility', ''), ctx.get('avg_range_pips', 0),
@@ -2628,7 +2678,7 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
 
 def get_trade_archive(limit=500):
     """Get trades from archive for learning analysis (excludes weekend paper trades)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
@@ -2643,7 +2693,7 @@ def get_trade_archive(limit=500):
 
 def get_archive_stats():
     """Get aggregate stats from trade archive."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT
@@ -2668,9 +2718,13 @@ def get_archive_stats():
     }
 
 
-def save_entry_context(strategy_id, market_state, htf_bias=None):
+def save_entry_context(strategy_id, market_state, htf_bias=None, setup_type=None):
     """Persist market snapshot captured AT signal creation time (entry).
     Stored as JSON in auto_strategies.entry_context column for later archival.
+
+    NOTA (v3.48.0): hoy esta funcion NO tiene callers — la ruta viva es
+    add_auto_strategy(entry_context=...). Se deja el param setup_type para que,
+    si alguien la vuelve a cablear, no repita el bug de dejarlo vacio.
     """
     import json as _json
     try:
@@ -2683,8 +2737,9 @@ def save_entry_context(strategy_id, market_state, htf_bias=None):
             'trend_strength': market_state.get('trend_strength', ''),
             'momentum': market_state.get('momentum', ''),
             'htf_bias': htf_bias or '',
+            'setup_type': setup_type or '',
         }
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         conn.execute("UPDATE auto_strategies SET entry_context = ? WHERE id = ?",
                      (_json.dumps(ctx), strategy_id))
         conn.commit()
@@ -2697,7 +2752,7 @@ def get_entry_context(strategy_id):
     """Read the market snapshot saved at entry time. Returns dict or empty dict."""
     import json as _json
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _connect()
         row = conn.execute("SELECT entry_context FROM auto_strategies WHERE id = ?",
                            (strategy_id,)).fetchone()
         conn.close()
@@ -2716,7 +2771,7 @@ def get_entry_context(strategy_id):
 def save_post_trade_analysis(strategy_id, analysis, result=None):
     """Save post-trade analysis from Gemma 4."""
     import json as _json
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     try:
         cursor.execute("""
@@ -2743,7 +2798,7 @@ def save_post_trade_analysis(strategy_id, analysis, result=None):
 
 def get_post_trade_analyses(limit=20):
     """Get recent post-trade analyses for dashboard."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
@@ -2759,7 +2814,7 @@ def get_post_trade_analyses(limit=20):
 
 def get_post_trade_stats():
     """Get aggregate stats from post-trade analyses."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     stats = {}
 
@@ -2778,7 +2833,7 @@ def get_post_trade_stats():
 def save_learning_insight(category, insight, data=None, action_taken=None):
     """Save a learning insight."""
     import json
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO learning_insights (category, insight, data, action_taken, created_at)
@@ -2790,7 +2845,7 @@ def save_learning_insight(category, insight, data=None, action_taken=None):
 
 def get_learning_insights(limit=20):
     """Get recent learning insights."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
@@ -2803,7 +2858,7 @@ def get_learning_insights(limit=20):
 
 def get_unsynced_insights(limit=50):
     """Get learning insights not yet synced to cloud."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
@@ -2821,7 +2876,7 @@ def mark_insights_synced(ids):
     """Mark insights as synced to cloud."""
     if not ids:
         return
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     placeholders = ','.join('?' * len(ids))
     conn.execute(f"UPDATE learning_insights SET synced_to_cloud = 1 WHERE id IN ({placeholders})", ids)
     conn.commit()
@@ -2832,7 +2887,7 @@ def get_learning_adjustments():
     """Get actionable learning adjustments for strategy generation.
     Returns dict with confidence penalties/bonuses by trigger, session, and blocked patterns."""
     import json
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     adjustments = {
         'session_penalties': {},      # e.g. {'off': -15, 'london': +5}
@@ -3079,7 +3134,7 @@ def get_learning_adjustments():
 
 def save_learning_metric(metric_name, value, period='daily'):
     """Save a periodic metric snapshot."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO learning_metrics (metric_name, value, period, recorded_at)
@@ -3091,7 +3146,7 @@ def save_learning_metric(metric_name, value, period='daily'):
 
 def get_learning_metrics(metric_name=None, period='daily', limit=60):
     """Get metric history for trend analysis."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     if metric_name:
@@ -3115,7 +3170,7 @@ def get_learning_metrics(metric_name=None, period='daily', limit=60):
 
 def get_shared_learning_config():
     """Get shared learning configuration."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT supabase_url, supabase_key, instance_id, instance_name, enabled, last_sync
@@ -3137,7 +3192,7 @@ def get_shared_learning_config():
 
 def update_shared_learning_config(supabase_url=None, supabase_key=None, instance_name=None, enabled=None):
     """Update shared learning configuration from dashboard."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     current = get_shared_learning_config()
     cursor.execute("""
@@ -3159,7 +3214,7 @@ def update_shared_learning_config(supabase_url=None, supabase_key=None, instance
 
 def update_shared_learning_last_sync(timestamp):
     """Update last sync timestamp."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("UPDATE shared_learning_config SET last_sync = ? WHERE id = 1", (timestamp,))
     conn.commit()
@@ -3168,7 +3223,7 @@ def update_shared_learning_last_sync(timestamp):
 
 def get_unsynced_trades(limit=50):
     """Get trades that haven't been synced to cloud yet."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
@@ -3185,7 +3240,7 @@ def mark_trades_synced(trade_ids):
     """Mark trades as synced to cloud."""
     if not trade_ids:
         return
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     placeholders = ','.join('?' * len(trade_ids))
     cursor.execute(f"UPDATE trade_archive SET synced_to_cloud = 1 WHERE id IN ({placeholders})", trade_ids)
@@ -3195,7 +3250,7 @@ def mark_trades_synced(trade_ids):
 
 def get_synced_trade_count():
     """Get count of trades synced to cloud."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM trade_archive WHERE synced_to_cloud = 1")
     count = cursor.fetchone()[0]
@@ -3209,7 +3264,7 @@ def save_shared_trades(trades):
     """Bulk insert remote trades into shared_trade_cache. Skips duplicates by remote_id."""
     if not trades:
         return 0
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     inserted = 0
     for t in trades:
@@ -3244,7 +3299,7 @@ def save_shared_trades(trades):
 
 def get_shared_trade_cache(limit=500):
     """Get cached shared trades from other instances, excluding weekends."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
@@ -3260,7 +3315,7 @@ def get_shared_trade_cache(limit=500):
 
 def get_last_fetched_remote_id():
     """Get the last Supabase shared_trades ID we fetched."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("SELECT last_fetched_remote_id FROM shared_learning_config WHERE id = 1")
     row = cursor.fetchone()
@@ -3270,7 +3325,7 @@ def get_last_fetched_remote_id():
 
 def update_last_fetched_remote_id(remote_id):
     """Update the last fetched Supabase ID cursor."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("UPDATE shared_learning_config SET last_fetched_remote_id = ? WHERE id = 1", (remote_id,))
     conn.commit()
@@ -3281,7 +3336,7 @@ def update_last_fetched_remote_id(remote_id):
 
 def save_last_session(username=None, password_hash=None, mt5_account=None, mt5_password=None, mt5_server=None):
     """Save last login session and/or MT5 credentials for auto-reconnect."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     fields = []
     values = []
     if username is not None:
@@ -3308,7 +3363,7 @@ def save_last_session(username=None, password_hash=None, mt5_account=None, mt5_p
 
 def get_last_session():
     """Get saved session data for auto-login and MT5 auto-connect."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM app_state WHERE id = 1").fetchone()
     conn.close()
@@ -3319,7 +3374,7 @@ def get_last_session():
 
 def clear_last_session():
     """Clear saved session (on disconnect/logout)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.execute("UPDATE app_state SET last_username = NULL, last_password_hash = NULL, updated_at = datetime('now') WHERE id = 1")
     conn.commit()
     conn.close()
@@ -3366,7 +3421,7 @@ def create_pending_change(change_type, params_json, reasoning, source):
         if forbidden in params_lower:
             raise ValueError(f"Guard-rail violation: param '{forbidden}' is read-only for meta-optimizer")
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO pending_changes (change_type, params_json, reasoning, source, status)
@@ -3385,7 +3440,7 @@ def create_pending_change(change_type, params_json, reasoning, source):
 
 def get_pending_changes(status=None, limit=50):
     """Get pending_changes filtered by status (or all if None)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     if status:
@@ -3404,7 +3459,7 @@ def get_pending_changes(status=None, limit=50):
 
 def get_pending_change(change_id):
     """Get single pending_change by id."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM pending_changes WHERE id = ?", (change_id,)).fetchone()
     conn.close()
@@ -3414,7 +3469,7 @@ def get_pending_change(change_id):
 def update_pending_change_status(change_id, new_status, **extra_fields):
     """Update status del cambio + audit trail. extra_fields: shadow_pf, shadow_wr, applied_baseline_pf, etc."""
     import json as _json
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cur = conn.cursor()
 
     # Build SET clause dinamica
@@ -3455,7 +3510,7 @@ def insert_shadow_strategy(pending_change_id, base_strategy_id, config_overrides
                             day_of_week, htf_bias, avg_range_pips,
                             shadow_decision, skip_reason=None):
     """Insert shadow strategy (signal evaluado con config alternativa)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO shadow_strategies (
@@ -3477,7 +3532,7 @@ def insert_shadow_strategy(pending_change_id, base_strategy_id, config_overrides
 def insert_shadow_trade(shadow_strategy_id, simulated_exit_price, simulated_pnl,
                          simulated_pips, sl_hit, tp_hit, expiry_hit, exit_reason):
     """Insert shadow trade outcome simulado."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO shadow_trades (
@@ -3495,7 +3550,7 @@ def insert_shadow_trade(shadow_strategy_id, simulated_exit_price, simulated_pnl,
 def evaluate_shadow_trades_for_change(change_id):
     """Compute shadow stats (PF, WR, count) para un pending_change.
     Returns dict: {count, wins, losses, pf, wr, total_pnl}."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT st.simulated_pnl FROM shadow_trades st
@@ -3527,7 +3582,7 @@ def evaluate_shadow_trades_for_change(change_id):
 
 def get_baseline_stats(lookback_trades=50):
     """Compute baseline PF/WR/PnL del live (ultimos N trades cerrados)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cur = conn.cursor()
     cur.execute(f"""
         SELECT mt5_pnl FROM auto_strategies
@@ -3565,7 +3620,7 @@ def get_baseline_stats(lookback_trades=50):
 
 def get_change_history(change_id):
     """Get audit trail completo para un cambio."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
         SELECT * FROM change_history WHERE pending_change_id = ?
@@ -3577,7 +3632,7 @@ def get_change_history(change_id):
 
 def insert_active_filter(change_id, filter_type, params_json, previous_value_json=None):
     """Insert filtro activo (cambio aplicado). UNIQUE constraint en change_id."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cur = conn.cursor()
     cur.execute("""
         INSERT OR REPLACE INTO active_meta_filters
@@ -3592,7 +3647,7 @@ def insert_active_filter(change_id, filter_type, params_json, previous_value_jso
 
 def deactivate_filter(change_id):
     """Marcar filter como revertido (active=0, reverted_at=now)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     cur = conn.cursor()
     cur.execute("""
         UPDATE active_meta_filters
@@ -3608,7 +3663,7 @@ def get_active_meta_filters():
     Esta funcion la consume el scanner en cada signal para aplicar bloqueos/ajustes.
     """
     import json as _json
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     cur.execute("""

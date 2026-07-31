@@ -6,9 +6,16 @@ from src.analyzer.news_analyzer import NewsAnalyzer
 
 @pytest.fixture
 def analyzer(mock_logger):
-    """Create a NewsAnalyzer in keywords mode (no Ollama, no Claude)."""
+    """Create a NewsAnalyzer in keywords mode (ni Ollama ni Groq disponibles).
+
+    v3.48.0 — antes esto patcheaba solo `_check_ollama` + limpiaba os.environ y
+    asumia que sin env vars no habia LLM. Falso desde v3.21: `_check_groq()` lee
+    `Config.GROQ_API_KEY`, que tiene un default en codigo -> el modo real salia
+    'groq' y reventaban 27 tests. Ademas `_check_groq` hace un GET real a
+    api.groq.com: patchearlo saca la red de la suite (deterministica y rapida).
+    """
     with patch.object(NewsAnalyzer, "_check_ollama", return_value=False), \
-         patch.dict("os.environ", {}, clear=True):
+         patch.object(NewsAnalyzer, "_check_groq", return_value=False):
         a = NewsAnalyzer(mock_logger)
     assert a.ai_mode == "keywords"
     return a
@@ -17,93 +24,65 @@ def analyzer(mock_logger):
 # ── _detect_ai_mode ──
 
 class TestDetectAiMode:
+    """Contrato real (v3.21.0): LLM_PROVIDER_PRIMARY = ollama | groq | auto.
+    El modo 'claude' ya no existe en _detect_ai_mode."""
+
+    @patch.object(NewsAnalyzer, "_check_groq", return_value=True)
     @patch.object(NewsAnalyzer, "_check_ollama", return_value=True)
-    def test_prefers_ollama(self, mock_ollama, mock_logger):
-        a = NewsAnalyzer(mock_logger)
-        assert a.ai_mode == "ollama"
+    @patch.dict("os.environ", {"LLM_PROVIDER_PRIMARY": "ollama"})
+    def test_primary_ollama_prefers_local(self, mock_ollama, mock_groq, mock_logger):
+        assert NewsAnalyzer(mock_logger).ai_mode == "ollama"
 
+    @patch.object(NewsAnalyzer, "_check_groq", return_value=True)
+    @patch.object(NewsAnalyzer, "_check_ollama", return_value=True)
+    @patch.dict("os.environ", {"LLM_PROVIDER_PRIMARY": "auto"})
+    def test_auto_prefers_groq(self, mock_ollama, mock_groq, mock_logger):
+        assert NewsAnalyzer(mock_logger).ai_mode == "groq"
+
+    @patch.object(NewsAnalyzer, "_check_groq", return_value=False)
+    @patch.object(NewsAnalyzer, "_check_ollama", return_value=True)
+    @patch.dict("os.environ", {"LLM_PROVIDER_PRIMARY": "auto"})
+    def test_auto_falls_back_to_ollama(self, mock_ollama, mock_groq, mock_logger):
+        assert NewsAnalyzer(mock_logger).ai_mode == "ollama"
+
+    @patch.object(NewsAnalyzer, "_check_groq", return_value=False)
     @patch.object(NewsAnalyzer, "_check_ollama", return_value=False)
-    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"})
-    def test_falls_back_to_claude(self, mock_ollama, mock_logger):
-        a = NewsAnalyzer(mock_logger)
-        assert a.ai_mode == "claude"
-
-    @patch.object(NewsAnalyzer, "_check_ollama", return_value=False)
-    @patch.dict("os.environ", {}, clear=True)
-    def test_falls_back_to_keywords(self, mock_ollama, mock_logger):
-        a = NewsAnalyzer(mock_logger)
-        assert a.ai_mode == "keywords"
+    def test_falls_back_to_keywords(self, mock_ollama, mock_groq, mock_logger):
+        assert NewsAnalyzer(mock_logger).ai_mode == "keywords"
 
 
-# ── _classify_by_keywords ──
+# ── _keyword_prefilter ──
+#
+# v3.48.0 — este bloque REEMPLAZA a ~22 tests que llamaban a `_classify_by_keywords`,
+# `_detect_direction_keywords`, `_auto_explain` y `_auto_impact`: cuatro metodos que
+# NO EXISTEN en el modulo. Testeaban un clasificador tier1/tier2/tier3/corporate que
+# se elimino cuando el LLM paso a ser obligatorio (v3.21). Estaban rojos desde
+# entonces => cero senal. Se cubre en cambio lo que el modulo SI hace hoy.
 
-class TestClassifyByKeywords:
-    def test_tier1_nfp(self, analyzer):
-        score, cat = analyzer._classify_by_keywords("nfp data released today")
-        assert cat == "tier1"
-        assert score >= 80
+class TestKeywordPrefilter:
+    """El pre-filtro corre en TODA noticia antes de gastar una llamada al LLM."""
 
-    def test_tier1_rate_decision(self, analyzer):
-        score, cat = analyzer._classify_by_keywords("fed rate decision announced")
-        assert cat == "tier1"
-        assert score >= 90
+    def test_always_relevant_forces(self, analyzer):
+        assert analyzer._keyword_prefilter("ECB interest rate decision", "") == "force"
 
-    def test_tier2_powell(self, analyzer):
-        score, cat = analyzer._classify_by_keywords("powell speaks at conference")
-        assert cat == "tier2"
-        assert 55 <= score <= 79
+    def test_irrelevant_topic_skips(self, analyzer):
+        result = analyzer._keyword_prefilter("Celebrity wedding in Hollywood", "")
+        assert result in ("skip", "pass")
 
-    def test_tier2_pmi(self, analyzer):
-        score, cat = analyzer._classify_by_keywords("manufacturing pmi beats estimates")
-        assert cat == "tier2"
-        assert score >= 55
-
-    def test_tier3_oil(self, analyzer):
-        score, cat = analyzer._classify_by_keywords("oil price surge on supply fears")
-        assert cat == "tier3"
-        assert 35 <= score <= 54
-
-    def test_corporate_multiple_hits(self, analyzer):
-        score, cat = analyzer._classify_by_keywords("ipo merger acquisition announcement")
-        assert cat == "corporate"
-        assert score < 30
-
-    def test_corporate_single_hit(self, analyzer):
-        score, cat = analyzer._classify_by_keywords("new ipo launched for tech company")
-        assert cat == "corporate"
-        assert score <= 25
-
-    def test_unknown_text(self, analyzer):
-        score, cat = analyzer._classify_by_keywords("the weather is nice today")
-        assert cat == "unknown"
-        assert score == 25
+    def test_uncertain_passes_to_ai(self, analyzer):
+        assert analyzer._keyword_prefilter("Company announces new product line", "") == "pass"
 
 
-# ── _detect_direction_keywords ──
+class TestAnalyzeDegradedMode:
+    """Contrato del modo degradado (sin Groq ni Ollama).
 
-class TestDetectDirection:
-    def test_usd_bearish_gives_call(self, analyzer):
-        direction = analyzer._detect_direction_keywords("rate cut expected dovish fed")
-        assert direction == "CALL"
+    OJO: 'keywords' NO significa "analiza por keywords". Desde v3.21 no hay
+    analisis sin LLM: una noticia RELEVANTE devuelve None y se loguea
+    'AI NOT AVAILABLE'. Es comportamiento intencional, verificado en el codigo
+    (news_analyzer._analyze_with_ai) — se testea para que quede fijado.
+    """
 
-    def test_usd_bullish_gives_put(self, analyzer):
-        direction = analyzer._detect_direction_keywords("rate hike hawkish fed strong dollar")
-        assert direction == "PUT"
-
-    def test_neutral_on_no_keywords(self, analyzer):
-        direction = analyzer._detect_direction_keywords("random text nothing here")
-        assert direction == "NEUTRAL"
-
-    def test_mixed_signals_resolves(self, analyzer):
-        direction = analyzer._detect_direction_keywords("rate hike but weak dollar")
-        # Both bullish and bearish present — tied goes to NEUTRAL or one side
-        assert direction in ("CALL", "PUT", "NEUTRAL")
-
-
-# ── analyze (full pipeline in keywords mode) ──
-
-class TestAnalyze:
-    def test_tier1_high_impact_result(self, analyzer):
+    def test_relevant_news_returns_none_without_llm(self, analyzer):
         result = analyzer.analyze(
             news_id=1,
             title="Fed rate decision: 25bps hike",
@@ -111,13 +90,10 @@ class TestAnalyze:
             entities="FED",
             tags="monetary_policy",
         )
-        assert result is not None
-        assert result["impact_score"] >= 80
-        assert result["level"] == "ALTA"
-        assert result["analysis_method"] == "keywords"
-        assert result["should_alert"] is True
+        assert result is None
 
-    def test_corporate_news_low_impact(self, analyzer):
+    def test_irrelevant_news_short_circuits_without_llm(self, analyzer):
+        """La noticia filtrada NO llega al LLM: devuelve dict de bajo impacto."""
         result = analyzer.analyze(
             news_id=2,
             title="Apple IPO merger acquisition earnings report",
@@ -126,82 +102,9 @@ class TestAnalyze:
             tags="earnings",
         )
         assert result is not None
-        assert result["impact_score"] < 30
-        assert result["level"] == "BAJA"
+        assert result["analysis_method"] == "keyword_filter"
         assert result["should_operate"] is False
         assert result["direction"] == "NEUTRAL"
-
-    def test_tier2_medium_impact(self, analyzer):
-        result = analyzer.analyze(
-            news_id=3,
-            title="Powell speaks at Jackson Hole",
-            summary="Fed chair discusses monetary policy outlook",
-            entities="Powell,FED",
-            tags="monetary_policy",
-        )
-        assert result is not None
-        assert result["impact_score"] >= 50
-        assert result["level"] in ("MEDIA", "ALTA")
-        assert result["should_alert"] is True
-
-    def test_returns_none_on_exception(self, analyzer):
-        """If something goes horribly wrong, analyze returns None."""
-        with patch.object(analyzer, "_classify_by_keywords", side_effect=Exception("Boom")):
-            result = analyzer.analyze(1, "title", "sum", "", "")
-        assert result is None
-
-    def test_neutral_caps_confidence_at_50(self, analyzer):
-        result = analyzer.analyze(
-            news_id=4,
-            title="Manufacturing pmi data released",
-            summary="PMI came in at 50.5",
-            entities="",
-            tags="",
-        )
-        if result and result["direction"] == "NEUTRAL":
-            assert result["confidence"] <= 50
-
-    def test_should_operate_requires_all_conditions(self, analyzer):
-        """should_operate needs score>=75, conf>=60, direction CALL/PUT, tier1/2."""
-        result = analyzer.analyze(
-            news_id=5,
-            title="Oil price crude oil surge tariff",
-            summary="Geopolitical tensions rise",
-            entities="",
-            tags="geopolitics",
-        )
-        assert result is not None
-        # Tier 3 geopolitics → should_operate = False
-        assert result["should_operate"] is False
+        assert result["impact_score"] < 30
 
 
-# ── _auto_explain ──
-
-class TestAutoExplain:
-    def test_tier1_explanation(self, analyzer):
-        text = analyzer._auto_explain("Title", "tier1")
-        assert "macro" in text.lower() or "relevante" in text.lower()
-
-    def test_corporate_explanation(self, analyzer):
-        text = analyzer._auto_explain("Title", "corporate")
-        assert "corporativa" in text.lower()
-
-    def test_unknown_category(self, analyzer):
-        text = analyzer._auto_explain("Title", "unknown")
-        assert "determinada" in text.lower() or "clasificar" in text.lower()
-
-
-# ── _auto_impact ──
-
-class TestAutoImpact:
-    def test_call_direction(self, analyzer):
-        text = analyzer._auto_impact("Title", "CALL", 80)
-        assert "subir" in text.lower()
-
-    def test_put_direction(self, analyzer):
-        text = analyzer._auto_impact("Title", "PUT", 80)
-        assert "bajar" in text.lower()
-
-    def test_neutral_direction(self, analyzer):
-        text = analyzer._auto_impact("Title", "NEUTRAL", 40)
-        assert "sin dirección" in text.lower()

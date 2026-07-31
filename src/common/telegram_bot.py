@@ -224,7 +224,7 @@ class TelegramBot:
     def _cmd_recent(self):
         try:
             from src.common.db import DB_PATH
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(DB_PATH, timeout=15.0)
             cur = conn.cursor()
             cur.execute("""
                 SELECT id, direction, status, mt5_pnl, trigger_type, created_at

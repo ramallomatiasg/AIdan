@@ -170,7 +170,7 @@ def generate_stats_input():
     # Get baseline FIRST (opens/closes own conn) to avoid conflict
     baseline = get_baseline_stats(lookback_trades=50)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 

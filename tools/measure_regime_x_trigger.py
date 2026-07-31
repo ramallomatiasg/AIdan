@@ -134,7 +134,7 @@ def main():
         out.append(f'posiciones cerradas (broker-truth): {len(positions)}')
 
         # trigger_type por sid (trade_archive principal, auto_strategies fallback)
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         trig = {}
         for tbl, key in (('trade_archive', 'strategy_id'), ('auto_strategies', 'id')):
             try:

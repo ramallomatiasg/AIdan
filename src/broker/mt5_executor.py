@@ -359,7 +359,7 @@ class MT5Executor:
                 try:
                     import sqlite3
                     from src.common.db import DB_PATH
-                    conn = sqlite3.connect(DB_PATH)
+                    conn = sqlite3.connect(DB_PATH, timeout=15.0)
                     conn.execute("UPDATE auto_strategies SET stop_loss = ?, take_profit = ? WHERE id = ?",
                                  (adjusted_sl, adjusted_tp, strategy_id))
                     conn.commit()
@@ -593,7 +593,7 @@ class MT5Executor:
         try:
             import sqlite3
             from src.common.db import DB_PATH, update_mt5_ticket
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(DB_PATH, timeout=15.0)
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, mt5_ticket, direction, mt5_lot
@@ -688,7 +688,7 @@ class MT5Executor:
             try:
                 import sqlite3
                 from src.common.db import DB_PATH
-                _conn = sqlite3.connect(DB_PATH)
+                _conn = sqlite3.connect(DB_PATH, timeout=15.0)
                 _cur = _conn.cursor()
                 _cur.execute("SELECT mt5_ticket FROM auto_strategies WHERE mt5_ticket IS NOT NULL")
                 for _row in _cur.fetchall():

@@ -88,7 +88,7 @@ OLD_CONF_FEATURE = 'confidence'
 def load_data():
     """Load trade_archive con todos los features completos.
     Si existe enriched CSV, hace merge con features adicionales."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     sql = """
         SELECT id as trade_id, direction, result, mt5_pnl,
                confidence, trigger_type, setup_type,

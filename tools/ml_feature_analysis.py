@@ -36,7 +36,7 @@ DB_PATH = os.path.join(os.environ['APPDATA'], 'AIdan', 'state', 'financial_news.
 
 def load_data(track='all'):
     """Load trade_archive into DataFrame."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     where_track = ''
     if track == 'm5':
         where_track = "AND trigger_type NOT LIKE 'm15_%' AND trigger_type NOT LIKE 'h1_%'"

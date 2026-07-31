@@ -38,7 +38,7 @@ def main():
         tick = mt5.symbol_info_tick(SYMBOL)
         srv_off = round((tick.time - time.time()) / 1800.0) * 1800 if tick else 0
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT * FROM fade_chop_shadow_log WHERE outcome_fav_pips IS NULL ORDER BY created_at"

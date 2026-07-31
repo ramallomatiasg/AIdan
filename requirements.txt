@@ -11,3 +11,13 @@ python-dotenv>=1.0.0
 pywebview>=4.0
 anthropic>=0.3.0
 MetaTrader5>=5.0.45
+
+# v3.48.0 — deps que el codigo YA importaba pero no estaban declaradas.
+# confidence_predictor.py usa joblib+numpy+sklearn; las tools de analisis usan
+# pandas/scipy. Funcionaba "de casualidad" porque estaban en el entorno local:
+# reproducibilidad cero en una maquina limpia.
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+scikit-learn>=1.3.0
+joblib>=1.3.0

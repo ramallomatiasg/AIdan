@@ -478,7 +478,7 @@ def plan_next_day_strategies(market_context=None):
         import sqlite3
         from src.common.db import DB_PATH
         from datetime import datetime, timedelta, timezone as _tz
-        _conn = sqlite3.connect(DB_PATH)
+        _conn = sqlite3.connect(DB_PATH, timeout=15.0)
         _c = _conn.cursor()
         now_utc = datetime.now(_tz.utc)
         window_end = now_utc + timedelta(hours=48)

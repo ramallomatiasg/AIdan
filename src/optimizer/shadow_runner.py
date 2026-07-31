@@ -196,7 +196,7 @@ def simulate_pending_shadow_trades(max_per_run: int = 20):
 
     Returns count de trades simulados.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
@@ -342,7 +342,7 @@ def _get_base_strategy_lot(base_strategy_id):
     if not base_strategy_id:
         return None
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cur = conn.cursor()
         cur.execute("SELECT mt5_lot FROM auto_strategies WHERE id = ?", (base_strategy_id,))
         row = cur.fetchone()

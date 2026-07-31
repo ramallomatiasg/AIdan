@@ -96,7 +96,7 @@ def evaluate_combo(trades, combo_changes):
 
 
 def main():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     print("=" * 90)
     print(f"BACKFILL SHADOW APILADO (combinaciones) — {datetime.now()}")
     print("=" * 90)

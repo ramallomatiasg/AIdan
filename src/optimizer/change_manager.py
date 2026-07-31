@@ -249,7 +249,7 @@ def _set_optimizer_param(param_name: str, value):
 
 def _get_filter_previous_value(change_id: int):
     """Get previous_value_json de active_meta_filters (para revert)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     cur = conn.cursor()
     cur.execute("""
         SELECT previous_value_json FROM active_meta_filters WHERE change_id = ?

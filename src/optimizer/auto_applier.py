@@ -204,7 +204,7 @@ def _count_trades_since(timestamp_str):
     """Cuenta trades en auto_strategies + trade_archive desde timestamp."""
     try:
         ts = str(timestamp_str)
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cur = conn.cursor()
         cur.execute("""
             SELECT COUNT(*) FROM auto_strategies
@@ -229,7 +229,7 @@ def _count_trades_since(timestamp_str):
 def _is_in_revert_cooldown():
     """Returns True si hubo un revert hace menos de COOLDOWN_DAYS_AFTER_REVERT dias."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cur = conn.cursor()
         cur.execute("""
             SELECT reverted_at FROM pending_changes

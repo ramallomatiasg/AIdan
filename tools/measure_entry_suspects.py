@@ -136,7 +136,7 @@ def main():
 
         # ── Sospechoso B: bias macro resagado ────────────────────────────────
         print('\n=== SOSPECHOSO B: htf_bias resagado vs deriva real previa (2h) ===')
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         bias_by_sid = {}
         for sid, hb in conn.execute(
                 "SELECT strategy_id, htf_bias FROM trade_archive "
@@ -182,7 +182,7 @@ def main():
 
         # ── Sospechoso C: ¿entra TARDE o entra MAL? (delay señal→fill + drift de precio) ──
         print('\n=== SOSPECHOSO C: ¿tarde o mal? (delay senal->fill y precio corrido al fill) ===')
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         meta = {}
         for tbl, key in (('trade_archive', 'strategy_id'), ('auto_strategies', 'id')):
             try:

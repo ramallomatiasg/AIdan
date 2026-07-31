@@ -1771,7 +1771,7 @@ class AIdan:
                                                 # Get alert_id from DB (last inserted)
                                                 import sqlite3
                                                 from src.common.db import DB_PATH
-                                                conn = sqlite3.connect(DB_PATH)
+                                                conn = sqlite3.connect(DB_PATH, timeout=15.0)
                                                 c = conn.cursor()
                                                 c.execute("SELECT id FROM alerts WHERE news_id=? ORDER BY id DESC LIMIT 1", (news_id,))
                                                 row = c.fetchone()
@@ -1832,6 +1832,10 @@ class AIdan:
                                                                 'trend_strength': market.get('trend_strength', ''),
                                                                 'momentum': market.get('momentum', ''),
                                                                 'htf_bias': _news_htf_real,
+                                                                # v3.48.0 — setup_type en el snapshot de entrada. Sin esto el
+                                                                # archive lo guardaba vacio (546/546 NULL) y moria el blend
+                                                                # historico de dynamic_conf + block_setup_type + adjust_setup_confidence.
+                                                                'setup_type': f"news_{result.get('level') or 'unknown'}",
                                                             }
                                                             sid = add_auto_strategy(
                                                                 alert_id=row[0], news_title=title,
@@ -2151,6 +2155,7 @@ class AIdan:
                                             'trend_strength': ms.get('trend_strength', ''),
                                             'momentum': ms.get('momentum', ''),
                                             'htf_bias': _cal_htf or '',
+                                            'setup_type': 'calendar',  # v3.48.0
                                         }
                                         sid = add_auto_strategy(
                                             alert_id=None,
@@ -2497,6 +2502,7 @@ class AIdan:
                                     'trend_strength': ms.get('trend_strength', ''),
                                     'momentum': ms.get('momentum', ''),
                                     'htf_bias': htf_bias or '',
+                                    'setup_type': sig.get('setup_type', ''),  # v3.48.0
                                 }
                                 sid = add_auto_strategy(
                                     alert_id=None,
@@ -2739,6 +2745,9 @@ class AIdan:
                                 'trend_strength': ms.get('trend_strength', ''),
                                 'momentum': ms.get('momentum', ''),
                                 'htf_bias': _smc_htf_for_ctx,
+                                # v3.48.0 — smc no emite setup_type; el tipo de zona (demand/supply)
+                                # ES la hipotesis del setup, asi que sirve de grano.
+                                'setup_type': f"smc_{(setup.get('zone') or {}).get('type') or 'zone'}",
                             }
                             sid = add_auto_strategy(
                                 alert_id=None,
@@ -3399,6 +3408,7 @@ class AIdan:
                                                 'momentum': _m15_state.get('momentum'),
                                                 'htf_bias': htf_bias,
                                                 'timeframe': 'M15',
+                                                'setup_type': _top.get('setup_type', ''),  # v3.48.0
                                             }
                                             _m15_title = f"[M15-STRUCT] {_top.get('reason', '')[:200]}"
                                             _m15_sid = add_auto_strategy(
@@ -3537,6 +3547,7 @@ class AIdan:
                                                 'momentum': _h1_state.get('momentum'),
                                                 'htf_bias': htf_bias,
                                                 'timeframe': 'H1',
+                                                'setup_type': _h1_top.get('setup_type', ''),  # v3.48.0
                                             }
                                             _h1_title = f"[H1-STRUCT] {_h1_top.get('reason', '')[:200]}"
                                             _h1_sid = add_auto_strategy(
@@ -3983,7 +3994,41 @@ class AIdan:
     def start_services(self):
         """Iniciar los 4 servicios como threads"""
         self.log("🚀 Iniciando servicios integrados...", "blue")
-        
+
+        # v3.48.0 — Backup de la DB al arrancar (idempotente por dia, rota a 7 dias).
+        # La DB es el 100% del track record (trades + insights + shadows) y no tenia
+        # ninguna copia. Corre en thread para no demorar el arranque; si falla, se
+        # loguea y AIdan sigue normal (nunca bloquea el trading).
+        #
+        # El logging a archivo se inicializa ACA, antes de lanzar el thread: el primer
+        # setup_logging() del proceso ocurre reciEn dentro del thread del collector,
+        # asi que sin esto el root no tiene handlers todavia y el resultado del backup
+        # se perdia (el INFO se descartaba y el WARNING salia por stderr a una consola
+        # oculta) => el user creeria tener backups sin tenerlos.
+        # OJO: `Config` NO existe a nivel de modulo en este archivo (todos los demas
+        # sitios lo importan localmente). Usar Config.LOG_LEVEL aca tiraba NameError
+        # y un `except: pass` se lo comia => install_file_logging nunca corria y el
+        # resultado del backup se perdia igual. El except loguea a stderr en vez de
+        # tragar, para no repetir la misma clase de bug.
+        try:
+            from src.common.config import Config as _LogCfg
+            from src.common.logging_setup import install_file_logging
+            install_file_logging(getattr(_LogCfg, 'LOG_LEVEL', 'INFO'))
+        except Exception as _lge:
+            import traceback as _tb
+            print(f"[start_services] install_file_logging fallo: {_lge}")
+            _tb.print_exc()
+
+        def _startup_backup():
+            try:
+                import logging as _bl
+                from src.common.db_backup import run_backup
+                run_backup(logger=_bl.getLogger('analyzer'))
+            except Exception as _be:
+                import logging as _bl
+                _bl.getLogger('analyzer').warning(f"Backup de DB no realizado: {_be}")
+        Thread(target=_startup_backup, daemon=True).start()
+
         # Collector thread
         self.log("📰 Iniciando Collector...", "blue")
         collector_thread = Thread(target=self.run_collector_service, daemon=True)

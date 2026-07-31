@@ -217,7 +217,7 @@ def main():
         sys.exit(1)
 
     symbol = 'EURUSD'
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     cur = conn.cursor()
 
     # Load trades

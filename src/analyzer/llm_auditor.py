@@ -200,7 +200,7 @@ def _ensure_pretrade_audits_table():
     try:
         from src.common.db import DB_PATH
         import sqlite3
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS pretrade_audits (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,7 +227,7 @@ def log_pretrade_audit(strategy_id, model, audit_result, signal_context):
         from src.common.db import DB_PATH
         import sqlite3
         _ensure_pretrade_audits_table()
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         conn.execute("""
             INSERT INTO pretrade_audits
             (strategy_id, model, veto_recommended, risk_score, concerns, reasoning, signal_context_json)

@@ -42,7 +42,7 @@ ENRICHED_FEATURES = [
 
 
 def load_data():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     df = pd.read_sql_query("""
         SELECT id as trade_id, direction, result, mt5_pnl, confidence, trigger_type,
                htf_bias, session, hour_utc, day_of_week, rsi_at_entry, avg_range_pips,

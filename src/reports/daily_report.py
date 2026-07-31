@@ -65,7 +65,7 @@ def _get_daily_data():
     try:
         import sqlite3
         from src.common.db import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM auto_strategies WHERE date(created_at) = ?", (today,))
         total_strategies = c.fetchone()[0]

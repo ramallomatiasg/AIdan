@@ -321,7 +321,7 @@ async def trade_archive_data():
     desde el what-if simulator. Filtra trades con mt5_pnl NULL (no completados)."""
     import sqlite3
     from src.common.db import DB_PATH
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     cur = conn.cursor()
     cur.execute("""
         SELECT id, direction, result, pips, sl_pips, tp_pips,
@@ -470,7 +470,7 @@ async def position_manager_state():
         import sqlite3
         from src.common.db import DB_PATH
         from src.common.config import Config
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         # Posiciones abiertas + ultima decision del manager
@@ -516,7 +516,7 @@ async def position_manager_stats(limit: int = 200):
     try:
         import sqlite3
         from src.common.db import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM position_manager_log")
@@ -559,7 +559,7 @@ async def bounce_entry_stats(limit: int = 50):
         import sqlite3
         from src.common.db import DB_PATH
         from src.common.config import Config
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) n, SUM(is_bounce) b, SUM(skipped) sk FROM bounce_entry_log")
@@ -1013,7 +1013,7 @@ async def get_recent_news_endpoint(limit: int = 200):
         from src.common.db import DB_PATH
         import sqlite3
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cursor = conn.cursor()
 
         # v3.27.0: LEFT JOIN con alerts para incluir direction/confidence/impact
@@ -1135,7 +1135,7 @@ async def backtest_strategy(strategy: StrategyDefinition):
     try:
         import sqlite3
         from src.common.db import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cursor = conn.cursor()
 
         # Query ALL alerts matching the strategy filters (with or without results)
@@ -1245,7 +1245,7 @@ async def save_strategy(strategy: StrategyDefinition):
         import sqlite3, json
         from datetime import datetime
         from src.common.db import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cursor = conn.cursor()
         cursor.execute("""
             INSERT OR REPLACE INTO strategies (name, config, created_at)
@@ -1263,7 +1263,7 @@ async def list_strategies():
     try:
         import sqlite3, json
         from src.common.db import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cursor = conn.cursor()
         cursor.execute("SELECT id, name, config, created_at, COALESCE(is_active, 0) FROM strategies ORDER BY created_at DESC")
         rows = cursor.fetchall()
@@ -1279,7 +1279,7 @@ async def activate_strategy(strategy_id: int):
     try:
         import sqlite3
         from src.common.db import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cursor = conn.cursor()
         cursor.execute("UPDATE strategies SET is_active = 0")  # deactivate all
         cursor.execute("UPDATE strategies SET is_active = 1 WHERE id = ?", (strategy_id,))
@@ -1295,7 +1295,7 @@ async def delete_strategy(strategy_id: int):
     try:
         import sqlite3
         from src.common.db import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM strategies WHERE id = ?", (strategy_id,))
         conn.commit()
@@ -1667,7 +1667,7 @@ async def equity_curve(days: int = 30):
     try:
         from src.common.db import DB_PATH
         import sqlite3
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cur = conn.cursor()
         cur.execute(f"""
             SELECT strategy_id, mt5_pnl, archived_at
@@ -1739,7 +1739,7 @@ async def wr_heatmap(mode: str = 'weekday', days: int = 30):
         from src.common.db import DB_PATH
         import sqlite3
         from datetime import datetime
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cur = conn.cursor()
 
         if mode == 'date':
@@ -1867,7 +1867,7 @@ async def filter_contribution():
     try:
         from src.common.db import DB_PATH
         import sqlite3
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cur = conn.cursor()
         cur.execute("""
             SELECT direction, confidence, impact_score, htf_bias, market_trend,
@@ -2198,7 +2198,7 @@ async def get_chat_context():
         from src.common.db import DB_PATH
         import sqlite3
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -2235,7 +2235,7 @@ async def chat_with_ollama(request: ChatRequest):
         from src.common.db import DB_PATH
         import sqlite3
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=15.0)
         cursor = conn.cursor()
 
         # Últimas 8 alertas con datos completos
@@ -2684,7 +2684,7 @@ async def mt5_toggle(request: Request):
         try:
             import sqlite3, MetaTrader5 as _mt5_mod
             from src.common.db import DB_PATH, now_ar
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(DB_PATH, timeout=15.0)
             cursor = conn.cursor()
             # Find strategies with open MT5 positions
             cursor.execute("""
@@ -2830,7 +2830,7 @@ async def mt5_config_update(request: Request):
 async def mt5_history():
     from src.common.db import DB_PATH, now_ar, today_ar
     import sqlite3
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     c = conn.cursor()
     c.execute("""
         SELECT id, direction, entry_price, mt5_ticket, mt5_lot, mt5_pnl,
