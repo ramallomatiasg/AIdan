@@ -2705,6 +2705,24 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             profile, mt5_pnl, title, created, entry_ctx_json
         ))
         conn.commit()
+
+        # v3.50.2 — VISIBILIDAD del P&L fantasma. Auditado el 5-ago: 20 filas del archivo
+        # (13 en data limpia = 7,7%) quedaron con mt5_pnl NULL, y sus `pips` son ~3x mas
+        # grandes que los de las filas con P&L real (|pips| medio 14,1 vs 5,0; max 51,3 vs
+        # 21,7; avg_win 16,2 vs 7,1) => son el TP/SL NOMINAL calculado por la evaluacion por
+        # precio, no un fill del broker. Control: 155/155 de las filas CON mt5_pnl tienen
+        # rastro en algun log de ejecucion. O sea: el archivo mezcla resultados realizados
+        # con resultados de papel, y quien mida por `pips` en vez de `mt5_pnl` se lleva una
+        # foto inflada. Esto se archivaba en SILENCIO. Ahora avisa (no cambia el dato: el
+        # historico no se toca, y la medicion correcta sigue siendo filtrar mt5_pnl IS NOT
+        # NULL). Si aparece seguido hay que atacar la carrera eval-por-precio vs sync del
+        # P&L del broker.
+        if mt5_pnl is None:
+            import logging
+            logging.getLogger('db').warning(
+                f"archive_trade: #{strategy_id} ({trigger}) archivado SIN mt5_pnl "
+                f"-> result={result} pips={pips} son TEORICOS (TP/SL nominal), no realizados. "
+                f"Excluir de toda medicion de plata.")
     finally:
         conn.close()
 
@@ -3242,8 +3260,16 @@ def get_learning_adjustments():
                         adjustments['news_category_penalties'][nc] = -10
                     elif ev_pips > 2.0:
                         adjustments['news_category_penalties'][nc] = 8
-    except Exception:
-        pass
+    except Exception as _eve:
+        # v3.50.2 — antes era `except Exception: pass`. Este bloque EV es la UNICA parte
+        # viva de esta funcion (alimenta trigger_penalties -> dynamic_conf y el gate de
+        # news): si tiraba, los ajustes volvian vacios y NADIE se enteraba. Es el mismo modo
+        # de falla que escondio el TypeError de la rama de insights durante meses (5.328
+        # ocurrencias invisibles hasta que hubo logs a archivo). Ahora se ve.
+        import logging as _log
+        _log.getLogger('db').warning(
+            f"get_learning_adjustments: bloque EV fallo, ajustes EV vacios: {_eve}",
+            exc_info=True)
 
     conn.close()
     return adjustments
