@@ -565,6 +565,23 @@ def init_db():
         )
     """)
 
+    # v3.49.0 — Snapshot de lo que el feedback de learning_insights RECOMENDARIA en cada ciclo.
+    # Con LEARNING_ADJ_MODE='log' (default) se escribe pero NO se aplica: sirve para mirar una
+    # semana y decidir con datos si el lazo vale la pena antes de enchufarlo al vivo.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS learning_adjustments_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mode TEXT,
+            insights_rows INTEGER,
+            session_penalties TEXT,
+            trigger_penalties TEXT,
+            news_category_penalties TEXT,
+            blocked_patterns TEXT,
+            sl_tp_advice TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.45.0 — Fade-en-chop shadow: el setup de REVERSION que se dispararia en el regimen
     # chop (ATR 3-8p, donde el breakout muere: 16% WR) SIN operar. Guarda candle snapshot +
     # el ATR (regimen) para scoring FORWARD. El scorer mide excursion FAVORABLE Y ADVERSA
@@ -2896,14 +2913,36 @@ def get_learning_adjustments():
         'blocked_patterns': [],       # patterns to avoid
         'sl_tp_advice': {},           # e.g. {'news': 'increase_sl', 'structure': 'ok'}
     }
+
+    # v3.49.0 — el loop de learning_insights acumula en _ins (AISLADO del vivo), no en
+    # `adjustments`. Se rebindea el nombre local para no tocar las ~30 escrituras de abajo;
+    # se restaura antes del bloque EV (que si es vivo). Con LEARNING_ADJ_MODE='log' (default)
+    # _ins se persiste y se DESCARTA; con 'active' se mergea antes del EV (mismo orden de
+    # precedencia que tenia el codigo original: insights primero, EV solo rellena huecos).
+    from src.common.config import Config as _Cfg
+    _mode = getattr(_Cfg, 'LEARNING_ADJ_MODE', 'log')
+    _ins = {
+        'session_penalties': {},
+        'trigger_penalties': {},
+        'news_category_penalties': {},
+        'blocked_patterns': [],
+        'sl_tp_advice': {},
+    }
+    _live_adjustments = adjustments
+    adjustments = _ins
+    _insight_rows = 0
     try:
         # Get most recent insights by category (last 48h)
         cutoff = (datetime.now(TZ_AR) - timedelta(hours=48)).strftime('%Y-%m-%d %H:%M:%S')
-        cursor.execute("""
-            SELECT category, insight, data FROM learning_insights
-            WHERE created_at > ? ORDER BY created_at DESC
-        """, (cutoff,))
-        for row in cursor.fetchall():
+        _rows = []
+        if _mode != 'off':
+            cursor.execute("""
+                SELECT category, insight, data FROM learning_insights
+                WHERE created_at > ? ORDER BY created_at DESC
+            """, (cutoff,))
+            _rows = cursor.fetchall()
+        _insight_rows = len(_rows)
+        for row in _rows:
             cat, insight, raw_data = row[0], row[1], row[2]
             data = json.loads(raw_data) if raw_data else {}
 
@@ -3033,7 +3072,17 @@ def get_learning_adjustments():
                     _rec_tp = float(data.get('recommended_tp_pips', 0) or 0)
                     if _sl_action in ('widen', 'tighten') and _rec_sl > 0:
                         # Accumulate per-trigger rolling list of recommendations
-                        bucket = adjustments['sl_tp_advice'].setdefault(_trigger, {'sl_recs': [], 'tp_recs': [], 'actions': []})
+                        # v3.49.0 FIX: la rama 'sl_tp' de arriba guarda un STRING en esta misma
+                        # clave; el setdefault devolvia ese string y el append reventaba con
+                        # "TypeError: string indices must be integers" -> abortaba TODO el for
+                        # (no solo esta fila). Colision real y diaria (sl_tp escribe para
+                        # h1_structure, post_trade widen/tighten existe para h1/m15/structure).
+                        # El bucket numerico gana sobre el string (que es inerte aguas abajo:
+                        # technical.py solo aplica dicts con action widen/tighten).
+                        bucket = adjustments['sl_tp_advice'].get(_trigger)
+                        if not isinstance(bucket, dict) or 'sl_recs' not in bucket:
+                            bucket = {'sl_recs': [], 'tp_recs': [], 'actions': []}
+                            adjustments['sl_tp_advice'][_trigger] = bucket
                         bucket['sl_recs'].append(_rec_sl * weight)
                         if _rec_tp > 0:
                             bucket['tp_recs'].append(_rec_tp * weight)
@@ -3041,6 +3090,91 @@ def get_learning_adjustments():
     except Exception as _le:
         import logging as _log
         _log.getLogger('db').warning(f"get_learning_adjustments failed: {_le}", exc_info=True)
+    finally:
+        adjustments = _live_adjustments  # a partir de aca se vuelve al dict VIVO
+
+    # v3.15.0 — finalize sl_tp_advice: convert per-trigger lists into actionable medians
+    # If trigger has 3+ recommendations and consensus action, output: {'action': 'widen', 'sl_pips': 5.5, 'tp_pips': 12.0}
+    # v3.49.0: corre sobre _ins (lo que el feedback RECOMENDARIA), no sobre el dict vivo.
+    try:
+        finalized = {}
+        for trigger, bucket in list(_ins['sl_tp_advice'].items()):
+            if isinstance(bucket, dict) and 'sl_recs' in bucket:
+                actions = bucket.get('actions', [])
+                sl_recs = bucket.get('sl_recs', [])
+                tp_recs = bucket.get('tp_recs', [])
+                if len(actions) < 3:
+                    continue  # need at least 3 trades for stable signal
+                # Consensus action: most common
+                from collections import Counter
+                action_count = Counter(actions)
+                top_action, top_n = action_count.most_common(1)[0]
+                if top_n / len(actions) < 0.6:
+                    continue  # no clear consensus (60% majority)
+                # Median of recommendations
+                sl_med = sorted(sl_recs)[len(sl_recs)//2] if sl_recs else 0
+                tp_med = sorted(tp_recs)[len(tp_recs)//2] if tp_recs else 0
+                finalized[trigger] = {
+                    'action': top_action,
+                    'sl_pips': round(sl_med, 1),
+                    'tp_pips': round(tp_med, 1),
+                    'sample_size': len(actions),
+                }
+            elif isinstance(bucket, str):
+                # Backward compat: existing 'sl_tp' category recommendation as plain string
+                finalized[trigger] = {'action': 'unknown', 'recommendation': bucket}
+        _ins['sl_tp_advice'] = finalized
+    except Exception:
+        pass
+
+    # v3.49.1 — persistir lo que el feedback recomendaria (siempre que haya corrido) y
+    # aplicarlo SOLO en modo active. En 'log' el vivo queda exactamente como hoy.
+    # THROTTLE: get_learning_adjustments se llama en CADA ciclo del scanner (~1/5s) -> la
+    # v3.49.0 escribio 5.104 filas identicas en 7h (1,8M/ano). Solo se escribe cuando el
+    # CONTENIDO cambia, mas un heartbeat cada 30min para poder ver "sigue igual" en el tiempo.
+    if _mode != 'off':
+        try:
+            _payload = (
+                json.dumps(_ins['session_penalties'], sort_keys=True),
+                json.dumps(_ins['trigger_penalties'], sort_keys=True),
+                json.dumps(_ins['news_category_penalties'], sort_keys=True),
+                json.dumps(sorted(_ins['blocked_patterns'])),
+                json.dumps(_ins['sl_tp_advice'], sort_keys=True),
+            )
+            _prev = conn.execute("""
+                SELECT session_penalties, trigger_penalties, news_category_penalties,
+                       blocked_patterns, sl_tp_advice, mode, created_at
+                FROM learning_adjustments_log ORDER BY id DESC LIMIT 1
+            """).fetchone()
+            _write = True
+            if _prev and tuple(_prev[:5]) == _payload and _prev[5] == _mode:
+                # mismo contenido y mismo modo -> solo heartbeat cada 30min
+                _write = False
+                try:
+                    _age = (now_ar().replace(tzinfo=None)
+                            - datetime.strptime(str(_prev[6])[:19], '%Y-%m-%d %H:%M:%S'))
+                    _write = _age.total_seconds() >= 1800
+                except Exception:
+                    _write = True  # created_at raro -> no perder el dato
+            if _write:
+                conn.execute("""
+                    INSERT INTO learning_adjustments_log
+                        (mode, insights_rows, session_penalties, trigger_penalties,
+                         news_category_penalties, blocked_patterns, sl_tp_advice, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (_mode, _insight_rows) + _payload
+                     + (now_ar().strftime('%Y-%m-%d %H:%M:%S'),))
+                conn.commit()
+        except Exception as _pe:
+            import logging as _log
+            _log.getLogger('db').warning(f"learning_adjustments_log insert failed: {_pe}")
+
+    if _mode == 'active':
+        adjustments['session_penalties'].update(_ins['session_penalties'])
+        adjustments['trigger_penalties'].update(_ins['trigger_penalties'])
+        adjustments['news_category_penalties'].update(_ins['news_category_penalties'])
+        adjustments['blocked_patterns'].extend(_ins['blocked_patterns'])
+        adjustments['sl_tp_advice'].update(_ins['sl_tp_advice'])
 
     # Compute EV-based adjustments directly from trade_archive (most reliable source)
     try:
@@ -3092,39 +3226,6 @@ def get_learning_adjustments():
                         adjustments['news_category_penalties'][nc] = -10
                     elif ev_pips > 2.0:
                         adjustments['news_category_penalties'][nc] = 8
-    except Exception:
-        pass
-
-    # v3.15.0 — finalize sl_tp_advice: convert per-trigger lists into actionable medians
-    # If trigger has 3+ recommendations and consensus action, output: {'action': 'widen', 'sl_pips': 5.5, 'tp_pips': 12.0}
-    try:
-        finalized = {}
-        for trigger, bucket in list(adjustments['sl_tp_advice'].items()):
-            if isinstance(bucket, dict) and 'sl_recs' in bucket:
-                actions = bucket.get('actions', [])
-                sl_recs = bucket.get('sl_recs', [])
-                tp_recs = bucket.get('tp_recs', [])
-                if len(actions) < 3:
-                    continue  # need at least 3 trades for stable signal
-                # Consensus action: most common
-                from collections import Counter
-                action_count = Counter(actions)
-                top_action, top_n = action_count.most_common(1)[0]
-                if top_n / len(actions) < 0.6:
-                    continue  # no clear consensus (60% majority)
-                # Median of recommendations
-                sl_med = sorted(sl_recs)[len(sl_recs)//2] if sl_recs else 0
-                tp_med = sorted(tp_recs)[len(tp_recs)//2] if tp_recs else 0
-                finalized[trigger] = {
-                    'action': top_action,
-                    'sl_pips': round(sl_med, 1),
-                    'tp_pips': round(tp_med, 1),
-                    'sample_size': len(actions),
-                }
-            elif isinstance(bucket, str):
-                # Backward compat: existing 'sl_tp' category recommendation as plain string
-                finalized[trigger] = {'action': 'unknown', 'recommendation': bucket}
-        adjustments['sl_tp_advice'] = finalized
     except Exception:
         pass
 

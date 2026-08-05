@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.48.0"
+APP_VERSION = "3.49.1"
 
 class Config:
     VERSION = APP_VERSION
@@ -189,6 +189,21 @@ class Config:
     # Banda de ATR (pips) que define el "chop" donde el breakout no tiene edge (medido 3-Jul).
     FADE_CHOP_ATR_MIN = float(os.getenv("FADE_CHOP_ATR_MIN", "3.0"))
     FADE_CHOP_ATR_MAX = float(os.getenv("FADE_CHOP_ATR_MAX", "8.0"))
+
+    # v3.49.0 — Feedback de learning_insights -> ajustes vivos (confianza + SL/TP).
+    # Contexto: get_learning_adjustments crasheaba en CADA ciclo (TypeError por colision de
+    # tipos entre la rama 'sl_tp' -string- y la rama 'post_trade' -dict-, db.py) desde hace
+    # meses; el try envolvia el for entero => abortaba TODA la agregacion de insights. O sea:
+    # el mecanismo nunca corrio completo, y lo poco que colaba dependia del orden de las filas.
+    # Arreglar el crash NO es neutro: ENCIENDE un lazo que nunca se valido (mueve confianza
+    # +-15 y el SL/TP vivo en los 5 tracks). Por eso arranca en 'log'. off / log / active:
+    #   log (DEFAULT) = calcula TODO y lo persiste en learning_adjustments_log, pero NO lo
+    #     aplica: lo que se devuelve al vivo sale solo del bloque EV sobre trade_archive
+    #     (que nunca crasheo y ya era la parte viva). Comportamiento en vivo = el de hoy.
+    #   active = ademas lo aplica (SOLO tras revisar una semana de log y decidir con datos).
+    #   off = ni siquiera calcula (no loguea).
+    # El bloque EV sobre trade_archive NO lo toca este flag: sigue vivo en los 3 modos.
+    LEARNING_ADJ_MODE = (os.getenv("LEARNING_ADJ_MODE", "log") or "log").lower()
 
     # v3.46.0 — Tighten de entrada relativo-a-ATR (breakout/breakdown). El tope de distancia
     # precio<->nivel deja de ser 7p fijo y pasa a ser min(breakout_dist_max, ATR*MULT). Medido

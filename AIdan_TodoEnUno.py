@@ -1340,12 +1340,28 @@ class AIdan:
                             min_pips = tuner.get_params().get('min_pips_for_win', 1.5)
                             result = 'win' if pips_result >= min_pips else 'loss'
                         exit_px = tp if hit_tp else (entry_price if hit_be else (sl if hit_sl else current_price))
+                        # v3.49.1 — el setup_type REAL vive en el snapshot de entrada
+                        # (v3.48.0 lo empezo a guardar). Antes esta rama lo ADIVINABA
+                        # raspando palabras del titulo con una lista mezclada es/en
+                        # ('soporte', 'resistencia', 'rebote', 'breakout' pelado) y como el
+                        # caller le gana al entry_context en la cadena de fallback de
+                        # archive_trade, esa adivinanza PISABA al valor bueno -> el archivo
+                        # quedaba con DOS vocabularios y los buckets del aprendizaje
+                        # (paso 6 de dynamic_conf, block_setup_type) se fragmentaban.
+                        # Ahora: snapshot primero, raspado solo si no hay nada.
                         _setup_type = ''
-                        _title_lower = (news_title or '').lower()
-                        for _st in ['breakout', 'breakdown', 'bb_rejection', 'reversal', 'momentum', 'crossover', 'continuation', 'rebote', 'rechazo', 'soporte', 'resistencia']:
-                            if _st in _title_lower:
-                                _setup_type = _st
-                                break
+                        try:
+                            from src.common.db import get_entry_context as _gec
+                            _setup_type = (_gec(sid) or {}).get('setup_type', '') or ''
+                        except Exception:
+                            _setup_type = ''
+                        if not _setup_type:
+                            _title_lower = (news_title or '').lower()
+                            for _st in ['breakout', 'breakdown', 'bb_rejection', 'reversal',
+                                        'momentum', 'crossover', 'continuation']:
+                                if _st in _title_lower:
+                                    _setup_type = _st
+                                    break
                         ctx = {'entry_price': entry_price, 'direction': direction, 'confidence': conf,
                                'setup_type': _setup_type, 'trigger_type': trigger_type or '',
                                'market_trend': tech.get_market_state().get('trend', ''),
@@ -1357,6 +1373,10 @@ class AIdan:
                             # Prefer entry-time snapshot over exit-time (for accurate learning)
                             entry_ctx = get_entry_context(sid)
                             if entry_ctx:
+                                # v3.49.1 — el setup_type del snapshot manda sobre cualquier
+                                # inferencia hecha al cerrar (vocabulario canonico unico).
+                                if entry_ctx.get('setup_type'):
+                                    ctx['setup_type'] = entry_ctx['setup_type']
                                 ctx['rsi_at_entry'] = entry_ctx.get('rsi', 0)
                                 ctx['avg_range_pips'] = entry_ctx.get('avg_range_pips', 0)
                                 ctx['volatility'] = entry_ctx.get('volatility', '')
