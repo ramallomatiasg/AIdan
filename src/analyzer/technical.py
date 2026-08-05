@@ -1217,6 +1217,42 @@ class TechnicalAnalyzer:
             except Exception:
                 _s['level_touches'] = 0
 
+        # v3.50.0 — CASTIGO DE CONFIANZA POR NIVEL FLOJO (ver Config.LEVEL_QUALITY_*).
+        # Va DESPUES del tag de toques y RE-APLICA el piso min_confidence: el gate original
+        # corre arriba (linea ~716 y compania) cuando la confianza todavia no tenia el
+        # castigo, asi que sin este re-filtro una señal castigada a 53 saldria igual.
+        # No es un block: la señal muy fuerte sobrevive al castigo, la mediocre no.
+        try:
+            from src.common.config import Config as _LqCfg
+            _lq_pen = int(getattr(_LqCfg, 'LEVEL_QUALITY_PENALTY', 0) or 0)
+            _lq_max = int(getattr(_LqCfg, 'LEVEL_QUALITY_MAX_TOUCHES', 10) or 10)
+            _lq_tracks = getattr(_LqCfg, 'LEVEL_QUALITY_TRACKS', []) or []
+            _lq_tf = getattr(self, 'timeframe_label', 'M5')
+            if _lq_pen > 0 and _lq_tf.upper() in _lq_tracks and signals:
+                _kept = []
+                for _s in signals:
+                    _t = _s.get('level_touches') or 0
+                    # _t == 0 => no hay key_level => no hay info de calidad, no se castiga.
+                    if 1 <= _t <= _lq_max:
+                        _before = _s.get('confidence', 0)
+                        _after = max(0, _before - _lq_pen)
+                        _s['confidence'] = _after
+                        _s['level_quality_penalty'] = _lq_pen
+                        if _after < min_confidence:
+                            self.logger.info(
+                                f"Level quality [{_lq_tf}]: DROP {_s.get('direction')} "
+                                f"{_s.get('setup_type')} nivel flojo ({_t} toques <= {_lq_max}) "
+                                f"conf {_before}->{_after} < min {min_confidence}")
+                            continue
+                        self.logger.info(
+                            f"Level quality [{_lq_tf}]: penalizada {_s.get('direction')} "
+                            f"{_s.get('setup_type')} nivel flojo ({_t} toques) "
+                            f"conf {_before}->{_after} (sigue sobre min {min_confidence})")
+                    _kept.append(_s)
+                signals = _kept
+        except Exception as _lqe:
+            self.logger.warning(f"Level quality penalty failed (señales intactas): {_lqe}")
+
         if signals:
             self.logger.info(f"Structure scanner: {len(signals)} signals detected")
         return signals

@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.49.1"
+APP_VERSION = "3.50.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -189,6 +189,36 @@ class Config:
     # Banda de ATR (pips) que define el "chop" donde el breakout no tiene edge (medido 3-Jul).
     FADE_CHOP_ATR_MIN = float(os.getenv("FADE_CHOP_ATR_MIN", "3.0"))
     FADE_CHOP_ATR_MAX = float(os.getenv("FADE_CHOP_ATR_MAX", "8.0"))
+
+    # v3.50.0 — Castigo de confianza por NIVEL FLOJO (pocos toques). Medido con P&L REAL
+    # (level_quality_log JOIN trade_archive, m15 n=83, 5-ago): <=10 toques = n=10, 20% WR,
+    # -$29.70 (9 de 10 pierden) vs >10 toques = n=73, 47% WR, +$61.70. Prevalencia 12%
+    # (mediana 20 toques) => filtra poco volumen. NO es un block: RESTA confianza, asi que
+    # con el piso min_conf 60 se caen los que entraban con conf<75 y sobreviven los muy
+    # fuertes. Los 10 flojos medidos entraban con conf ALTA (90,90,83,81,78,75,73,73,68,60)
+    # => el castigo es lo que los separa.
+    # CAVEATS asumidos a proposito (n=10 NO pasa el gate formal, p=0.21; por prevalencia
+    # quizas nunca lo pase => se decide con juicio calibrado, como se acordo el 31-jul):
+    #   - `level_touches` usa tolerancia max(2, ATR*0.5) => correlaciona con volatilidad,
+    #     no es calidad de nivel pura.
+    #   - Arranca SOLO en M15 (donde se midio). M5 esta con la frecuencia ya golpeada por el
+    #     tighten v3.46.0 (3 trades en 10 dias) y su muestra joinable es n=22 => sumarle un
+    #     filtro no medido ahi seria apilar recortes a ciegas. H1 n=20, misma razon.
+    # PENALTY=0 apaga todo (reversa por env, sin rebuild). Medir forward ~2 sem: cayo la
+    # frecuencia de m15 mas de lo estimado (~12%)? mejoro el WR del resto?
+    # CALIBRACION DEL NUMERO (probado contra los 10 flojos reales): con 15 se bloquean
+    # 4/10 (los de conf<75) y se evitan ~$11.3 de los -$29.7 => se le ESCAPAN los dos
+    # peores, que entraban con conf 90 y 83 (#683 -4.69, #834 -6.40). Con 25 se bloquean
+    # 8/10 (~$25.2) pero eso ya es casi un block de la familia flojo, y a n=10 no hay
+    # evidencia para tanto. Se eligio 15 = la version conservadora ("mejorar, no sacar"):
+    # castiga a todos, deja pasar solo a los muy fuertes. Subir a 25 es 1 env var si el
+    # forward confirma que los flojos de conf alta siguen perdiendo.
+    LEVEL_QUALITY_PENALTY = int(os.getenv("LEVEL_QUALITY_PENALTY", "15"))
+    LEVEL_QUALITY_MAX_TOUCHES = int(os.getenv("LEVEL_QUALITY_MAX_TOUCHES", "10"))
+    LEVEL_QUALITY_TRACKS = [
+        _t.strip().upper() for _t in
+        (os.getenv("LEVEL_QUALITY_TRACKS", "M15") or "").split(",") if _t.strip()
+    ]
 
     # v3.49.0 — Feedback de learning_insights -> ajustes vivos (confianza + SL/TP).
     # Contexto: get_learning_adjustments crasheaba en CADA ciclo (TypeError por colision de
