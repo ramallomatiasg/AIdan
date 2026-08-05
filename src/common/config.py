@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.50.2"
+APP_VERSION = "3.50.3"
 
 class Config:
     VERSION = APP_VERSION
@@ -189,6 +189,25 @@ class Config:
     # Banda de ATR (pips) que define el "chop" donde el breakout no tiene edge (medido 3-Jul).
     FADE_CHOP_ATR_MIN = float(os.getenv("FADE_CHOP_ATR_MIN", "3.0"))
     FADE_CHOP_ATR_MAX = float(os.getenv("FADE_CHOP_ATR_MAX", "8.0"))
+
+    # v3.50.3 — get_setup_win_rates() tambien mira trade_archive (el cable que faltaba).
+    # Auditado en runtime el 5-ago: la funcion devolvia SOLO 'news' porque lee de
+    # signal_results (430 filas, todas news) y strategy_results (6 filas, 0 con setup_type)
+    # e IGNORABA trade_archive, que es la tabla buena. Por eso el feedback historico estaba
+    # MUERTO para structure/m15/h1/smc.
+    # POR QUE NO SE ENCIENDE DE UNA: esta funcion no alimenta solo el paso 6 de dynamic_conf
+    # (+-15); tambien la consume auto_tuner._update_blocked_setups(), que BLOQUEA un
+    # setup_type con WR<35% y n>=5. Cablear a lo bruto = block en vivo con muestra de 5 =
+    # exactamente el error que la metodologia prohibe (hour gate, late breakout 3p).
+    #   log (DEFAULT) = calcula lo que el archivo aportaria y lo loguea, SIN devolverlo.
+    #                   Vivo identico. Sirve para ver la tabla antes de confiar en ella.
+    #   on  = lo devuelve (enciende paso 6 + impact_score + el block del tuner).
+    #   off = ni lo calcula.
+    # MIN_TRADES es el piso de muestra POR setup_type para que un setup entre siquiera a la
+    # cuenta: 25 = el mismo n del gate de significancia de la casa. Hoy ningun setup del
+    # archivo llega (33 filas repartidas en ~10 setups) => aun en 'on' seria no-op por ahora.
+    SETUP_WR_SOURCE_ARCHIVE = (os.getenv("SETUP_WR_SOURCE_ARCHIVE", "log") or "log").lower()
+    SETUP_WR_MIN_TRADES = int(os.getenv("SETUP_WR_MIN_TRADES", "25"))
 
     # v3.50.0 — Castigo de confianza por NIVEL FLOJO (pocos toques). Medido con P&L REAL
     # (level_quality_log JOIN trade_archive, m15 n=83, 5-ago): <=10 toques = n=10, 20% WR,

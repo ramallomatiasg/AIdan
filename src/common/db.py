@@ -1976,6 +1976,47 @@ def get_setup_win_rates():
     except Exception:
         pass
 
+    # v3.50.3 — TERCERA fuente: trade_archive (la tabla buena). Sin esto la funcion
+    # devolvia SOLO 'news' (signal_results son 430 filas todas news; strategy_results tiene
+    # 6 filas y 0 con setup_type) => el feedback historico estaba MUERTO para
+    # structure/m15/h1/smc, que es el 100% del volumen que no es news.
+    # Se cuenta con P&L REAL del broker (mt5_pnl IS NOT NULL) para no contar los resultados
+    # de papel (auditoria 5-ago: 20 filas con pips teoricos y sin fill del broker).
+    # Arranca en modo 'log': se calcula y se loguea pero NO se devuelve => vivo identico.
+    # Ver el comentario largo de Config.SETUP_WR_SOURCE_ARCHIVE para el por que.
+    _arch = {}
+    _mode = 'log'   # init antes del try: si el import falla, el log de abajo no debe NameError
+    try:
+        from src.common.config import Config as _SwCfg
+        _mode = getattr(_SwCfg, 'SETUP_WR_SOURCE_ARCHIVE', 'log')
+        _min_n = int(getattr(_SwCfg, 'SETUP_WR_MIN_TRADES', 25) or 25)
+        if _mode != 'off':
+            cursor.execute("""
+                SELECT setup_type, result, COUNT(*) FROM trade_archive
+                WHERE result IN ('win', 'loss') AND setup_type IS NOT NULL AND setup_type != ''
+                  AND mt5_pnl IS NOT NULL
+                  AND day_of_week NOT IN (5, 6)
+                GROUP BY setup_type, result
+            """)
+            for setup_type, result, count in cursor.fetchall():
+                b = _arch.setdefault(setup_type, {'wins': 0, 'losses': 0})
+                if result == 'win':
+                    b['wins'] += count
+                else:
+                    b['losses'] += count
+            # piso de muestra POR setup: por debajo del gate no entra (evita que el tuner
+            # bloquee una familia entera con n=5, y que el paso 6 mueva +-15 sobre ruido)
+            _arch = {k: v for k, v in _arch.items()
+                     if (v['wins'] + v['losses']) >= _min_n}
+            if _mode == 'on':
+                for k, v in _arch.items():
+                    b = stats.setdefault(k, {'wins': 0, 'losses': 0})
+                    b['wins'] += v['wins']
+                    b['losses'] += v['losses']
+    except Exception as _swe:
+        import logging as _log
+        _log.getLogger('db').warning(f"get_setup_win_rates: fuente archive fallo: {_swe}")
+
     conn.close()
 
     # Calculate win rates
@@ -1984,6 +2025,13 @@ def get_setup_win_rates():
         total = s['wins'] + s['losses']
         s['total'] = total
         s['win_rate'] = round(s['wins'] / total * 100, 1) if total > 0 else 50.0
+
+    if _arch and _mode == 'log':
+        import logging as _log
+        _log.getLogger('db').info(
+            "get_setup_win_rates [archive=log, min_n=%d]: el archivo APORTARIA %s "
+            "(no aplicado; SETUP_WR_SOURCE_ARCHIVE=on para activarlo)"
+            % (_min_n, {k: '%dW/%dL' % (v['wins'], v['losses']) for k, v in _arch.items()}))
     return stats
 
 
@@ -2098,6 +2146,44 @@ def update_mt5_close(strategy_id, pnl, close_price, status='closed'):
             UPDATE auto_strategies SET mt5_pnl = ?, mt5_close_price = ?, mt5_status = ?, mt5_closed_at = ?
             WHERE id = ?
         """, (round(pnl, 2), close_price, status, now_ar(), strategy_id))
+
+        # v3.50.3 — BACKFILL del P&L fantasma. Causa raiz auditada el 5-ago: dentro de UN
+        # ciclo, la evaluacion por precio corre ANTES que sync_closed_positions (que es
+        # quien llama a esta funcion con el P&L REAL de los deals). Si esa evaluacion decide
+        # "hit TP/SL" mirando el high/low de la vela, archiva en ese momento con
+        # auto_strategies.mt5_pnl todavia en NULL; despues llega el P&L del broker aca, pero
+        # archive_trade es idempotente (sale por "already archived") => la fila del archivo
+        # se queda con mt5_pnl NULL y con `pips` TEORICOS para siempre. Resultado medido:
+        # 20 filas (13 en data limpia = 7,7%) con |pips| medio 14,1 vs 5,0 de las reales.
+        # Fix: completar la fila del archivo cuando llega la verdad del broker. NO cambia el
+        # timing de ninguna decision (esto corre despues de que el trade ya cerro) y no
+        # relabelea nada: si el signo del P&L contradice el `result` que puso la evaluacion
+        # por precio, se AVISA y se deja la decision al humano (regla broker-truth vs no
+        # contaminar el historico con relabels, caso #658).
+        try:
+            _row = cursor.execute(
+                "SELECT result, pips, mt5_pnl FROM trade_archive WHERE strategy_id = ?",
+                (strategy_id,)).fetchone()
+            if _row and _row[2] is None:
+                cursor.execute("""
+                    UPDATE trade_archive SET mt5_pnl = ?, exit_price = ?
+                    WHERE strategy_id = ? AND mt5_pnl IS NULL
+                """, (round(pnl, 2), close_price, strategy_id))
+                import logging as _log
+                _lg = _log.getLogger('db')
+                _lg.info(
+                    f"archive backfill: #{strategy_id} mt5_pnl NULL -> ${round(pnl, 2)} "
+                    f"(P&L real del broker; los pips {_row[1]} eran teoricos)")
+                _res = _row[0]
+                if (_res == 'win' and pnl < 0) or (_res == 'loss' and pnl > 0):
+                    _lg.warning(
+                        f"archive backfill: #{strategy_id} INCOHERENTE — result='{_res}' "
+                        f"pero el broker dice ${round(pnl, 2)}. NO se relabelea "
+                        f"(decision del humano); la fila queda visible para revisar.")
+        except Exception as _bfe:
+            import logging as _log
+            _log.getLogger('db').warning(f"archive backfill #{strategy_id} fallo: {_bfe}")
+
         conn.commit()
     finally:
         conn.close()
