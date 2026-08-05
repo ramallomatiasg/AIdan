@@ -2621,8 +2621,23 @@ class AIdan:
                                 break
 
                             # Confidence minimum check: skip if below profile minimum
-                            if conf < prof_min_conf:
-                                logger.info(f"Min confidence: skipping SMC {direction}, conf {conf} < profile min {prof_min_conf}")
+                            # v3.50.4 — BUG: esto leia `prof_min_conf`, que se asigna en la
+                            # rama de NOTICIAS (~l.1620, dentro de `if result and
+                            # direction != NEUTRAL`). En los ciclos sin noticia analizada la
+                            # variable no existe => UnboundLocalError justo aca => el
+                            # scanner de SMC moria EN EL MOMENTO en que encontraba un setup
+                            # (visto en vivo el 5-ago: los 2 setups del dia se perdieron
+                            # asi). Es la misma clase de bug que mato a M15 en v3.33.0:
+                            # variable de otro scope + excepcion atrapada = subsistema
+                            # muerto en silencio. Ahora se resuelve local y autosuficiente.
+                            _smc_min_conf = 60
+                            try:
+                                from src.common.db import get_active_profile as _gap
+                                _smc_min_conf = (_gap() or {}).get('min_confidence', 60)
+                            except Exception as _mce:
+                                logger.debug(f"SMC min_conf fallback 60: {_mce}")
+                            if conf < _smc_min_conf:
+                                logger.info(f"Min confidence: skipping SMC {direction}, conf {conf} < profile min {_smc_min_conf}")
                                 continue
 
                             # Adaptive SL/TP
