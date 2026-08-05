@@ -568,11 +568,22 @@ class MT5Executor:
             return False
 
         p = position[0]
+        _target = round(new_sl, 5)
+
+        # v3.50.1 — NO-OP GUARD. El thread de trailing corre cada 1s y llamaba aca con el
+        # MISMO SL que ya tiene la posicion: el broker devolvia retcode 10025 ("No changes")
+        # y se logueaba como WARNING. Medido en el log del 31-jul/3-ago: 8.567 warnings
+        # (4.738 de un solo ticket) = un order_send inutil por segundo por posicion, y el
+        # log real de errores enterrado abajo del spam. El SL ya esta donde queremos => exito.
+        if round(p.sl or 0.0, 5) == _target:
+            self.logger.debug(f"MT5 trailing SL: #{ticket} ya esta en {_target:.5f}, sin cambios")
+            return True
+
         request = {
             "action": self._mt5.TRADE_ACTION_SLTP,
             "position": p.ticket,
             "symbol": p.symbol,
-            "sl": round(new_sl, 5),
+            "sl": _target,
             "tp": p.tp,  # Keep existing TP
         }
 
@@ -583,6 +594,12 @@ class MT5Executor:
         else:
             retcode = result.retcode if result else 'None'
             comment = result.comment if result else 'None'
+            # 10025 = NO_CHANGES: si se cuela igual (carrera con otro thread que ya lo movio)
+            # no es una falla real -> debug, no warning.
+            _no_changes = getattr(self._mt5, 'TRADE_RETCODE_NO_CHANGES', 10025)
+            if retcode == _no_changes:
+                self.logger.debug(f"MT5 modify SL: #{ticket} sin cambios (retcode={retcode})")
+                return True
             self.logger.warning(f"MT5 modify SL failed: #{ticket} retcode={retcode} {comment}")
             return False
 

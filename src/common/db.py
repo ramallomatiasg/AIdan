@@ -1027,6 +1027,22 @@ def get_stats():
 
 def record_signal_result(alert_id, result, market_context=None):
     """Record whether a trading signal was correct, with optional market context"""
+    # v3.50.1 — GUARD. `signal_results.result` tiene CHECK(result IN ('win','loss','skip'))
+    # pero el auto-eval de alertas produce un tercer resultado legitimo, 'break_even'
+    # (|movimiento| < 2p, ver AIdan_TodoEnUno.py) => el INSERT tiraba sqlite3.IntegrityError
+    # y, como el try del caller envuelve el for ENTERO, abortaba la evaluacion de TODAS las
+    # alertas que venian despues en el lote (la clase de bug de siempre: una fila mala mata
+    # el loop). El dato NO se pierde: `alerts.alert_result` ya guarda 'break_even' fiel
+    # (182 filas). Aca se descarta a proposito porque esta tabla alimenta win/loss y un
+    # break_even no aporta a ninguno de los dos. Si algun dia hace falta preservarlo, hay que
+    # migrar el CHECK (SQLite obliga a recrear la tabla).
+    _allowed = ('win', 'loss', 'skip')
+    if result not in _allowed:
+        import logging as _log
+        _log.getLogger('db').info(
+            f"record_signal_result: alerta #{alert_id} con result='{result}' "
+            f"(no esta en {_allowed}) -> no se registra en signal_results")
+        return
     conn = _connect()
     cursor = conn.cursor()
     try:

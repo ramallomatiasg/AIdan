@@ -3109,7 +3109,13 @@ class AIdan:
                             if current_price:
                                 pip = 0.0001
                                 min_pips_move = 2.0  # minimum pips to count as win/loss
+                                _eval_ok = 0
                                 for arow in pending_alerts:
+                                  # v3.50.1 — try POR ALERTA: antes el try envolvia el for
+                                  # entero, asi que una sola fila mala (p.ej. el
+                                  # IntegrityError de 'break_even') abortaba la evaluacion
+                                  # de todas las alertas siguientes del lote.
+                                  try:
                                     aid, a_dir, a_entry, a_conf, a_impact, a_sent, a_title = arow
                                     if not a_entry or a_entry <= 0:
                                         continue
@@ -3142,7 +3148,10 @@ class AIdan:
                                         'news_category': _classify_news_category(a_title),
                                     })
                                     logger.info(f"Alert eval #{aid}: {a_result.upper()} | {a_dir} entry={a_entry:.5f} exit={current_price:.5f} | {pips_move:+.1f}p | {a_title[:50]}")
-                                logger.info(f"Evaluated {len(pending_alerts)} pending news alerts")
+                                    _eval_ok += 1
+                                  except Exception as _ae:
+                                    logger.warning(f"Alert eval fallo en una alerta (sigue el lote): {_ae}")
+                                logger.info(f"Evaluated {_eval_ok}/{len(pending_alerts)} pending news alerts")
                     except Exception as e:
                         logger.error(f"Alert auto-eval error: {e}", exc_info=True)
 
