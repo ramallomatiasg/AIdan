@@ -1764,8 +1764,20 @@ class AIdan:
                                                 price = 0
 
                                         if price > 0:
+                                            # v3.51.0 PERILLA 1 — piso de expiry para news.
+                                            # El profile activo no trae 'expiry_minutes', asi que el tp_cap
+                                            # caia siempre en cap_mult 2.25 (el default 15) y el expiry se
+                                            # calculaba DE ese TP chico -> se retroalimentaban hacia abajo.
+                                            # Copia local del profile: NO muta el dict que usa el resto de
+                                            # la rama (min_impact/min_confidence/direction siguen intactos).
+                                            _news_floor = max(0, int(getattr(Config, 'NEWS_MIN_EXPIRY_MIN', 45)))
+                                            _news_profile = profile
+                                            if _news_floor > 15:
+                                                _news_profile = dict(profile)
+                                                _news_profile['expiry_minutes'] = _news_floor
+
                                             # Adaptive SL/TP based on ATR + structure levels
-                                            adaptive = tech.compute_adaptive_sl_tp(direction, price, market, profile, trigger_type='news', sl_tp_advice=_learn_adj.get('sl_tp_advice') if _learn_adj else None)
+                                            adaptive = tech.compute_adaptive_sl_tp(direction, price, market, _news_profile, trigger_type='news', sl_tp_advice=_learn_adj.get('sl_tp_advice') if _learn_adj else None)
                                             sl = adaptive['sl']
                                             tp = adaptive['tp']
 
@@ -1773,7 +1785,9 @@ class AIdan:
                                             avg_range_pips = market.get('avg_range_pips', 5.0)
                                             avg_range_pips = avg_range_pips if avg_range_pips > 0 else 5.0
                                             expiry_min = max(15, int(adaptive['tp_pips'] / avg_range_pips * 5))
-                                            expiry_min = min(expiry_min, 60)  # cap at 60 min
+                                            # el piso pisa al calculo de arriba; el cap sigue siendo el techo
+                                            expiry_min = max(expiry_min, _news_floor)
+                                            expiry_min = min(expiry_min, max(60, _news_floor))  # cap at 60 min
 
                                             # Spread gate: skip if estimated spread > 50% of SL
                                             session_info = TechnicalAnalyzer.get_session_info()
@@ -3924,13 +3938,25 @@ class AIdan:
 
                     mom_aligned = mom_raw if direction == 'CALL' else -mom_raw
 
+                    # v3.51.0 PERILLA 2 — el soft-expiry de news queda ANCLADO donde estaba.
+                    # La perilla 1 le da al TRADE mas tiempo (y un TP mas lejos) para que el
+                    # ganador llegue; esto evita que de paso el PERDEDOR gane 30min extra para
+                    # caminar hasta el stop. CLOSE_PROTECT dispara en time_in_trade >=
+                    # base_expiry_min, asi que sin este ancla el cambio se da vuelta (EV -0.86p).
+                    # OJO: se toca SOLO lo que ve el PM. `expiry_min` no se modifica porque
+                    # arriba deriva _trade_start (fix #615) y abajo nada mas lo usa.
+                    _pm_base_expiry = float(expiry_min)
+                    _news_pm_anchor = int(getattr(Config, 'NEWS_PM_BASE_EXPIRY_MIN', 15))
+                    if (trigger_type or '').lower() == 'news' and _news_pm_anchor > 0:
+                        _pm_base_expiry = float(min(expiry_min, _news_pm_anchor))
+
                     ctx = PositionContext(
                         strategy_id=sid, direction=direction,
                         fill_price=fill_price, current_price=current_price,
                         tp_distance=tp_distance, sl_distance=sl_distance,
                         progress=progress, hwm=hwm,
                         time_in_trade_min=time_in_trade_min,
-                        base_expiry_min=float(expiry_min),
+                        base_expiry_min=_pm_base_expiry,
                         max_hold_min=max_hold_for_trigger(trigger_type, Config),
                         momentum_aligned_pips=mom_aligned,
                         atr_pips=atr_pips, trigger_type=trigger_type,

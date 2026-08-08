@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.50.4"
+APP_VERSION = "3.51.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -132,6 +132,28 @@ class Config:
     # R1 Profit-lock: arma cuando HWM >= ARM*tp_distance; cierra si progress cae a <= KEEP*HWM.
     PM_PROFIT_LOCK_ARM = float(os.getenv("PM_PROFIT_LOCK_ARM", "0.60"))   # llego a 60% del TP
     PM_PROFIT_LOCK_KEEP = float(os.getenv("PM_PROFIT_LOCK_KEEP", "0.60"))  # cierra si retrocede 40% del pico
+
+    # v3.51.0 — news: recorrido para los GANADORES, defensa igual para los perdedores.
+    # Medido sobre los 12 news post-fix v3.47.0 (P&L real): WR 42% y -2.7p brutos, pero
+    # -8.4p de comision => la comision es el 76% de la perdida. 9 de 12 se cortan a mitad
+    # de camino y la asimetria esta AL REVES: los ganadores recorren 40% del TP y los
+    # perdedores 53% del SL.
+    #
+    # Causa de codigo (no estadistica): el TP y el expiry de news se retroalimentan hacia
+    # abajo. El tp_cap usa cap_mult = 2.0 + profile['expiry_minutes']/60 con el 15 del
+    # profile -> TP chico (6.8p); despues AIdan_TodoEnUno calcula el expiry DE ese TP
+    # (tp_pips/atr*5) -> cae al piso de 15min. Se clava en el trade mas chico posible.
+    #
+    # PERILLA 1 — piso de expiry para news: rompe el lazo. cap_mult 2.25 -> 2.75, el TP
+    # pasa de 6.8p a 7.7p y el ganador tiene 45min en vez de 15 para llegar.
+    NEWS_MIN_EXPIRY_MIN = int(os.getenv("NEWS_MIN_EXPIRY_MIN", "45"))   # 0/15 = apagado
+    # PERILLA 2 — el soft-expiry del Position Manager para news queda ANCLADO donde esta
+    # hoy. Sin esto la perilla 1 se da vuelta: CLOSE_PROTECT dispara en
+    # time_in_trade >= base_expiry_min (position_manager.py:97), asi que con expiry 45 los
+    # perdedores tendrian 30min mas para llegar al stop; si pasan de 53% a 100% del SL el
+    # EV cae a -0.86p = PEOR que hoy. Anclado en 15 la defensa sigue igual que hoy.
+    # 0 = seguir al expiry de la estrategia (comportamiento previo a v3.51.0).
+    NEWS_PM_BASE_EXPIRY_MIN = int(os.getenv("NEWS_PM_BASE_EXPIRY_MIN", "15"))
 
     # v3.38.1 — Entry Quality Gates (v3.34.0) ahora config-driven y DESACTIVADOS por default.
     # Sweep de significancia (29 May, tools/sweep_entry_gates.py): los 30 combos de
