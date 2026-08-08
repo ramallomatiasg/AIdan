@@ -3755,6 +3755,27 @@ class AIdan:
         BE_OFFSET = BE_OFFSET_PIPS * 0.0001
         MIN_SL_MOVE = 0.00003
 
+        # v3.52.0 — Cap del umbral de BE en pips absolutos, por track. Ver Config para el
+        # detalle medido. Resumen: en h1 el TP es ~54p => el BE arma a +27p y el HWM maximo
+        # historico es 26.3p => nunca armo. El cap lo baja a +5p, que si se alcanza (32% de
+        # los h1). Se resuelve aca una sola vez; el loop solo hace un min().
+        # NOTA: Config NO existe a nivel de modulo en este archivo (se importa local en cada
+        # sitio, con alias). Importarlo aca adentro y con alias propio es deliberado: es la
+        # clase de bug que mato a SMC en v3.50.4 (nombre resuelto desde otro scope).
+        try:
+            from src.common.config import Config as _TrailCfg
+            _be_cap_pips = float(getattr(_TrailCfg, 'BE_TRIGGER_MAX_PIPS', 0) or 0)
+            _be_cap_tracks = {
+                t.strip() for t in str(getattr(_TrailCfg, 'BE_TRIGGER_MAX_TRACKS', '') or '').split(',')
+                if t.strip()
+            }
+        except Exception as e:
+            _be_cap_pips, _be_cap_tracks = 0.0, set()
+            _logger.warning(f"BE cap: no se pudo leer la config, queda apagado ({e})")
+        _be_cap_dist = _be_cap_pips * 0.0001 if _be_cap_pips > 0 else None
+        if _be_cap_dist and _be_cap_tracks:
+            _logger.info(f"BE cap activo: {_be_cap_pips}p para {sorted(_be_cap_tracks)}")
+
         while True:
             try:
                 with self._mt5_lock:
@@ -3804,6 +3825,14 @@ class AIdan:
                     # Stage 2 (Trail): cuando price reaches TRAIL_START del TP, trail HWM - TRAIL_DIST.
                     be_threshold = tp_distance * BE_TRIGGER
                     trail_threshold = tp_distance * TRAIL_START
+
+                    # v3.52.0 — el % del TP no sirve cuando el TP es inalcanzable (h1). El min()
+                    # es MONOTONICO: solo puede adelantar el BE, nunca atrasarlo. El trailing
+                    # (80% del TP) NO se capea: es una etapa distinta, sin evidencia medida.
+                    if _be_cap_dist and _be_cap_tracks:
+                        _trk = row[13] if len(row) > 13 else None
+                        if _trk in _be_cap_tracks:
+                            be_threshold = min(be_threshold, _be_cap_dist)
                     be_active = high_water >= be_threshold
                     trail_active = high_water >= trail_threshold
 

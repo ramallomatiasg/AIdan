@@ -2239,7 +2239,7 @@ def get_strategies_with_open_mt5():
     cursor.execute("""
         SELECT id, mt5_ticket, direction, entry_price, stop_loss, take_profit,
                mt5_lot, created_at, news_title, mt5_trailing_step, mt5_fill_price,
-               mt5_high_water, confidence
+               mt5_high_water, confidence, trigger_type
         FROM auto_strategies
         WHERE mt5_status = 'filled' AND mt5_ticket IS NOT NULL
     """)

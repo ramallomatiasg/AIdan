@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.51.1"
+APP_VERSION = "3.52.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -132,6 +132,20 @@ class Config:
     # R1 Profit-lock: arma cuando HWM >= ARM*tp_distance; cierra si progress cae a <= KEEP*HWM.
     PM_PROFIT_LOCK_ARM = float(os.getenv("PM_PROFIT_LOCK_ARM", "0.60"))   # llego a 60% del TP
     PM_PROFIT_LOCK_KEEP = float(os.getenv("PM_PROFIT_LOCK_KEEP", "0.60"))  # cierra si retrocede 40% del pico
+
+    # v3.52.0 — Cap del umbral de break-even en pips absolutos, por track.
+    # El BE (50% del TP), el trailing (80%) y el profit-lock del PM (60%) estan anclados a
+    # un % del TP. En h1 el TP es ~54p => el BE arma a +27p, y el HWM MAXIMO de toda la
+    # historia de h1 es 26.3p => h1 NUNCA armo una proteccion de ganancia en 67 trades.
+    # Medido (34 h1 con log de PM): los que llegaron a >=4p a favor conservan -6% al cerrar
+    # (suben +10p y vuelven a negativo). Los 6 perdedores que tocaron >=5p cerraron entre
+    # -0.5p y -5.6p => todos pasaron por +1p en la bajada. Los 8 ganadores que tocaron >=5p
+    # conservan 67% del pico y ninguno bajo de +3.9p => el BE no habria cortado a ninguno.
+    # El min() lo hace MONOTONICO: arma antes, nunca despues. 0 = apagado (sin rebuild).
+    BE_TRIGGER_MAX_PIPS = float(os.getenv("BE_TRIGGER_MAX_PIPS", "5.0"))
+    # Solo los tracks listados. m15 (el motor, +$32.64) y M5 quedan intactos a proposito:
+    # su BE ya arma dentro del rango que el precio alcanza (m15 TP 18p => BE a 9p).
+    BE_TRIGGER_MAX_TRACKS = os.getenv("BE_TRIGGER_MAX_TRACKS", "h1_structure")
 
     # v3.51.1 — trade_archive solo acepta trades que LLEGARON AL BROKER (ticket o P&L).
     # Una estrategia skipeada (cooldown / market closing / spread gate / sin fill) no es un
