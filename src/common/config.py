@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.51.0"
+APP_VERSION = "3.51.1"
 
 class Config:
     VERSION = APP_VERSION
@@ -132,6 +132,12 @@ class Config:
     # R1 Profit-lock: arma cuando HWM >= ARM*tp_distance; cierra si progress cae a <= KEEP*HWM.
     PM_PROFIT_LOCK_ARM = float(os.getenv("PM_PROFIT_LOCK_ARM", "0.60"))   # llego a 60% del TP
     PM_PROFIT_LOCK_KEEP = float(os.getenv("PM_PROFIT_LOCK_KEEP", "0.60"))  # cierra si retrocede 40% del pico
+
+    # v3.51.1 — trade_archive solo acepta trades que LLEGARON AL BROKER (ticket o P&L).
+    # Una estrategia skipeada (cooldown / market closing / spread gate / sin fill) no es un
+    # trade: archivarla mete un win/loss de papel con los pips teoricos del TP/SL nominal.
+    # Medido: 22 de 600 filas, ~2 por semana desde abril. false = comportamiento previo.
+    ARCHIVE_REQUIRE_EXECUTION = os.getenv("ARCHIVE_REQUIRE_EXECUTION", "true").lower() != "false"
 
     # v3.51.0 — news: recorrido para los GANADORES, defensa igual para los perdedores.
     # Medido sobre los 12 news post-fix v3.47.0 (P&L real): WR 42% y -2.7p brutos, pero

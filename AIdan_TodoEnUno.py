@@ -3025,10 +3025,39 @@ class AIdan:
                                             # MT5 already closed — use that data, don't force anything
                                             logger.info(f"Strategy #{sid} expired — MT5 already closed naturally @ ${_mt5_check['pnl']:.2f}")
                                         else:
-                                            # Position still open — let it run with MT5's SL/TP
-                                            logger.info(f"Strategy #{sid} expired but MT5 position still OPEN — letting SL/TP do their job (no force-close)")
-                                            # Skip evaluation this cycle; will be re-evaluated when MT5 closes naturally
-                                            continue
+                                            # v3.51.1 — "sin P&L" NO implica "posicion abierta". Una
+                                            # estrategia que nunca llego al broker (cooldown, market
+                                            # closing, spread gate, sin fill) tampoco tiene P&L, y este
+                                            # branch la dejaba en limbo: `continue` para siempre, con el
+                                            # log mintiendo cada 10s (#865 lo repitio ~4.300 veces en 12h)
+                                            # hasta que el eval de arranque la archivaba como fantasma.
+                                            # El ticket distingue los dos casos sin ambiguedad.
+                                            # imports LOCALES a proposito: `_sq3`/`DB_PATH` se asignan
+                                            # en otras ramas de esta misma funcion, y depender de eso
+                                            # es la clase de bug que mato a SMC en v3.50.4.
+                                            # Si la lectura falla NO adivinamos: se asume que hay
+                                            # posicion y se conserva el comportamiento previo
+                                            # (continue). Nunca evaluar por precio algo que
+                                            # podria estar abierto — es el bug v3.39.1.
+                                            _tk = 'unknown'
+                                            try:
+                                                import sqlite3 as _sq3b
+                                                from src.common.db import DB_PATH as _DBP
+                                                _c3 = _sq3b.connect(_DBP, timeout=15.0)
+                                                _r3 = _c3.execute("SELECT mt5_ticket FROM auto_strategies WHERE id=?", (sid,)).fetchone()
+                                                _c3.close()
+                                                _tk = _r3[0] if _r3 else None
+                                            except Exception as _tke:
+                                                logger.debug(f"ticket check #{sid}: {_tke}")
+                                            if _tk:
+                                                # Position still open — let it run with MT5's SL/TP
+                                                logger.info(f"Strategy #{sid} expired but MT5 position still OPEN (ticket #{_tk}) — letting SL/TP do their job (no force-close)")
+                                                # Skip evaluation this cycle; will be re-evaluated when MT5 closes naturally
+                                                continue
+                                            # Nunca se ejecuto: no hay posicion que esperar. Se evalua la
+                                            # SEÑAL normalmente (strategy_results) y archive_trade la
+                                            # excluye de trade_archive por el guard de v3.51.1.
+                                            logger.info(f"Strategy #{sid} expired y NUNCA se ejecuto (sin ticket) — se evalua la señal, no entra a trade_archive")
                                     except Exception as e:
                                         logger.debug(f"MT5 status check on expiry: {e}")
 

@@ -2690,6 +2690,17 @@ def update_mt5_config(risk_percent=None, max_positions=None, max_lot=None):
 
 # ── Learning System Functions ──
 
+def _archive_requires_execution():
+    """v3.51.1 — si trade_archive solo acepta trades que llegaron al broker.
+    Default True. `ARCHIVE_REQUIRE_EXECUTION=false` lo apaga sin rebuild (escape hatch:
+    si alguna vez se corre sin MT5 y se quiere el archivo de papel)."""
+    try:
+        from src.common.config import Config
+        return bool(getattr(Config, 'ARCHIVE_REQUIRE_EXECUTION', True))
+    except Exception:
+        return True
+
+
 def archive_trade(strategy_id, result, exit_price, pips, context=None):
     """Archive a completed trade with enriched context for learning."""
     ctx = context or {}
@@ -2705,7 +2716,7 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
         cursor.execute("""
             SELECT direction, entry_price, stop_loss, take_profit, confidence,
                    impact_score, trigger_type, news_title, profile_name, created_at,
-                   mt5_pnl, mt5_fill_price, entry_context
+                   mt5_pnl, mt5_fill_price, entry_context, mt5_ticket, mt5_status
             FROM auto_strategies WHERE id = ?
         """, (strategy_id,))
         row = cursor.fetchone()
@@ -2714,7 +2725,31 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             logging.getLogger('db').warning(f"archive_trade: strategy #{strategy_id} not found (deleted by cap?)")
             conn.close()
             return
-        direction, entry, sl, tp, conf, impact, trigger, title, profile, created, mt5_pnl, fill_price, entry_ctx_json = row
+        (direction, entry, sl, tp, conf, impact, trigger, title, profile, created,
+         mt5_pnl, fill_price, entry_ctx_json, mt5_ticket, mt5_status) = row
+
+        # v3.51.1 — GUARD: trade_archive es la tabla de PLATA REALIZADA. Una estrategia que
+        # nunca llego al broker (skipeada por el cooldown, bloqueada por "market closing",
+        # spread gate, sin fill...) no es un trade: archivarla mete un win/loss de PAPEL con
+        # los pips TEORICOS del TP/SL nominal. Medido: 22 de 600 filas (~2 por semana, parejo
+        # desde abril) y sus |pips| son ~3x los de las filas reales, asi que inflan cualquier
+        # medicion que no filtre por mt5_pnl.
+        #   Casos que lo destaparon: #865 (skip por COOLDOWN, archivado "+13.3p WIN") y
+        #   #881 (nunca ejecutado, "MT5 blocked: market closing soon", archivado "-0.7p").
+        #   Ninguno de los dos tiene un solo deal en el historial de MT5.
+        # Evidencia de ejecucion = ticket del broker O P&L ya cargado. Es deliberadamente
+        # AMPLIA: con ticket pero sin P&L todavia (la carrera que cubre el backfill de
+        # v3.50.3) el trade SI se archiva y el P&L real lo completa update_mt5_close.
+        # La evaluacion a nivel SEÑAL no cambia: auto_evaluate_strategy sigue escribiendo en
+        # strategy_results (universo distinto: "¿la señal acerto?", incluye las no operadas).
+        if _archive_requires_execution() and not mt5_ticket and mt5_pnl is None:
+            import logging
+            logging.getLogger('db').info(
+                f"archive_trade: #{strategy_id} ({trigger}) NO se archiva — nunca se ejecuto "
+                f"(mt5_ticket=NULL, mt5_pnl=NULL, mt5_status={mt5_status!r}). "
+                f"result={result} pips={pips} eran TEORICOS. La señal igual queda en strategy_results.")
+            conn.close()
+            return
 
         # v3.48.0 — setup_type: cadena de fallback en UN solo lugar (cubre los 3 callers).
         # Antes quedaba '' en el 100% de las filas (546/546 NULL) porque ningun caller lo
