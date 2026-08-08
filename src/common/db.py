@@ -2439,6 +2439,29 @@ def update_mt5_trailing_data(strategy_id, step, high_water=None):
     conn.close()
 
 
+def update_mt5_high_water(strategy_id, high_water):
+    """v3.52.1 — Persiste SOLO el high-water mark, sin tocar mt5_trailing_step ni
+    be_triggered.
+
+    Existe para UN caso: el trailing decidio mover el SL pero el broker rechazo el
+    modify (reconexion, positions_get vacio, retcode raro). Ahi el SL NO se movio =>
+    marcar el step avanzado (o be_triggered=1) seria mentir sobre el estado del stop
+    — es el "clobber del trailing step" que la nota de deuda tecnica advertia. Pero el
+    PICO no se puede perder: el profit-lock del PM (R1) lee mt5_high_water, y el pico,
+    una vez que el precio retrocede, no vuelve a calcularse desde el progress actual.
+
+    El MAX en SQL es defensa en profundidad: el caller ya calcula
+    high_water = max(stored_hwm, progress), asi que el valor nunca baja; esto garantiza
+    que ningun caller futuro pueda bajarlo por accidente.
+    """
+    conn = _connect()
+    conn.execute(
+        "UPDATE auto_strategies SET mt5_high_water = MAX(COALESCE(mt5_high_water, 0), ?) "
+        "WHERE id = ?", (high_water, strategy_id))
+    conn.commit()
+    conn.close()
+
+
 def mark_be_triggered(strategy_id):
     """Mark a strategy as having reached breakeven (trailing SL moved to BE)."""
     conn = _connect()

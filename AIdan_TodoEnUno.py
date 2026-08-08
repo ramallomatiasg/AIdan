@@ -3790,7 +3790,8 @@ class AIdan:
                 except Exception as e:
                     _logger.debug(f"Sync pending orders: {e}")
 
-                from src.common.db import get_strategies_with_open_mt5, update_mt5_trailing_data
+                from src.common.db import (get_strategies_with_open_mt5, update_mt5_trailing_data,
+                                           update_mt5_high_water)
                 open_mt5 = get_strategies_with_open_mt5()
                 if not open_mt5:
                     _time.sleep(1)
@@ -3874,6 +3875,21 @@ class AIdan:
                                 f"Trailing[{stage_label}]: #{ticket} strat#{sid} SL->{new_sl:.5f} "
                                 f"(lock={locked_pips:+.1f}p hwm={high_water/0.0001:+.1f}p "
                                 f"progress={progress/0.0001:+.1f}p)")
+                        elif high_water != (stored_hwm or 0) and high_water > 0:
+                            # v3.52.1 BUGFIX — AMNESIA DEL HWM. La escritura de arriba vive
+                            # bajo `if success`, y el respaldo de abajo es el `elif` de
+                            # `new_sl`, NO de `success` => cuando el trailing DECIDE mover el
+                            # SL y el broker rechaza el modify, ese ciclo perdia el pico. Y el
+                            # pico no se recupera: al ciclo siguiente high_water se recalcula
+                            # como max(stored_hwm_viejo, progress_actual), asi que si el precio
+                            # ya retrocedio, el maximo real se pierde para siempre.
+                            # Medido: 101 filas con el pico retrocediendo en 21 trades (15 m15).
+                            # h1 tenia 0 casos SOLO porque su BE nunca armaba (arm a 27p, HWM
+                            # max historico 26.3p) => v3.52.0, al bajar el arm a 5p, lo expone
+                            # por primera vez. Lo lee el profit-lock del PM (R1).
+                            # Helper HWM-only a proposito: el SL no se movio, marcar el step
+                            # avanzado o be_triggered=1 seria mentir sobre el estado del stop.
+                            update_mt5_high_water(sid, high_water)
                     elif high_water != (stored_hwm or 0) and high_water > 0:
                         # Always track HWM for learning even with trailing disabled
                         update_mt5_trailing_data(sid, new_step, high_water)
