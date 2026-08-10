@@ -947,12 +947,25 @@ class MT5Executor:
                         if deal.entry == 1:  # entry=1 means close deal
                             self.logger.info(f"MT5 position #{ticket} already closed by TP/SL @ {deal.price:.5f}")
                             return _ret(deal.price, False)  # NO mandamos orden: ya estaba cerrada
+                # v3.53.0 — esta rama era MUDA. positions_get vino vacio Y no hay deal de
+                # cierre: o el deal todavia no aparece en el historial, o positions_get tuvo
+                # el glitch transitorio que este mismo archivo documenta para el caso #804.
+                # En cualquiera de los dos casos NO se mando ninguna orden y el trade puede
+                # seguir vivo. Medido: 25 de 174 cierres del PM en modo active (14%) salieron
+                # por aca sin dejar rastro; #805 reintento 8 veces en 32 minutos.
+                self.logger.warning(
+                    f"close_strategy_position: #{strategy_id} ticket #{ticket} no esta en "
+                    f"positions_get y no hay deal de cierre -> NO se mando orden. La posicion "
+                    f"puede seguir ABIERTA (glitch transitorio o deal aun no propagado)")
                 return _ret(None, False)
 
             p = position[0]
             close_type = self._mt5.ORDER_TYPE_SELL if p.type == 0 else self._mt5.ORDER_TYPE_BUY
             tick = self._mt5.symbol_info_tick(p.symbol)
             if not tick:
+                self.logger.error(
+                    f"close_strategy_position: #{strategy_id} ticket #{ticket} sin tick para "
+                    f"{p.symbol} -> NO se mando orden, la posicion sigue ABIERTA")
                 return _ret(None, False)
             close_price = tick.bid if p.type == 0 else tick.ask
 
@@ -979,22 +992,40 @@ class MT5Executor:
                 return _ret(None, False)
         return _ret(None, False)
 
-    def close_all_positions(self):
+    def close_all_positions(self, return_detail=False):
+        """Cierra todas las posiciones de AIdan (kill switch / pre-close del viernes).
+
+        v3.53.0 — Antes fallaba en SILENCIO ABSOLUTO: el `if result and retcode == DONE`
+        no tenia else y el `continue` por falta de tick tampoco logueaba, asi que un
+        cierre que no salia era invisible y el caller no podia distinguir "cerre 0 porque
+        no habia posiciones" de "cerre 0 porque las 3 fallaron". En el path del boton de
+        panico esa diferencia es la que decide si quedaste expuesto al mercado.
+
+        return_detail=True devuelve (closed, found) en vez de solo closed — mismo patron
+        que close_strategy_position(return_sent_flag=True) de v3.40.19, para no cambiarle
+        el shape a los callers viejos.
+        """
+        def _ret(closed, found):
+            return (closed, found) if return_detail else closed
+
         if not self.connected or not self._mt5:
-            return 0
+            self.logger.warning("close_all_positions: MT5 no conectado -> NO se cerro NADA")
+            return _ret(0, 0)
 
         positions = self._mt5.positions_get(group="*")
         if not positions:
-            return 0
+            return _ret(0, 0)
 
+        mine = [p for p in positions if p.magic == MAGIC_NUMBER]
+        found = len(mine)
         closed = 0
-        for p in positions:
-            if p.magic != MAGIC_NUMBER:
-                continue
-
+        for p in mine:
             close_type = self._mt5.ORDER_TYPE_SELL if p.type == 0 else self._mt5.ORDER_TYPE_BUY
             tick = self._mt5.symbol_info_tick(p.symbol)
             if not tick:
+                self.logger.error(
+                    f"close_all_positions: sin tick para {p.symbol} -> posicion #{p.ticket} "
+                    f"NO se cerro (sigue ABIERTA en el broker)")
                 continue
             close_price = tick.bid if p.type == 0 else tick.ask
 
@@ -1016,11 +1047,35 @@ class MT5Executor:
             if result and result.retcode == self._mt5.TRADE_RETCODE_DONE:
                 closed += 1
                 self.logger.info(f"MT5 closed position #{p.ticket}")
+            else:
+                # v3.53.0 — el else que faltaba: sin esto un cierre fallido era invisible.
+                rc = getattr(result, 'retcode', None) if result else None
+                cm = getattr(result, 'comment', '') if result else 'order_send devolvio None'
+                self.logger.error(
+                    f"close_all_positions: FALLO el cierre de #{p.ticket} "
+                    f"(retcode={rc} comment={cm}) -> sigue ABIERTA en el broker")
 
-        return closed
+        if closed < found:
+            self.logger.error(
+                f"close_all_positions: se cerraron {closed} de {found} posiciones de AIdan "
+                f"-> {found - closed} SIGUEN ABIERTAS y sin gestion")
+        elif found:
+            self.logger.info(f"close_all_positions: {closed}/{found} cerradas OK")
+
+        return _ret(closed, found)
 
     def toggle(self, enabled):
+        """Enciende/apaga el trading. Al apagar CIERRA TODO y RECIEN DESPUES levanta el
+        flag — el orden importa: is_ready() es `connected and not kill_switch`, asi que
+        con el flag ya arriba cualquier cierre queda bloqueado (era el bug del /kill de
+        Telegram, v3.53.0).
+
+        v3.53.0 — devuelve (closed, found) para que el caller pueda decirle al humano si
+        de verdad salio del mercado. Los callers viejos que ignoran el retorno siguen igual.
+        """
+        closed = found = 0
         if not enabled and self.connected:
-            n = self.close_all_positions()
-            self.logger.info(f"MT5 kill switch: closed {n} positions")
+            closed, found = self.close_all_positions(return_detail=True)
+            self.logger.info(f"MT5 kill switch: closed {closed}/{found} positions")
         self.kill_switch = not enabled
+        return closed, found

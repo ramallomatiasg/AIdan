@@ -4099,6 +4099,16 @@ class AIdan:
                             elif closed_px:
                                 _logger.info(f"PositionManager [{decision.action}] #{sid} — ya estaba "
                                              f"cerrada por TP/SL @ {closed_px} (no la cerro el PM)")
+                            else:
+                                # v3.53.0 — el else que faltaba. Sin esto, cuando
+                                # close_strategy_position devolvia (None, False) la decision
+                                # se persistia con executed=0 y en el log NO quedaba rastro:
+                                # el PM decidia cerrar, no se cerraba nada, y nadie se enteraba.
+                                # Medido: 25 de 174 CLOSE en modo active (14%) cayeron aca.
+                                _logger.warning(
+                                    f"PositionManager [{decision.action}] #{sid} ticket#{ticket} — "
+                                    f"NO se pudo cerrar (sin precio ni orden enviada). "
+                                    f"Razon de la decision: {decision.reason}")
                         except Exception as ce:
                             _logger.error(f"PositionManager close error #{sid}: {ce}")
                     elif is_close:

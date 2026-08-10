@@ -273,35 +273,37 @@ class TelegramBot:
             self._send(f"Error: {e}")
 
     def _cmd_kill(self):
+        """Boton de panico. v3.53.0 — ANTES NO CERRABA NADA.
+
+        La version previa hacia `mt5_exec.kill_switch = True` y RECIEN DESPUES exigia
+        `if mt5_exec.is_ready()`, que es `connected and not kill_switch` => siempre False
+        => las ~25 lineas de cierre eran codigo INALCANZABLE. El mensaje respondia
+        "0 posicion(es) cerrada(s)", que se lee como "no habia posiciones" cuando en
+        realidad quedaban abiertas, sin trailing y sin Position Manager (los dos filtran
+        por mt5_status='filled', que nadie habia actualizado).
+
+        Ahora delega en toggle(False), que cierra PRIMERO y levanta el flag despues — el
+        mismo camino que ya usaba el kill switch del dashboard, que si funcionaba. De paso
+        se borra la duplicacion del armado de ordenes y sus `except: pass`.
+        """
         try:
             mt5_exec = self.mt5_provider() if self.mt5_provider else None
-            if mt5_exec:
-                mt5_exec.kill_switch = True
-            # Try to close all open positions immediately
-            closed = 0
-            if mt5_exec and mt5_exec.is_ready():
-                try:
-                    positions = mt5_exec._mt5.positions_get(symbol='EURUSD')
-                    if positions:
-                        for p in positions:
-                            try:
-                                close_type = mt5_exec._mt5.ORDER_TYPE_SELL if p.type == 0 else mt5_exec._mt5.ORDER_TYPE_BUY
-                                tick = mt5_exec._mt5.symbol_info_tick(p.symbol)
-                                if tick:
-                                    req = {
-                                        "action": mt5_exec._mt5.TRADE_ACTION_DEAL,
-                                        "symbol": p.symbol, "volume": p.volume,
-                                        "type": close_type, "position": p.ticket,
-                                        "price": tick.bid if p.type == 0 else tick.ask,
-                                        "deviation": 50,
-                                    }
-                                    res = mt5_exec._mt5.order_send(req)
-                                    if res and res.retcode == mt5_exec._mt5.TRADE_RETCODE_DONE:
-                                        closed += 1
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-            self._send(f"🚨 *EMERGENCY KILL*\nKill switch ON. {closed} posicion(es) cerrada(s).")
+            if not mt5_exec:
+                self._send("⚠️ *EMERGENCY KILL*\nMT5 executor no disponible: el kill switch "
+                           "NO se pudo aplicar y las posiciones (si hay) siguen abiertas.")
+                return
+
+            closed, found = mt5_exec.toggle(False)
+
+            if found == 0:
+                detalle = "No habia posiciones abiertas."
+            elif closed == found:
+                detalle = f"{closed} posicion(es) cerrada(s)."
+            else:
+                detalle = (f"⚠️ Se cerraron {closed} de {found}. "
+                           f"*{found - closed} SIGUEN ABIERTAS* — cerralas a mano en MT5.")
+            self._send(f"🚨 *EMERGENCY KILL*\nKill switch ON. {detalle}")
         except Exception as e:
-            self._send(f"Error: {e}")
+            # El flag pudo quedar sin aplicar: decirlo en vez de un "Error:" pelado.
+            self._send(f"🚨 *EMERGENCY KILL — FALLO*\n`{e}`\n"
+                       f"Verifica el estado en MT5 y en el dashboard.")
