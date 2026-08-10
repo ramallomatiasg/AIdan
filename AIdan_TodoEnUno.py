@@ -1243,18 +1243,39 @@ class AIdan:
                         # v3.9.0 / P&L fantasma en trade_archive en cada restart. Si la posicion
                         # sigue viva en MT5, la salteamos y deja que el main loop la cierre/evalue
                         # con el P&L real. (Bug confirmado por auditoria.)
+                        # STARTUP-EVAL GUARD v3.53.2 — ahora FAIL-CLOSED, alineado con su
+                        # gemelo in-loop (ver AIdan_TodoEnUno.py:3042, patron `_tk='unknown'`).
+                        #
+                        # Antes fallaba ABIERTO por DOS lados y en los dos casos la ejecucion
+                        # caia a la evaluacion por precio, que es justo el bug v3.39.1:
+                        #   (1) estaba condicionado a mt5_exec.is_ready() — que es
+                        #       `connected and not kill_switch` — asi que con MT5 todavia
+                        #       levantando (arranque por Task Scheduler 4 AM) o con el kill
+                        #       switch puesto, el guard NI CORRIA;
+                        #   (2) su `except` logueaba a debug y seguia de largo.
+                        #
+                        # El fix saca MT5 de la ecuacion: alcanza el TICKET en la DB. Si hay
+                        # ticket, la estrategia llego al broker => la evalua el main loop con
+                        # el P&L REAL de los deals (sync_closed_positions), que siempre es
+                        # mejor que un outcome sintetico por precio. Si NO hay ticket, nunca
+                        # se ejecuto => se evalua la SENAL normalmente y el guard de v3.51.1
+                        # la mantiene afuera de trade_archive.
+                        #
+                        # El valor inicial 'unknown' es truthy A PROPOSITO: si la lectura de
+                        # la DB falla, se saltea. En la duda NO adivinamos.
+                        _tk_su = 'unknown'
                         try:
-                            if mt5_exec and mt5_exec.is_ready() and mt5_exec._mt5:
-                                _c2 = _sq3.connect(DB_PATH)
-                                _r2 = _c2.execute("SELECT mt5_status, mt5_ticket FROM auto_strategies WHERE id=?", (sid,)).fetchone()
-                                _c2.close()
-                                if _r2 and _r2[0] == 'filled' and _r2[1]:
-                                    _pos = mt5_exec._mt5.positions_get(ticket=int(_r2[1]))
-                                    if _pos and len(_pos) > 0:
-                                        logger.info(f"Startup eval: #{sid} sigue ABIERTA en MT5 -> skip (la maneja el main loop con P&L real)")
-                                        continue
+                            _c2 = _sq3.connect(DB_PATH, timeout=15.0)
+                            _r2 = _c2.execute("SELECT mt5_ticket FROM auto_strategies WHERE id=?", (sid,)).fetchone()
+                            _c2.close()
+                            _tk_su = _r2[0] if _r2 else None
                         except Exception as _se:
-                            logger.debug(f"Startup MT5-open check #{sid}: {_se}")
+                            logger.warning(f"Startup eval: no se pudo leer el ticket de #{sid} "
+                                           f"({_se}) -> skip por precaucion (no evaluamos por precio)")
+                        if _tk_su:
+                            logger.info(f"Startup eval: #{sid} tiene ticket #{_tk_su} -> skip "
+                                        f"(la evalua el main loop con el P&L real del broker)")
+                            continue
                         hit_tp, hit_sl, hit_be = False, False, False
                         # SL/TP fijos — trailing desactivado.
                         # Solo trackea HWM para learning.
