@@ -1305,16 +1305,38 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
                         import logging
                         logging.getLogger('db').info(f"Auto-archived strategy #{old_id} before cap delete: {old_result} {old_pips}p")
             # Delete oldest + their votes
-            cursor.execute("""
-                DELETE FROM strategy_results WHERE strategy_id IN (
-                    SELECT id FROM auto_strategies ORDER BY created_at ASC LIMIT ?
-                )
-            """, (to_delete,))
-            cursor.execute("""
-                DELETE FROM auto_strategies WHERE id IN (
-                    SELECT id FROM auto_strategies ORDER BY created_at ASC LIMIT ?
-                )
-            """, (to_delete,))
+            #
+            # v3.53.1 — el DELETE NO puede tocar filas con una posicion potencialmente VIVA
+            # en el broker. Antes ordenaba por created_at sin mirar mt5_status ni mt5_ticket,
+            # asi que la fila mas vieja podia ser una posicion abierta: se borraba de la
+            # UNICA tabla donde AIdan la registra, y a partir de ahi el trailing y el Position
+            # Manager (los dos filtran mt5_status='filled') dejaban de gestionarla,
+            # sync_closed_positions no la encontraba y su P&L nunca entraba al track record.
+            # El auto-archive de arriba solo cubre las que ya estan 'closed'.
+            #
+            # Criterio conservador: solo es seguro borrar si NUNCA llego al broker
+            # (mt5_ticket IS NULL) o si ya cerro ('closed'). 'filled' y 'pending' pueden
+            # tener posicion/orden viva, y 'error' puede tener ticket igual (el caso v3.35.2:
+            # order_send fallo pero la orden SI habia llegado al server).
+            _deletable = """
+                SELECT id FROM auto_strategies
+                WHERE mt5_ticket IS NULL OR mt5_status = 'closed'
+                ORDER BY created_at ASC LIMIT ?
+            """
+            cursor.execute(
+                f"DELETE FROM strategy_results WHERE strategy_id IN ({_deletable})",
+                (to_delete,))
+            cursor.execute(
+                f"DELETE FROM auto_strategies WHERE id IN ({_deletable})",
+                (to_delete,))
+            # Si no habia nada borrable, el buffer queda por encima del cap a proposito.
+            # Se avisa para que no sea silencioso: si esto se repite, hay posiciones que
+            # quedaron 'filled' para siempre (otro bug) y el buffer crece sin techo.
+            if cursor.rowcount == 0:
+                import logging
+                logging.getLogger('db').warning(
+                    f"cap-delete: {count} filas en auto_strategies y NINGUNA borrable "
+                    f"(todas con posicion viva o pendiente) -> el buffer queda sobre el cap")
 
         now = now_ar()
         expires_at = now + timedelta(minutes=expiry_minutes)
