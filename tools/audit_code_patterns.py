@@ -58,6 +58,28 @@ CONOCIDOS_INALCANZABLE = {
         'bloque keywords deshabilitado en v3.21, tras `return None` incondicional',
 }
 
+# Umbrales relativos YA REVISADOS (chequeo 5). Clave = fragmento que los identifica.
+# Sirve para no re-analizarlos cada semana: el script muestra el veredicto al lado.
+UMBRALES_REVISADOS = {
+    'profit_lock_arm':
+        'REVISADO 10-ago: en h1 arma a 32p con HWM max historico 26,3p => MUERTO. Se midio '
+        'capearlo y se REFUTO (5/5 mediciones + 3/3 refutadores): es redundante con el BE de '
+        'v3.52.0, su marginal es +2,5p en 2,5 meses y corta los 3 mejores h1. NO tocar.',
+    'BE_TRIGGER':
+        'REVISADO 10-ago: era el bug de v3.52.0 (en h1 armaba a 27p, inalcanzable). ARREGLADO '
+        'con BE_TRIGGER_MAX_PIPS=5.0 para h1_structure. 1ra lectura agendada ~22-ago.',
+    'TRAIL_START':
+        'REVISADO 10-ago: en h1 arma a 43p => MUERTO igual que el BE lo estaba. Se evaluo '
+        'capearlo y NO se hizo: en la simulacion propia se derrumba con mecha >=1p (+17,7p con '
+        'mecha 0 pero +0,2p con mecha 2p). Sin evidencia => no se toca.',
+    '0.5 * ctx.tp_distance':
+        'REVISADO 11-ago: es la regla R2 EXTEND del soft-expiry, y esta en un OR con '
+        '`progress >= flat_band`. En h1 la rama del 50% del TP nunca se cumple (27p) pero la '
+        'otra si (+1p) => el umbral muerto DEGRADA el mecanismo, no lo mata (distinto del BE, '
+        'que quedaba inerte). Efecto: un h1 que llego a +20p y al soft-expiry esta en +0,5p no '
+        'se reconoce como "venia funcionando". Impacto menor y NO medido => no se toca.',
+}
+
 # DELETEs sin guard ya evaluados: (archivo, linea aproximada) -> razon para no reportarlos
 CONOCIDOS_SQL = {
     'cleanup_old_data':
@@ -323,11 +345,22 @@ def main():
         print(f"    OK — nada nuevo ({len(CONOCIDOS_INALCANZABLE)} conocidos en baseline)")
 
     ur = check_umbrales_relativos()
-    print(f"\n[5] umbrales atados a un % del TP/SL (bug v3.52.0) — REVISION MANUAL")
-    print(f"    {len(ur)} sitios. Para cada uno: el rango resultante es ALCANZABLE en")
-    print(f"    todos los tracks? (h1 tenia el BE a 27p con un HWM maximo de 26,3p)")
-    for rel, ln, q in ur[:10]:
-        print(f"      {rel}:{ln} {q}")
+    sin_revisar = []
+    print(f"\n[5] umbrales atados a un % del TP/SL (bug v3.52.0)")
+    print(f"    {len(ur)} sitios. La pregunta para cada uno: el rango resultante es")
+    print(f"    ALCANZABLE en todos los tracks? (h1 tenia el BE a 27p con HWM max 26,3p)")
+    for rel, ln, q in ur:
+        veredicto = next((v for k, v in UMBRALES_REVISADOS.items() if k in q), None)
+        if veredicto:
+            print(f"      [ok] {rel}:{ln} {q}")
+            print(f"           {veredicto}")
+        else:
+            sin_revisar.append((rel, ln, q))
+            print(f"      *** SIN REVISAR *** {rel}:{ln} {q}")
+    if sin_revisar:
+        nuevo += len(sin_revisar)
+        print(f"    => {len(sin_revisar)} umbral(es) nuevo(s): verificar si su rango es")
+        print(f"       alcanzable en CADA track antes de asumir que el mecanismo funciona.")
 
     sq = check_sql_sin_guard()
     print(f"\n[6] DELETE sin guard en db.py (bug v3.53.1)")
