@@ -41,6 +41,10 @@ data/
 backtest_*.csv
 backtest_*.json
 
+# Datasets generados por las tools de ML (regenerables desde la DB)
+trade_archive_enriched.csv
+trade_archive_ml.csv
+
 # Logs
 logs/
 *.log
