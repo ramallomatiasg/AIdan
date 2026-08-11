@@ -914,6 +914,28 @@ NO se reporta costo de tokens en Telegram (solo log local).
 
 ---
 
+## Estado del repo (ordenado 11 Ago 2026)
+
+- **`CLAUDE.md` (este archivo) es la fuente de verdad.** El `README.md` es la referencia pública
+  (qué es, cómo funciona, arquitectura, build, tests, metodología) y **apunta acá** para todo lo que
+  cambia seguido. Tenía 1.252 líneas con "v3.21.0" en el título y 840 de changelog duplicado; se
+  reescribió a ~200. **No volver a poner el changelog en el README** — vive en la tabla de versiones
+  de acá y en git.
+- **`.env.example` documenta las perillas reversibles** (los `MODE=shadow/log/active`, los caps por
+  env que permiten revertir sin rebuild). Si se agrega una perilla nueva, sumarla ahí.
+- **`static/` solo tiene lo que se usa**: `aidan_icon.ico` (spec + monolito) y `vaultboy_avatar.png`
+  (notificación del dashboard). El `.spec` empaqueta la carpeta ENTERA ⇒ cualquier archivo que se
+  deje ahí viaja dentro del exe (los 5 muertos que se borraron pesaban ~4 MB; el exe pasó de 105,0 a
+  96,4 MB).
+- **Artefactos generados, fuera de git**: `AIdan_Portable/` (lo recrea `crear_paquete.bat`),
+  `trade_archive_enriched.csv` y `trade_archive_ml.csv` (los regeneran las tools de ML). Siguen en
+  disco, solo destrackeados.
+- **NO se tocó el pipeline de ML** (`compare_models`, `train_*`, `prep_ml_dataset`,
+  `revalidate_predictor`, `enrich_archive_features`): la línea está refutada a n=276 pero la
+  re-evaluación a 300-500 trades sigue agendada y esos scripts son lo que la haría posible.
+
+---
+
 ## Reglas de mantenimiento de este archivo
 
 **IMPORTANTE**: con cada cambio significativo (nueva versión, feature, herramienta, hallazgo de backtest), CLAUDE.md DEBE actualizarse. Antes de cada sesión nueva con asistentes IA, leer este archivo completo para mantener contexto. La última actualización siempre debe coincidir con la versión activa en `Config.APP_VERSION`.
