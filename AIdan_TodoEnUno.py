@@ -1433,6 +1433,20 @@ class AIdan:
                             }
                             def _run_pt(s_id, data, res):
                                 try:
+                                    # v3.53.6 — no fabricar lecciones sobre trades que no existieron.
+                                    # Una señal frenada por el cooldown / "market closing" / spread
+                                    # gate no tiene fill, ni SL real, ni duracion, pero el analyzer
+                                    # igual escribia un insight sobre los pips TEORICOS del TP/SL
+                                    # nominal ("#886: Ajustar el SL a 2.5 pips" sobre una señal que
+                                    # nunca opero), y eso va a learning_insights ->
+                                    # get_learning_adjustments -> compute_adaptive_sl_tp.
+                                    # `is None` = no se pudo determinar -> se corre igual
+                                    # (fail-open: comportamiento previo; una lectura de DB fallada
+                                    # no debe apagar el post-trade en silencio).
+                                    from src.common.db import strategy_was_executed as _was_exec
+                                    if _was_exec(s_id) is False:
+                                        logger.info(f"Post-trade #{s_id}: SKIP — la señal nunca se ejecuto (sin ticket ni P&L)")
+                                        return
                                     analysis = analyze_closed_trade(data)
                                     if analysis:
                                         save_post_trade_analysis(s_id, analysis, res)
@@ -3163,6 +3177,14 @@ class AIdan:
                                     }
                                     def _run_pt_eval(s_id, data, res):
                                         try:
+                                            # v3.53.6 — ver el comentario del gemelo en el eval de
+                                            # arranque: no se analizan señales que nunca llegaron al
+                                            # broker (sus pips son teoricos). Este es el path que
+                                            # genero la leccion fantasma de #886. fail-open ante duda.
+                                            from src.common.db import strategy_was_executed as _was_exec
+                                            if _was_exec(s_id) is False:
+                                                logger.info(f"Post-trade #{s_id}: SKIP — la señal nunca se ejecuto (sin ticket ni P&L)")
+                                                return
                                             analysis = analyze_closed_trade(data)
                                             if analysis:
                                                 save_post_trade_analysis(s_id, analysis, res)

@@ -1765,11 +1765,55 @@ def get_strategies_pending_evaluation():
     return rows
 
 
+def strategy_exists(strategy_id):
+    """v3.53.6 — ¿la estrategia existe en auto_strategies? True / False / None (error).
+
+    La tabla `post_trade_analysis` DECLARA `FOREIGN KEY (strategy_id) REFERENCES
+    auto_strategies(id)`, pero SQLite **no aplica las FK** sin `PRAGMA foreign_keys=ON`
+    => es decorativa. Por eso pudo entrar un `strategy_id=999` inventado por un test.
+
+    OJO con el momento de la llamada: `auto_strategies` es un buffer rotativo de 6 filas,
+    asi que una estrategia VIEJA legitimamente no existe. Este guard solo sirve en el
+    momento de ESCRIBIR (la estrategia acaba de cerrar => todavia esta en el buffer),
+    nunca para filtrar al leer.
+
+    Devuelve None si no se pudo determinar; el caller decide (todos hacen `is False`).
+    """
+    conn = None
+    try:
+        conn = _connect()
+        row = conn.execute("SELECT 1 FROM auto_strategies WHERE id = ?", (strategy_id,)).fetchone()
+        return row is not None
+    except Exception as e:
+        import logging
+        logging.getLogger('db').warning(f"strategy_exists #{strategy_id}: {e}")
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def auto_evaluate_strategy(strategy_id, result, exit_price, pips, market_context=None):
     """Record an auto-evaluated strategy result."""
     conn = _connect()
     cursor = conn.cursor()
     try:
+        # v3.53.6 — no registrar resultados de estrategias que NO EXISTEN.
+        # Un test que corria `sync_closed_positions` de verdad (parcheando solo 2 de sus
+        # write paths) metio un `strategy_id=999` inventado en strategy_results y 30 filas
+        # en post_trade_analysis, con llamadas REALES al LLM. Como el FK no se aplica,
+        # nada lo frenaba. `is False` (no truthiness): ante un error de lectura se escribe
+        # igual, que es el comportamiento previo.
+        if strategy_exists(strategy_id) is False:
+            import logging
+            logging.getLogger('db').warning(
+                f"auto_evaluate_strategy: #{strategy_id} NO existe en auto_strategies — "
+                f"no se registra (result={result} pips={pips}). ¿Un test escribiendo en prod?")
+            conn.close()
+            return
         ctx = market_context or {}
         ctx['exit_price'] = exit_price
         ctx['pips'] = pips
@@ -1785,12 +1829,74 @@ def auto_evaluate_strategy(strategy_id, result, exit_price, pips, market_context
               ctx.get('direction', ''), ctx.get('confidence', 0),
               ctx.get('setup_type', ''), ctx.get('trigger_type', ''),
               ctx.get('market_trend', ''), ctx.get('rsi_at_entry', 0), ctx.get('htf_bias', '')))
-        status_map = {'win': 'auto_win', 'loss': 'auto_loss', 'break_even': 'auto_break_even'}
-        cursor.execute("UPDATE auto_strategies SET status = ? WHERE id = ?",
-                       (status_map.get(result, 'auto_loss'), strategy_id))
+        # v3.53.6 — NO pisar el status de una señal que nunca llego al broker.
+        # El path de skip marca status='skipped_cooldown'/'skipped_bounce'/
+        # 'skipped_opposite'/'auto_skipped' y este UPDATE lo sobreescribia con
+        # 'auto_loss' 15-20 min despues => se destruia el registro de POR QUE no
+        # opero, y el dashboard mostraba "Perdio" (rojo, en la tabla de Cerradas)
+        # una señal que jamas tuvo posicion. Caso #886: la freno el COOLDOWN a
+        # 1.4min de la perdida de #885 y aparecio como perdida con -2.2 pips
+        # TEORICOS; #881 igual, por el gate de "market closing soon". Eran 2 de
+        # las 6 filas del buffer vivo = un tercio de lo que se ve en pantalla.
+        # La fila de strategy_results SI se escribe: evaluar la SEÑAL no operada
+        # es correcto y es la decision explicita de v3.51.1 (universo "¿la señal
+        # acerto?"). Lo unico que se conserva aca es el status, que es el unico
+        # lugar donde queda escrito que no se ejecuto.
+        _skip_status = None
+        try:
+            cursor.execute("SELECT status FROM auto_strategies WHERE id = ?", (strategy_id,))
+            _row = cursor.fetchone()
+            _cur_status = (_row[0] if _row else '') or ''
+            if _cur_status.startswith('skipped') or _cur_status == 'auto_skipped':
+                _skip_status = _cur_status
+        except Exception as _se:
+            import logging
+            logging.getLogger('db').warning(
+                f"auto_evaluate_strategy: no pude leer el status de #{strategy_id} ({_se}) — "
+                f"se conserva el comportamiento previo (se pisa con el resultado)")
+        if _skip_status:
+            import logging
+            logging.getLogger('db').info(
+                f"auto_evaluate_strategy: #{strategy_id} conserva status='{_skip_status}' "
+                f"(nunca se ejecuto); result={result} pips={pips} quedan solo en strategy_results")
+        else:
+            status_map = {'win': 'auto_win', 'loss': 'auto_loss', 'break_even': 'auto_break_even'}
+            cursor.execute("UPDATE auto_strategies SET status = ? WHERE id = ?",
+                           (status_map.get(result, 'auto_loss'), strategy_id))
         conn.commit()
     finally:
         conn.close()
+
+
+def strategy_was_executed(strategy_id):
+    """v3.53.6 — ¿la estrategia llego al broker? True / False / None (no se pudo saber).
+
+    Mismo criterio que el guard de archive_trade (v3.51.1): evidencia de ejecucion =
+    ticket del broker O P&L ya cargado. Deliberadamente AMPLIO — con ticket pero sin
+    P&L todavia (la carrera que cubre el backfill de v3.50.3) cuenta como ejecutada.
+
+    Devuelve None si no se pudo determinar (fila borrada por el cap, error de DB) para
+    que el caller decida; NUNCA asume 'no ejecutada' ante la duda.
+    """
+    conn = None
+    try:
+        conn = _connect()
+        row = conn.execute(
+            "SELECT mt5_ticket, mt5_pnl FROM auto_strategies WHERE id = ?", (strategy_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return bool(row[0]) or row[1] is not None
+    except Exception as e:
+        import logging
+        logging.getLogger('db').warning(f"strategy_was_executed #{strategy_id}: {e}")
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def get_news_fetch_time(news_id):
@@ -3011,14 +3117,27 @@ def get_entry_context(strategy_id):
 def save_post_trade_analysis(strategy_id, analysis, result=None):
     """Save post-trade analysis from Gemma 4."""
     import json as _json
+    # v3.53.6 — guard de existencia. La FK declarada en el CREATE TABLE no se aplica
+    # (SQLite necesita PRAGMA foreign_keys=ON) => un strategy_id inventado entraba igual.
+    # Fue asi como un test metio 30 filas con id 999 y sus lecciones ("Ajustar el SL a
+    # 15 pips", que es el SL del trade FALSO del harness) coparon el panel y el 91% de
+    # los insights post_trade de la ventana de 48h que lee get_learning_adjustments.
+    # Se llama al ESCRIBIR, con la estrategia recien cerrada => sigue en el buffer de 6.
+    if strategy_exists(strategy_id) is False:
+        import logging
+        logging.getLogger('db').warning(
+            f"save_post_trade_analysis: #{strategy_id} NO existe en auto_strategies — "
+            f"no se guarda. ¿Un test escribiendo en prod?")
+        return
     conn = _connect()
     cursor = conn.cursor()
     try:
         cursor.execute("""
             INSERT INTO post_trade_analysis
             (strategy_id, result, entry_quality, exit_quality, news_accuracy,
-             timing_assessment, key_lesson, confidence_was, suggested_adjustment, raw_response)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             timing_assessment, key_lesson, confidence_was, suggested_adjustment, raw_response,
+             analyzed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strategy_id,
             result or analysis.get('result', ''),
@@ -3029,7 +3148,13 @@ def save_post_trade_analysis(strategy_id, analysis, result=None):
             analysis.get('key_lesson', ''),
             analysis.get('confidence_was', ''),
             analysis.get('suggested_adjustment', ''),
-            _json.dumps(analysis)
+            _json.dumps(analysis),
+            # v3.53.6 — el DEFAULT de la columna es datetime('now') = UTC, mientras TODO
+            # el resto del proyecto sella con now_ar() => los analisis figuraban 3 HORAS
+            # adelantados (el post-trade de #886 decia 16:11 y ocurrio 13:11). Misma clase
+            # que los timestamps UTC arreglados en v3.40.11. Las filas viejas quedan en UTC:
+            # cutover 11-ago, tenerlo en cuenta en cualquier forense del panel.
+            now_ar()
         ))
         conn.commit()
     finally:

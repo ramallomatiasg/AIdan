@@ -2360,6 +2360,18 @@
                 if (tt === 'pattern')    return { label:'PAT',  color:'var(--accent-yellow)', bg:'var(--accent-yellow-dim)' };
                 return { label:'NEWS', color:'var(--accent-cyan)', bg:'var(--accent-green-dim)' };
             };
+            // v3.53.6 — motivo por el que la señal no llego al broker, si quedo marcado.
+            // El status es el UNICO lugar donde se registra; auto_evaluate_strategy ya no
+            // lo pisa con auto_win/auto_loss (db.py). Hay casos sin marca (#881, gate de
+            // "market closing") => devuelve '' y la fila igual dice "No operada".
+            const _skipWhy = (st) => {
+                st = st || '';
+                if (st === 'skipped_cooldown') return ' (cooldown)';
+                if (st === 'skipped_bounce')   return ' (bounce)';
+                if (st === 'skipped_opposite') return ' (señal opuesta)';
+                if (st === 'auto_skipped')     return ' (descartada)';
+                return '';
+            };
             const _resultOf = (s) => s.result || (s.status==='auto_win'?'win':s.status==='auto_loss'?'loss':s.status==='auto_break_even'?'break_even':null);
 
             const activeList = filtered.filter(_isAct);
@@ -2448,8 +2460,17 @@
                     const dcol = isCall ? 'var(--accent-green)' : 'var(--accent-red)';
                     const b = _badge(s.trigger_type);
                     const r = _resultOf(s);
-                    const stripe = r==='win' ? 'var(--accent-green)' : r==='loss' ? 'var(--accent-red)' : 'var(--text-muted)';
-                    const rlabel = r==='win' ? 'Ganó' : r==='loss' ? 'Perdió' : r==='break_even' ? 'Break-even' : r==='skip' ? 'Skip' : 'Evaluando';
+                    // v3.53.6 — una señal que nunca llego al broker NO es un trade cerrado.
+                    // El win/loss que trae `result` es la evaluacion de la SEÑAL (pips teoricos,
+                    // correcto en su universo) pero pintarlo "Perdió" en rojo junto a trades
+                    // reales miente: #886 la freno el cooldown y aparecia como perdida.
+                    // Se decide por ausencia de ticket/P&L (mismo criterio que archive_trade),
+                    // no por el status, asi cubre tambien las que no dejan marca de skip (#881).
+                    const executed = !!(s.mt5_ticket || s.mt5_pnl != null);
+                    const stripe = !executed ? 'var(--text-muted)'
+                                 : r==='win' ? 'var(--accent-green)' : r==='loss' ? 'var(--accent-red)' : 'var(--text-muted)';
+                    const rlabel = !executed ? `No operada${_skipWhy(s.status)}`
+                                 : r==='win' ? 'Ganó' : r==='loss' ? 'Perdió' : r==='break_even' ? 'Break-even' : r==='skip' ? 'Skip' : 'Evaluando';
                     const exit = s.mt5_close_price ? s.mt5_close_price.toFixed(5) : '—';
                     let pips = '';
                     if (s.mt5_close_price && s.entry_price) {

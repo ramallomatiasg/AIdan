@@ -31,7 +31,10 @@ Correr: python tools/test_commission_double_count_v3533.py
 """
 import logging
 import os
+import shutil
+import sqlite3
 import sys
+import tempfile
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -98,14 +101,53 @@ class FakeMT5:
 
 
 class SyncHarness(unittest.TestCase):
-    """Corre sync_closed_positions real capturando lo que escribiria en la DB."""
+    """Corre sync_closed_positions real capturando lo que escribiria en la DB.
+
+    v3.53.6 — AISLADO DE PRODUCCION. La version original parcheaba solo
+    `get_strategies_with_open_mt5` y `update_mt5_close`, pero `sync_closed_positions`
+    escribe por MAS caminos: `auto_evaluate_strategy` (strategy_results),
+    `archive_trade` y el thread de post-trade (que ademas llama al LLM DE VERDAD).
+    Resultado medido el 11-ago: **30 filas con strategy_id=999 en post_trade_analysis
+    de la DB REAL** (+1 en strategy_results), con lecciones inventadas sobre el trade
+    falso de este harness, que coparon el panel de Aprendizaje y el 91% de los insights
+    que lee get_learning_adjustments. Mas ~30 llamadas al LLM gastando la cuota de Groq,
+    que es compartida con el exe vivo.
+
+    Ahora se apunta la DB a un archivo TEMPORAL (como ya hacian test_cap_delete y
+    test_archive_execution_guard) y se neutraliza el analyzer. Es la defensa que NO
+    depende de acordarse de parchear cada write path nuevo, que fue el bug original.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import src.common.db as dbmod
+        cls._tmpdir = tempfile.mkdtemp(prefix='aidan_t3533_')
+        cls._tmpdb = os.path.join(cls._tmpdir, 'test.db')
+        cls._orig_db_path = dbmod.DB_PATH
+        cls._orig_connect = dbmod._connect
+        dbmod.DB_PATH = cls._tmpdb
+        dbmod._connect = lambda *a, **k: sqlite3.connect(cls._tmpdb, timeout=15.0)
+        # Control: si algo se escapa, que se escriba en el temporal y NUNCA en prod.
+        assert dbmod.DB_PATH != cls._orig_db_path
+
+    @classmethod
+    def tearDownClass(cls):
+        import src.common.db as dbmod
+        dbmod.DB_PATH = cls._orig_db_path
+        dbmod._connect = cls._orig_connect
+        shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def _correr(self, deals_por_posicion, deals_por_tiempo):
         import src.common.db as dbmod
+        import src.analyzer.post_trade_analyzer as ptmod
         capturado = {}
 
         orig_get = dbmod.get_strategies_with_open_mt5
         orig_upd = dbmod.update_mt5_close
+        # El analyzer se neutraliza: llamaba al LLM real (cuota de Groq compartida con
+        # el exe vivo) y despues escribia el resultado. Nada de eso aporta a este test.
+        orig_analyze = ptmod.analyze_closed_trade
+        ptmod.analyze_closed_trade = lambda *a, **k: None
         # shape real: (id, ticket, direction, entry, sl, tp, lot, created, title,
         #              step, fill, hwm, conf, trigger_type)
         dbmod.get_strategies_with_open_mt5 = lambda: [
@@ -122,6 +164,7 @@ class SyncHarness(unittest.TestCase):
         finally:
             dbmod.get_strategies_with_open_mt5 = orig_get
             dbmod.update_mt5_close = orig_upd
+            ptmod.analyze_closed_trade = orig_analyze
         return capturado
 
 
