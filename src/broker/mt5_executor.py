@@ -754,15 +754,29 @@ class MT5Executor:
 
             # Position closed — get deal history by position ID (most reliable)
             # Sum ALL deals (open + close) for true net P&L including both-side commissions
-            pnl = 0.0
-            close_price = 0.0
+            #
+            # COMISION-DOBLE GUARD v3.53.3 — el fallback REEMPLAZA, nunca acumula.
+            # Antes el `pnl` no se reseteaba entre la consulta por posicion y el fallback
+            # por tiempo, y la condicion de entrada al fallback es `not deals or
+            # close_price == 0` => se entraba AUNQUE `deals` tuviera filas, cuando el deal
+            # de CIERRE todavia no habia propagado al historial del broker. El fallback
+            # volvia a sumar los mismos deals y la COMISION DE ENTRADA se contaba dos
+            # veces, dejando el P&L mas negativo que la realidad. Y mt5_pnl es la columna
+            # que todo el proyecto trata como verdad.
+            def _sumar(lote_de_deals, solo_ticket=None):
+                """Suma neta + precio de cierre de un conjunto de deals. Pura: no toca
+                nada de afuera, asi que no puede acumular sobre un total previo."""
+                _p, _cp = 0.0, 0.0
+                for _d in lote_de_deals or []:
+                    if solo_ticket is not None and _d.position_id != solo_ticket:
+                        continue
+                    _p += _d.profit + _d.swap + _d.commission
+                    if _d.entry == 1:      # close deal -> exit price
+                        _cp = _d.price
+                return _p, _cp
 
             deals = self._mt5.history_deals_get(position=ticket)
-            if deals:
-                for deal in deals:
-                    pnl += deal.profit + deal.swap + deal.commission
-                    if deal.entry == 1:  # close deal → get exit price
-                        close_price = deal.price
+            pnl, close_price = _sumar(deals)
 
             if not deals or close_price == 0:
                 # Fallback: time-based search
@@ -770,12 +784,13 @@ class MT5Executor:
                 time_from = datetime.now(timezone.utc) - timedelta(days=3)
                 time_to = datetime.now(timezone.utc) + timedelta(hours=1)
                 deals_fb = self._mt5.history_deals_get(time_from, time_to)
-                if deals_fb:
-                    for deal in deals_fb:
-                        if deal.position_id == ticket:
-                            pnl += deal.profit + deal.swap + deal.commission
-                            if deal.entry == 1:
-                                close_price = deal.price
+                pnl_fb, close_fb = _sumar(deals_fb, solo_ticket=ticket)
+                # Reemplaza solo si el fallback aporta algo que la 1ra consulta no tenia:
+                # el deal de cierre, o cualquier deal cuando la 1ra vino vacia. Si el
+                # fallback tampoco ve el cierre, se conserva lo ya calculado (mismo valor,
+                # sin duplicar).
+                if close_fb or not deals:
+                    pnl, close_price = pnl_fb, close_fb
 
             if close_price == 0:
                 # Last resort: estimate from current price
