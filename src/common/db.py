@@ -851,6 +851,29 @@ def init_db():
         except Exception:
             pass
 
+    # v3.53.6 — UNIQUE en trade_archive(strategy_id): defensa en profundidad para el
+    # check-then-insert de archive_trade (el SELECT esta ~100 lineas antes del INSERT).
+    # Va APARTE del loop de arriba a proposito: ese loop traga excepciones con `pass`, y
+    # aca si queremos saber si no se pudo crear — significaria que ya hay duplicados.
+    # El orden importa: primero se crea el UNIQUE nuevo, y solo si eso salio bien se
+    # borra el indice viejo no-unico. Si el CREATE falla, el viejo sigue en su lugar.
+    try:
+        import logging as _ulog
+        _dups = cursor.execute(
+            "SELECT COUNT(*) FROM (SELECT strategy_id FROM trade_archive "
+            "GROUP BY strategy_id HAVING COUNT(*) > 1)").fetchone()[0]
+        if _dups:
+            _ulog.getLogger('db').warning(
+                f"trade_archive tiene {_dups} strategy_id DUPLICADOS => no se crea el UNIQUE. "
+                f"Revisar a mano: el historico no se toca automaticamente (regla de la casa).")
+        else:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_archive_strategy_uniq "
+                           "ON trade_archive(strategy_id)")
+            cursor.execute("DROP INDEX IF EXISTS idx_trade_archive_strategy")
+    except Exception as _uie:
+        import logging as _ulog2
+        _ulog2.getLogger('db').warning(f"UNIQUE en trade_archive(strategy_id): {_uie}")
+
     conn.commit()
     conn.close()
 
@@ -1287,7 +1310,7 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
                     cursor.execute("SELECT 1 FROM trade_archive WHERE strategy_id = ?", (old_id,))
                     if not cursor.fetchone():
                         cursor.execute("""
-                            INSERT INTO trade_archive
+                            INSERT OR IGNORE INTO trade_archive
                                 (strategy_id, direction, result, entry_price, exit_price, pips,
                                  stop_loss, take_profit, sl_pips, tp_pips, sl_hit, tp_hit,
                                  confidence, impact_score, setup_type, trigger_type,
@@ -2852,7 +2875,7 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             hour_utc, day_of_week, session = 0, 0, 'unknown'
 
         cursor.execute("""
-            INSERT INTO trade_archive
+            INSERT OR IGNORE INTO trade_archive
                 (strategy_id, direction, result, entry_price, exit_price, pips,
                  stop_loss, take_profit, sl_pips, tp_pips, sl_hit, tp_hit,
                  confidence, impact_score, setup_type, trigger_type,

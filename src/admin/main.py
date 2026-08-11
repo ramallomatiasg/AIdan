@@ -2683,41 +2683,67 @@ async def mt5_toggle(request: Request):
     if not enabled:
         try:
             import sqlite3, MetaTrader5 as _mt5_mod
-            from src.common.db import DB_PATH, now_ar
+            from src.common.db import DB_PATH, update_mt5_close
+            # KILL-SWITCH EVAL v3.53.5 — reestructurado en DOS FASES.
+            # Antes esto sostenia el write-lock de SQLite (transaccion abierta) MIENTRAS
+            # llamaba a history_deals_get contra el broker, y escribia con SQL a mano. Ahora
+            # se lee y se cierra primero, y recien despues se consulta a MT5 y se escribe
+            # via update_mt5_close (que es tambien quien corre el backfill de v3.50.3).
             conn = sqlite3.connect(DB_PATH, timeout=15.0)
-            cursor = conn.cursor()
-            # Find strategies with open MT5 positions
-            cursor.execute("""
+            abiertas = conn.execute("""
                 SELECT id, mt5_ticket, direction, entry_price FROM auto_strategies
                 WHERE mt5_status = 'filled' AND status IN ('active', 'expired')
-            """)
-            for sid, ticket, direction, entry_price in cursor.fetchall():
-                pnl = 0.0
-                close_price = 0.0
-                try:
-                    deals = _mt5_mod.history_deals_get(position=ticket)
-                    if deals:
-                        for d in deals:
-                            if d.entry == 1:
-                                pnl += d.profit + d.swap + d.commission
-                                close_price = d.price
-                except Exception:
-                    pass
-                result = 'auto_win' if pnl > 0 else 'auto_loss'
-                conn.execute("""
-                    UPDATE auto_strategies SET status=?, mt5_status='closed', mt5_pnl=?, mt5_close_price=?
-                    WHERE id=?
-                """, (result, round(pnl, 2), close_price, sid))
-                logger.info(f"Kill switch eval: #{sid} → {result} PnL=${pnl:.2f}")
+            """).fetchall()
             # Cancel unexecuted active strategies (never reached MT5)
             cancelled = conn.execute("""
                 UPDATE auto_strategies SET status = 'cancelled'
                 WHERE status = 'active' AND (mt5_status IS NULL OR mt5_ticket IS NULL)
             """).rowcount
-            if cancelled:
-                logger.info(f"Kill switch: cancelled {cancelled} unexecuted strategies")
             conn.commit()
             conn.close()
+            if cancelled:
+                logger.info(f"Kill switch: cancelled {cancelled} unexecuted strategies")
+
+            for sid, ticket, direction, entry_price in abiertas:
+                # v3.53.5 — sumar TODOS los deals, igual que sync_closed_positions
+                # (mt5_executor.py). Antes sumaba solo los `d.entry == 1` => perdia la
+                # comision de ENTRADA, que es la mitad del round-turn, y quedaban DOS
+                # formulas distintas escribiendo la misma columna mt5_pnl.
+                pnl = 0.0
+                close_price = 0.0
+                try:
+                    for d in (_mt5_mod.history_deals_get(position=ticket) or []):
+                        pnl += d.profit + d.swap + d.commission
+                        if d.entry == 1:
+                            close_price = d.price
+                except Exception as _de:
+                    logger.warning(f"Kill switch eval: #{sid} no se pudieron leer los deals "
+                                   f"del ticket #{ticket} ({_de}) — se deja para el sync")
+                    continue
+
+                # v3.53.5 — sin deal de CIERRE no hay evidencia de que la posicion cerro.
+                # Antes se marcaba mt5_status='closed' INCONDICIONALMENTE con pnl=0.0 y
+                # close_price=0.0: si close_all_positions habia fallado para este ticket, la
+                # posicion quedaba VIVA en el broker pero invisible para el trailing y el
+                # Position Manager (los dos filtran mt5_status='filled'), y su P&L real no
+                # entraba nunca al track record. Ademas 'auto_win if pnl > 0 else auto_loss'
+                # etiquetaba como PERDIDA un cierre plano.
+                # Dejandola en 'filled', sync_closed_positions la resuelve en el proximo
+                # ciclo con el P&L real — que es exactamente su trabajo.
+                if close_price == 0:
+                    logger.warning(
+                        f"Kill switch eval: #{sid} ticket#{ticket} sin deal de cierre en el "
+                        f"historial -> NO se marca closed (puede seguir ABIERTA). Lo resuelve "
+                        f"sync_closed_positions cuando el deal propague.")
+                    continue
+
+                result = 'auto_win' if pnl > 0 else 'auto_loss'
+                update_mt5_close(sid, pnl, close_price)
+                _c2 = sqlite3.connect(DB_PATH, timeout=15.0)
+                _c2.execute("UPDATE auto_strategies SET status=? WHERE id=?", (result, sid))
+                _c2.commit()
+                _c2.close()
+                logger.info(f"Kill switch eval: #{sid} → {result} PnL=${pnl:.2f} @ {close_price:.5f}")
         except Exception as e:
             logger.error(f"Kill switch strategy cleanup error: {e}")
     return JSONResponse({"status": "success", "enabled": not mt5.kill_switch})
