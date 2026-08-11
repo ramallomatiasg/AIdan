@@ -2590,6 +2590,69 @@ def update_mt5_trailing_data(strategy_id, step, high_water=None):
     conn.close()
 
 
+def get_trade_excursion(strategy_id):
+    """v3.53.7 — El RECORRIDO del trade: cuanto llego a estar a favor y cuando.
+
+    Devuelve {'mfe_pips', 'mins_to_peak', 'duration_min'} o None si no hay datos.
+
+    POR QUE IMPORTA: es el discriminador mas fuerte que midio este proyecto — el
+    74% de los trades nunca llega a la mitad del TP y ahi vive el 100% de la
+    perdida (v3.53.2). El resultado win/loss NO lo dice: un perdedor que estuvo al
+    45% del TP es un problema de GESTION, y uno que nunca paso del 5% es un
+    problema de ENTRADA. Son dos bugs distintos y hasta ahora no se distinguian.
+
+    Fuentes, en orden: `position_manager_log.hwm_pips` (muestreado cada 15s, es el
+    unico que tiene la serie temporal) y, si el PM no logueo, el
+    `auto_strategies.mt5_high_water` que persiste el thread de trailing.
+    CAVEAT del muestreo cada 15s: subestima el pico real (mismo caveat que
+    measure_be_cost.py).
+    """
+    conn = None
+    try:
+        conn = _connect()
+        row = conn.execute("""
+            SELECT MAX(hwm_pips) mfe, MIN(created_at) first_at, MAX(created_at) last_at
+            FROM position_manager_log WHERE strategy_id = ?""", (strategy_id,)).fetchone()
+        mfe = row[0] if row else None
+        first_at, last_at = (row[1], row[2]) if row else (None, None)
+        if mfe is None:
+            r2 = conn.execute(
+                "SELECT mt5_high_water FROM auto_strategies WHERE id = ?", (strategy_id,)).fetchone()
+            if not r2 or r2[0] is None:
+                return None
+            return {'mfe_pips': float(r2[0]), 'mins_to_peak': 0.0, 'duration_min': 0.0}
+        peak = conn.execute("""
+            SELECT MIN(created_at) FROM position_manager_log
+            WHERE strategy_id = ? AND hwm_pips = ?""", (strategy_id, mfe)).fetchone()
+        peak_at = peak[0] if peak else None
+
+        def _mins(a, b):
+            for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
+                try:
+                    ta = datetime.strptime(str(a).split('+')[0].strip().replace('T', ' '), fmt)
+                    tb = datetime.strptime(str(b).split('+')[0].strip().replace('T', ' '), fmt)
+                    return round((tb - ta).total_seconds() / 60.0, 1)
+                except (ValueError, TypeError):
+                    continue
+            return 0.0
+
+        return {
+            'mfe_pips': float(mfe),
+            'mins_to_peak': _mins(first_at, peak_at) if peak_at else 0.0,
+            'duration_min': _mins(first_at, last_at),
+        }
+    except Exception as e:
+        import logging
+        logging.getLogger('db').warning(f"get_trade_excursion #{strategy_id}: {e}")
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def update_mt5_high_water(strategy_id, high_water):
     """v3.52.1 — Persiste SOLO el high-water mark, sin tocar mt5_trailing_step ni
     be_triggered.

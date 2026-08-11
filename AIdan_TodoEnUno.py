@@ -1422,6 +1422,7 @@ class AIdan:
                             from src.analyzer.post_trade_analyzer import analyze_closed_trade
                             from src.common.db import save_post_trade_analysis, save_learning_insight
                             _pt_data = {
+                                'strategy_id': sid,  # v3.53.7: para leer el recorrido (MFE)
                                 'result': result, 'pips': round(pips_result, 1), 'direction': direction,
                                 'trigger_type': trigger_type or '', 'entry_price': entry_price, 'exit_price': exit_px,
                                 'stop_loss': sl, 'take_profit': tp, 'sl_pips': abs(sl - entry_price) / pip,
@@ -3166,6 +3167,7 @@ class AIdan:
                                     except Exception as e:
                                         logger.debug(f"MT5 P&L for post-trade: {e}")
                                     _pt_data = {
+                                        'strategy_id': sid,  # v3.53.7: para leer el recorrido (MFE)
                                         'result': result, 'pips': round(pips_result, 1), 'direction': direction,
                                         'trigger_type': trigger_type or '', 'entry_price': entry_price, 'exit_price': exit_px,
                                         'stop_loss': sl, 'take_profit': tp, 'sl_pips': abs(sl - entry_price) / pip,

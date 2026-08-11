@@ -911,6 +911,7 @@ class MT5Executor:
                     from src.analyzer.post_trade_analyzer import analyze_closed_trade
                     from src.common.db import save_post_trade_analysis, save_learning_insight
                     _pt_data = {
+                        'strategy_id': sid,  # v3.53.7: para leer el recorrido (MFE)
                         'result': result, 'pips': pips_result, 'direction': direction,
                         'trigger_type': _tt, 'entry_price': fill_price, 'exit_price': close_price,
                         'stop_loss': sl, 'take_profit': tp,
