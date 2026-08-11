@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.53.3"
+APP_VERSION = "3.53.4"
 
 class Config:
     VERSION = APP_VERSION
@@ -132,6 +132,26 @@ class Config:
     # R1 Profit-lock: arma cuando HWM >= ARM*tp_distance; cierra si progress cae a <= KEEP*HWM.
     PM_PROFIT_LOCK_ARM = float(os.getenv("PM_PROFIT_LOCK_ARM", "0.60"))   # llego a 60% del TP
     PM_PROFIT_LOCK_KEEP = float(os.getenv("PM_PROFIT_LOCK_KEEP", "0.60"))  # cierra si retrocede 40% del pico
+
+    # v3.53.4 — Intento de orden LIMITE antes de ir a mercado. APAGADO por default.
+    # Medido en los logs: 36 intentos, 36 rechazados con retcode 10022 "Invalid
+    # expiration", 36 fallbacks a market order, 0 fallos => el mecanismo NUNCA opero y
+    # TODO el track record de AIdan se hizo con ordenes a mercado. Encenderlo no seria un
+    # bugfix: seria estrenar una forma de entrar que nunca se midio.
+    # Y hay razon para pensar que es ADVERSA: pedir 1,5p mejor que el mercado no entra
+    # cuando el precio se va a favor de una (te perdes el ganador) y si entra cuando
+    # retrocede (te llena en los perdedores) = seleccion adversa por construccion, el
+    # mismo mecanismo del catch-the-falling-knife. Caso empirico: #625 espero 27min
+    # pendiente, se lleno dentro de un spike y fue la peor perdida de ese dia (-$13,48).
+    # Ademas el sospechoso C midio que el 94% de los fills ya son inmediatos al precio
+    # planeado y pierden al baseline => el precio de entrada no es el problema.
+    # Apagarlo NO cambia el comportamiento efectivo (ya iba siempre a mercado): saca 36
+    # llamadas inutiles al broker y 72 lineas de ruido del log.
+    # Para encenderlo algun dia: (1) diagnosticar el 10022 con MT5 real —hay 3 hipotesis:
+    # timestamp en zona horaria equivocada, 90s por debajo del minimo del broker, o el
+    # simbolo no soporta ORDER_TIME_SPECIFIED—, (2) medirlo en shadow comparando
+    # fill-vs-no-fill, (3) decidir con datos.
+    LIMIT_ORDER_ENABLED = os.getenv("LIMIT_ORDER_ENABLED", "false").lower() == "true"
 
     # v3.52.0 — Cap del umbral de break-even en pips absolutos, por track.
     # El BE (50% del TP), el trailing (80%) y el profit-lock del PM (60%) estan anclados a

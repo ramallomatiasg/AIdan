@@ -294,15 +294,23 @@ class MT5Executor:
                 update_mt5_ticket(strategy_id, None, 0, 'error')
                 return None
 
-        # Try limit order first for better entry price
-        LIMIT_DISCOUNT_PIPS = 1.5  # pips discount from current price
-        discount = LIMIT_DISCOUNT_PIPS * 0.0001
-        ticket = self._try_limit_order(strategy_id, direction, entry_price, sl_distance, tp_distance, lot, tick, symbol, discount)
-        if ticket:
-            return ticket
+        # Try limit order first for better entry price.
+        #
+        # v3.53.4 — APAGADO por default (LIMIT_ORDER_ENABLED). Ver Config para el detalle
+        # medido: 36 intentos / 36 rechazados con retcode 10022 / 36 fallbacks a mercado
+        # => el mecanismo nunca opero y todo el track record se hizo a mercado. Apagarlo
+        # no cambia el comportamiento efectivo, solo saca las llamadas que el broker
+        # rechaza siempre. `Config` ya esta en scope (import de la l.248, en el flujo
+        # lineal de este metodo).
+        if Config.LIMIT_ORDER_ENABLED:
+            LIMIT_DISCOUNT_PIPS = 1.5  # pips discount from current price
+            discount = LIMIT_DISCOUNT_PIPS * 0.0001
+            ticket = self._try_limit_order(strategy_id, direction, entry_price, sl_distance, tp_distance, lot, tick, symbol, discount)
+            if ticket:
+                return ticket
+            # Fallback: immediate market order
+            self.logger.info(f"MT5: limit order failed for #{strategy_id}, using market order")
 
-        # Fallback: immediate market order
-        self.logger.info(f"MT5: limit order failed for #{strategy_id}, using market order")
         return self._market_order(strategy_id, direction, entry_price, sl_distance, tp_distance, lot, tick, symbol)
 
     def _try_limit_order(self, strategy_id, direction, entry_price, sl_distance, tp_distance, lot, tick, symbol, discount):
