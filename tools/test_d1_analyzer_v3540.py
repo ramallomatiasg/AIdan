@@ -8,13 +8,12 @@ verdad con el harness parcheado a medias (v3.53.6).
 Cubre:
   1. El profile es coherente (R:R 2, expiry = 10 dias de mercado).
   2. Los overrides de la subclase (label, cache TTL, dedup).
-  3. FAIL-CLOSED: si la fuente no es MT5, _fetch_candles devuelve None.
-     Este es EL test importante — las velas diarias de Yahoo son de otro
-     instrumento (EURUSD=X) y ademas incluyen la vela en formacion.
+  3. FAIL-CLOSED: solo MT5, y validando el ESPACIADO real de las velas
+     (no una etiqueta que otro thread puede pisar).
   4. Que se pide el interval '1d' y no '1day' (MT5 solo entiende '1d';
      el resto de las fuentes usan '1day' — la trampa de nombres).
   5. Que None se degrada a "sin señales" y NO a una excepcion.
-  6. Test de mutacion: sin el guard de fuente, un fetch de Yahoo pasaria.
+  6. Test de mutacion sobre el guard estructural.
 """
 import os
 import sys
@@ -82,44 +81,55 @@ class TestD1Subclase(unittest.TestCase):
                                 "un nivel diario no puede re-disparar el mismo dia")
 
 
-class TestFailClosedDeFuente(unittest.TestCase):
-    """El guard que impide medir otra cosa que la que se backtesteo."""
+class TestFuenteSoloMT5(unittest.TestCase):
+    """Desde v3.54.0 se llama a _fetch_mt5 DIRECTO, no a fetch_candles(): asi no
+    se paga la cadena de fallback (Yahoo+TwelveData+FXCM, ~30s bloqueando el
+    ciclo vivo) para despues tirar el resultado, y no se depende del global
+    get_last_source(), que otro thread puede pisar."""
 
-    def _run(self, source, candles=FAKE_CANDLES):
+    def _run(self, candles):
         a = TechnicalAnalyzerD1(_logger())
-        with patch('src.common.price_feed.fetch_candles', return_value=candles), \
-             patch('src.common.price_feed.get_last_source', return_value=source):
+        with patch('src.common.price_feed._fetch_mt5', return_value=candles):
             return a._fetch_candles()
 
-    def test_mt5_pasa(self):
-        self.assertIsNotNone(self._run('mt5'))
-        self.assertEqual(len(self._run('mt5')), 100)
+    def test_velas_diarias_de_mt5_pasan(self):
+        r = self._run(FAKE_CANDLES)
+        self.assertIsNotNone(r)
+        self.assertEqual(len(r), 100)
 
-    def test_yahoo_se_rechaza(self):
-        self.assertIsNone(self._run('yahoo'),
-                          "Yahoo D1 es EURUSD=X + vela en formacion")
+    def test_mt5_sin_datos(self):
+        self.assertIsNone(self._run(None))
+        self.assertIsNone(self._run([]))
 
-    def test_fxcm_y_twelvedata_se_rechazan(self):
-        self.assertIsNone(self._run('fxcm'))
-        self.assertIsNone(self._run('twelvedata'))
+    def test_muestra_corta_se_rechaza(self):
+        self.assertIsNone(self._run(FAKE_CANDLES[:20]))
 
-    def test_unknown_se_rechaza(self):
-        self.assertIsNone(self._run('unknown'))
+    def test_no_llama_a_la_cadena_de_fallback(self):
+        """El bug que se arreglo: fetch_candles() recorre Yahoo/TwelveData/FXCM
+        aunque el resultado se vaya a descartar.
 
-    def test_feed_vacio_no_explota(self):
-        self.assertIsNone(self._run('mt5', candles=None))
-        self.assertIsNone(self._run('mt5', candles=[]))
+        Se usa AST y no busqueda de texto: los docstrings y comentarios del
+        modulo MENCIONAN fetch_candles y get_last_source para explicar por que
+        NO se usan, y un assertNotIn sobre el texto matchea esa prosa. Es el
+        mismo error que cometi en test_startup_eval_guard_v3532.
+        """
+        import ast
+        import src.analyzer.technical_d1 as mod
+        arbol = ast.parse(open(mod.__file__, encoding='utf-8').read())
 
-    def test_mutacion_sin_guard_yahoo_pasaria(self):
-        """Confirma que el guard es lo unico que frena a Yahoo: sin el
-        chequeo de fuente, el mismo input devolveria velas."""
-        candles = FAKE_CANDLES
-        source = 'yahoo'
-        # Replica de _fetch_candles SIN el guard de fuente.
-        resultado_sin_guard = candles if candles else None
-        self.assertIsNotNone(resultado_sin_guard)
-        # Con el guard, lo mismo da None.
-        self.assertIsNone(self._run(source, candles))
+        importados = set()
+        for n in ast.walk(arbol):
+            if isinstance(n, ast.ImportFrom) and 'price_feed' in (n.module or ''):
+                importados.update(a.name for a in n.names)
+        self.assertIn('_fetch_mt5', importados)
+        self.assertNotIn('fetch_candles', importados,
+                         "fetch_candles arrastra la cadena de fallback")
+        self.assertNotIn('get_last_source', importados,
+                         "no debe depender del global compartido entre threads")
+
+        llamadas = {n.func.id for n in ast.walk(arbol)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        self.assertNotIn('get_last_source', llamadas)
 
 
 class TestDegradacionSinFuente(unittest.TestCase):
@@ -326,12 +336,11 @@ class TestValidacionEstructural(unittest.TestCase):
     def test_falta_la_clave_datetime(self):
         self.assertFalse(self.a._son_velas_diarias([{'close': 1.1}] * 30))
 
-    def test_fetch_rechaza_aunque_la_etiqueta_diga_mt5(self):
-        """Falso positivo de la etiqueta (race con otro thread): la fuente dice
-        'mt5' pero las velas son de 5 minutos. El guard estructural lo frena."""
+    def test_fetch_rechaza_velas_no_diarias_aunque_vengan_de_mt5(self):
+        """Defensa en profundidad: aunque la fuente sea MT5 por construccion,
+        si el espaciado no es diario no se scanea."""
         from unittest.mock import patch as _p
-        v = self._velas(300)
-        with _p('src.common.price_feed.fetch_candles', return_value=v),              _p('src.common.price_feed.get_last_source', return_value='mt5'):
+        with _p('src.common.price_feed._fetch_mt5', return_value=self._velas(300)):
             self.assertIsNone(self.a._fetch_candles())
 
 

@@ -63,15 +63,38 @@ SWAP_SHORT_PIPS = 0.1445   # por noche, vendido
 
 
 def fetch_d1_candles(count=400):
+    """Velas D1 CERRADAS. copy_rates_from_pos(..., 0, count) devuelve la vela
+    ACTUAL en formacion como ultimo elemento — price_feed la descarta
+    explicitamente (price_feed.py:142-144) y aca hay que hacer lo mismo.
+
+    Si no se descarta, una fila con 9 velas cerradas + la de hoy a medio hacer
+    cuenta como madura a horizonte 10: se le escribe el outcome un dia antes,
+    con un high/low incompletos. Y como el UPDATE solo alcanza filas con
+    outcome NULL, ese numero queda CLAVADO para siempre.
+    """
+    import time as _t
     import MetaTrader5 as mt5
     if not mt5.initialize():
         raise RuntimeError(f"MT5 init failed: {mt5.last_error()}")
     rates = mt5.copy_rates_from_pos("EURUSD", mt5.TIMEFRAME_D1, 0, count)
+    tick = mt5.symbol_info_tick("EURUSD")
+    # Offset servidor-vs-UTC derivado en vivo (redondeado a 30min, robusto a
+    # DST). Hardcodear la zona del broker es el error que dejo 457 filas
+    # tz_unreconciled en measure_news_llm_error.
+    srv_off = round((tick.time - _t.time()) / 1800.0) * 1800 if tick else 0
     mt5.shutdown()
     if rates is None or len(rates) == 0:
         raise RuntimeError("MT5 no devolvio velas D1")
-    return [{'t': int(r['time']), 'open': float(r['open']), 'high': float(r['high']),
-             'low': float(r['low']), 'close': float(r['close'])} for r in rates]
+
+    ahora_srv = _t.time() + srv_off
+    out = [{'t': int(r['time']), 'open': float(r['open']), 'high': float(r['high']),
+            'low': float(r['low']), 'close': float(r['close'])} for r in rates]
+    # Una vela D1 cierra 86400s despues de su apertura (en hora servidor).
+    cerradas = [c for c in out if c['t'] + 86400 <= ahora_srv]
+    if len(cerradas) < len(out):
+        print(f"  (se descarta{'n' if len(out)-len(cerradas) > 1 else ''} "
+              f"{len(out)-len(cerradas)} vela(s) en formacion)")
+    return cerradas
 
 
 def excursion(candles, entry_ts, entry_price, direction, n_bars):

@@ -3775,43 +3775,66 @@ class AIdan:
                                 if _d1_ts == _last_d1_candle_ts:
                                     pass  # misma vela que el scan anterior, nada nuevo
                                 elif _d1_seen(_d1_ts):
-                                    # ya procesada en una corrida anterior del exe
+                                    # ya procesada en una corrida anterior del exe.
+                                    # OJO: _d1_seen tambien devuelve True ante error
+                                    # de LECTURA (fail-closed para no duplicar), asi
+                                    # que esto se loguea — si no, una DB trabada
+                                    # descartaria la vela del dia sin dejar rastro.
+                                    logger.info(
+                                        f"D1 shadow: vela {_d1_candles[-1]['datetime'][:10]} "
+                                        f"ya registrada (o DB ilegible), skip")
                                     _last_d1_candle_ts = _d1_ts
                                 else:
-                                    _last_d1_candle_ts = _d1_ts
                                     _d1_state = tech_d1.get_market_state()
                                     _d1_atr = _d1_state.get('avg_range_pips', 0)
-                                    _d1_signals = tech_d1.detect_structure_signals(
-                                        min_confidence=D1_PROFILE['min_confidence'])
-                                    logger.info(
-                                        f"D1 shadow: vela nueva {_d1_candles[-1]['datetime'][:10]} "
-                                        f"ATR={_d1_atr:.1f}p -> {len(_d1_signals or [])} señal(es)")
-                                    if _d1_signals:
-                                        _d1_m5_trend = tech.get_market_state().get('trend', 'neutral')
-                                        _d1_snap = _d1_candles[-5:]
-                                        for _d1_sig in _d1_signals:
-                                            # SL/TP con la formula del backtest (1,5xATR, R:R 2).
-                                            # Es METADATA: en shadow no se opera, y en active
-                                            # el numero real lo pondria compute_adaptive_sl_tp.
-                                            _d1_sl = round(max(_d1_atr, 1.0) * 1.5, 1)
-                                            _d1_tp = round(_d1_sl * 2.0, 1)
-                                            _d1_log(
-                                                _d1_ts,
-                                                _d1_sig.get('direction'),
-                                                _d1_sig.get('setup_type', 'd1_structure'),
-                                                _d1_state.get('price', 0),
-                                                _d1_sig.get('key_level'),
-                                                _d1_sig.get('level_touches', 0),
-                                                _d1_atr,
-                                                _d1_state.get('rsi', 0),
-                                                htf_bias,
-                                                _d1_m5_trend,
-                                                _d1_sig.get('confidence', 0),
-                                                _d1_sl, _d1_tp, _d1_snap)
-                                            logger.info(
-                                                f"D1 shadow LOG: {_d1_sig.get('direction')} "
-                                                f"{_d1_sig.get('setup_type')} conf={_d1_sig.get('confidence')} "
-                                                f"SL={_d1_sl}p TP={_d1_tp}p (NO opera)")
+                                    _d1_price = _d1_state.get('price', 0)
+                                    if _d1_state.get('source') == 'fallback' or _d1_price <= 0:
+                                        # get_market_state cae a _fallback_state() si su
+                                        # propio fetch falla. Loguear con precio 0 QUEMA
+                                        # la vela para siempre (la idempotencia la daria
+                                        # por vista) => mejor no marcarla y reintentar.
+                                        logger.warning(
+                                            "D1 shadow: market state en fallback "
+                                            "(price=0) -> no se loguea, se reintenta")
+                                    else:
+                                        _d1_signals = tech_d1.detect_structure_signals(
+                                            min_confidence=D1_PROFILE['min_confidence'])
+                                        logger.info(
+                                            f"D1 shadow: vela nueva {_d1_candles[-1]['datetime'][:10]} "
+                                            f"ATR={_d1_atr:.1f}p -> {len(_d1_signals or [])} señal(es)")
+                                        # La vela se marca DESPUES del trabajo: si algo
+                                        # falla arriba, el proximo ciclo la reintenta en
+                                        # vez de darla por procesada.
+                                        _last_d1_candle_ts = _d1_ts
+                                        if _d1_signals:
+                                            _d1_m5_trend = tech.get_market_state().get('trend', 'neutral')
+                                            _d1_snap = _d1_candles[-5:]
+                                            for _d1_sig in _d1_signals:
+                                                # SL/TP con la formula EXACTA del titular del
+                                                # backtest: 1,2xATR y R:R 2 (PF 1,40 / +16,3p).
+                                                # En el barrido 1,5xATR rindio MAS (+16,4 vs
+                                                # +12,8) pero no es lo que se midio => se deja
+                                                # 1,2 para que la fila sea comparable.
+                                                # Es METADATA: en shadow no se opera.
+                                                _d1_sl = round(max(_d1_atr, 1.0) * 1.2, 1)
+                                                _d1_tp = round(_d1_sl * 2.0, 1)
+                                                _d1_log(
+                                                    _d1_ts,
+                                                    _d1_sig.get('direction'),
+                                                    _d1_sig.get('setup_type', 'd1_structure'),
+                                                    _d1_state.get('price', 0),
+                                                    _d1_sig.get('key_level'),
+                                                    _d1_sig.get('level_touches', 0),
+                                                    _d1_atr,
+                                                    _d1_state.get('rsi', 0),
+                                                    htf_bias,
+                                                    _d1_m5_trend,
+                                                    _d1_sig.get('confidence', 0),
+                                                    _d1_sl, _d1_tp, _d1_snap)
+                                                logger.info(
+                                                    f"D1 shadow LOG: {_d1_sig.get('direction')} "
+                                                    f"{_d1_sig.get('setup_type')} conf={_d1_sig.get('confidence')} "
+                                                    f"SL={_d1_sl}p TP={_d1_tp}p (NO opera)")
                     except Exception as _d1_e:
                         logger.error(f"D1 shadow scan error: {_d1_e}")
 

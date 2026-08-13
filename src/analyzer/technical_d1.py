@@ -98,34 +98,45 @@ class TechnicalAnalyzerD1(TechnicalAnalyzer):
         debe tratar None como "no escanear este ciclo", NO como "no hay señal":
         son cosas distintas y confundirlas es como murieron M15 y SMC.
 
-        Valida la DATA, no la etiqueta. get_last_source() es un global de modulo
-        (price_feed.py:_last_source_used) compartido por todos los tracks Y por
-        el thread del dashboard, que tambien llama a fetch_candles
-        (src/admin/main.py:1380 y :1971). O sea que entre nuestro fetch y la
-        lectura de la etiqueta, otro thread puede pisarla. El caso peligroso no
-        es el falso negativo (perder un scan, se reintenta en 15min) sino el
-        falso POSITIVO: que otro track deje 'mt5' en el global justo cuando lo
-        nuestro cayo a Yahoo, y terminemos midiendo velas de 5 MINUTOS de otro
-        instrumento (EURUSD=X) creyendo que son diarias. Por eso la etiqueta es
-        solo un filtro barato y la autoridad es el ESPACIADO REAL de las velas.
+        Se pide MT5 DIRECTO y se valida la DATA. La version anterior de este
+        metodo preguntaba "de que fuente vino" con get_last_source(), que es un
+        global de proceso escrito por cualquier caller — incluido el thread del
+        dashboard (main.py:1380 y :1971) — asi que podia leer 'mt5' de un fetch
+        AJENO y aceptar velas que no eran nuestras. Ese chequeo ya no existe:
+        yendo directo a _fetch_mt5 la fuente es MT5 por construccion, y la
+        unica autoridad sobre la data es el ESPACIADO REAL entre velas.
         """
-        from src.common.price_feed import fetch_candles, get_last_source
-        candles = fetch_candles(interval=D1_INTERVAL, count=100,
-                                logger=self.logger)
+        # Se llama a _fetch_mt5 DIRECTO y no a fetch_candles(). Tres razones,
+        # y las tres son bugs que la version anterior de este metodo tenia:
+        #  1. fetch_candles() es multi-fuente: si MT5 devuelve None recorre
+        #     Yahoo (2 hosts x timeout 10s) + TwelveData (10s) + FXCM (10s)
+        #     ANTES de devolver. Nosotros ibamos a descartar ese resultado
+        #     igual, pero el ciclo del analyzer —que es UN solo thread y
+        #     ademas sincroniza MT5 y corre M5/M15/H1— ya habia pagado ~30s.
+        #  2. get_last_source() es un global de proceso: lo escribe cualquier
+        #     caller, incluido el thread del dashboard (main.py:1380 y :1971).
+        #     Podia leerse 'mt5' de OTRO fetch y aceptar velas ajenas.
+        #  3. Al caer a Yahoo, ese fetch dejaba 'yahoo' pegado en el global y
+        #     el dashboard lo reportaba como la fuente actual del sistema.
+        # Yendo directo a MT5 no hay cadena, no hay global y no hay race.
+        from src.common.price_feed import _fetch_mt5
+        candles = _fetch_mt5(D1_INTERVAL, 100, self.logger)
         if not candles or len(candles) < 30:
+            # None = MT5 no disponible. NO se cae a otra fuente a proposito:
+            # las velas diarias de Yahoo son de EURUSD=X (otro instrumento) y
+            # ademas incluyen la vela en formacion => medirian otra cosa que
+            # la que se backtesteo.
+            self.logger.info(
+                "Technical D1: MT5 no devolvio velas diarias -> sin scan este "
+                "ciclo (el track D1 no acepta otra fuente)")
             return None
 
-        src = get_last_source()
-        if src != 'mt5':
-            self.logger.warning(
-                f"Technical D1: fuente '{src}' != mt5 -> se descarta el fetch "
-                f"(el track D1 exige velas del broker). Sin scan este ciclo.")
-            return None
-
+        # Defensa en profundidad: aunque la fuente sea MT5 por construccion,
+        # se valida que el espaciado sea realmente diario.
         if not self._son_velas_diarias(candles):
             return None
 
-        self.logger.info(f"Technical D1: {len(candles)} candles via {src}")
+        self.logger.info(f"Technical D1: {len(candles)} candles via mt5")
         return candles
 
     def _son_velas_diarias(self, candles):
