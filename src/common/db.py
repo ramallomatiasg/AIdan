@@ -607,6 +607,39 @@ def init_db():
         )
     """)
 
+    # v3.54.0 — Track D (swing DIARIO) en shadow: cada señal de structure que el scanner
+    # encuentra sobre velas D1 CERRADAS del broker, SIN crear estrategia ni mandar orden.
+    # Guarda el snapshot de la vela que disparo + el ATR diario para el scoring FORWARD.
+    # Columnas de outcome: se miden FAVORABLE Y ADVERSA (como fade_chop y no como pullback)
+    # porque a horizonte de dias un swing puede ir a favor y darse vuelta — medir solo lo
+    # favorable sobreestima el edge. NUNCA re-simular SL/TP (regla del caso bounce).
+    # d1_candle_ts = timestamp (hora servidor) de la vela D1 que disparo: es la clave de
+    # idempotencia, para no loguear dos veces la misma vela si el exe reinicia.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS d1_shadow_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            d1_candle_ts INTEGER,
+            direction TEXT,
+            setup_type TEXT,
+            entry_price REAL,
+            key_level REAL,
+            level_touches INTEGER,
+            avg_range REAL,
+            rsi REAL,
+            htf_bias TEXT,
+            m5_trend TEXT,
+            confidence REAL,
+            sl_pips REAL,
+            tp_pips REAL,
+            candles_snapshot TEXT,
+            outcome_fav_pips REAL DEFAULT NULL,
+            outcome_adv_pips REAL DEFAULT NULL,
+            outcome_close_pips REAL DEFAULT NULL,
+            scored_at TIMESTAMP DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.40.20 — Level-quality log: tagea CADA señal de structure que se ejecuta con la
     # cantidad de toques de su nivel (calidad), EN EL MOMENTO. Join por strategy_id a
     # trade_archive -> medir WR de nivel-validado (>=2 toques) vs ruido. Plan B (mejora
@@ -2472,6 +2505,56 @@ def log_fade_chop_shadow(direction, setup_type, entry_price, key_level, level_to
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (direction, setup_type, entry_price, key_level, level_touches, avg_range, rsi,
               htf_bias, m5_trend, confidence, snap, now_ar()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def d1_shadow_already_logged(d1_candle_ts):
+    """v3.54.0 — True si esa vela D1 ya se logueo. Idempotencia del track D.
+
+    Devuelve True ante un error de lectura, NO False: el track es shadow, asi que
+    perder una fila no cuesta nada, pero duplicarla ensucia el n del scorer. Es el
+    criterio inverso al de strategy_was_executed (donde el fail-open protege al vivo).
+    """
+    try:
+        conn = _connect()
+        row = conn.execute(
+            "SELECT 1 FROM d1_shadow_log WHERE d1_candle_ts = ? LIMIT 1",
+            (int(d1_candle_ts),)).fetchone()
+        conn.close()
+        return row is not None
+    except Exception:
+        return True
+
+
+def log_d1_shadow(d1_candle_ts, direction, setup_type, entry_price, key_level,
+                  level_touches, avg_range, rsi, htf_bias, m5_trend, confidence,
+                  sl_pips, tp_pips, candles_snapshot):
+    """v3.54.0 — Persiste una señal del track D1 en SHADOW (sin operar).
+
+    created_at se sella con now_ar() EXPLICITO: el DEFAULT de SQLite es UTC y el
+    scorer asume AR naive. Olvidarlo no da error, da numeros plausibles y falsos
+    (mismo bug que v3.40.11 y v3.53.6).
+
+    El except: pass es deliberado (igual que los otros dos shadows): un fallo al
+    escribir el shadow jamas debe romper el scan del vivo.
+    """
+    try:
+        import json as _json
+        conn = _connect()
+        snap = (candles_snapshot if isinstance(candles_snapshot, str)
+                else _json.dumps(candles_snapshot))
+        conn.execute("""
+            INSERT INTO d1_shadow_log
+                (d1_candle_ts, direction, setup_type, entry_price, key_level,
+                 level_touches, avg_range, rsi, htf_bias, m5_trend, confidence,
+                 sl_pips, tp_pips, candles_snapshot, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (int(d1_candle_ts), direction, setup_type, entry_price, key_level,
+              level_touches, avg_range, rsi, htf_bias, m5_trend, confidence,
+              sl_pips, tp_pips, snap, now_ar()))
         conn.commit()
         conn.close()
     except Exception:

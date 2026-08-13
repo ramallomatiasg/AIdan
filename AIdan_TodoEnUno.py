@@ -821,6 +821,7 @@ class AIdan:
             from src.analyzer.technical import TechnicalAnalyzer
             from src.analyzer.technical_m15 import TechnicalAnalyzerM15, M15_PROFILE
             from src.analyzer.technical_h1 import TechnicalAnalyzerH1, H1_PROFILE
+            from src.analyzer.technical_d1 import TechnicalAnalyzerD1, D1_PROFILE
             from src.analyzer.llm_auditor import audit_signal, build_signal_context
 
             logger = setup_logging("analyzer", Config.LOG_LEVEL)
@@ -845,6 +846,17 @@ class AIdan:
             # v3.31.7 — Warmup gate H1: 60 min para que cierre al menos 1 vela H1 fresca.
             H1_WARMUP_SECONDS = 3600  # 60 min (1 vela H1)
             _last_h1_warmup_log = 0
+            # v3.54.0 — Track D: swing DIARIO (D1) en SHADOW. Loguea, NO opera.
+            # NO lleva warmup gate (a diferencia de M15/H1) y es a proposito: el warmup
+            # existe para no operar sobre velas stale recien arrancado, pero este track
+            # no opera, y ademas solo actua cuando aparece una vela D1 NUEVA — la vela
+            # ya viene cerrada del broker, no depende de haberla observado en vivo.
+            tech_d1 = TechnicalAnalyzerD1(logger)
+            _last_d1_scan = 0        # timestamp del ultimo chequeo
+            _last_d1_candle_ts = 0   # ts (hora servidor) de la ultima vela D1 ya procesada
+            _d1_mode = getattr(Config, 'D1_TRACK_MODE', 'shadow') or 'shadow'
+            D1_SCAN_INTERVAL = getattr(Config, 'D1_SCAN_INTERVAL_SEC', 900)
+            logger.info(f"Track D1 (swing diario): modo={_d1_mode} scan cada {D1_SCAN_INTERVAL}s")
 
             # SMC Engine initialization
             from src.analyzer.mtf_analyzer import MTFAnalyzer
@@ -3714,6 +3726,94 @@ class AIdan:
                                 logger.debug(f"H1 skip: ATR {_h1_atr:.1f}p < 10.0p floor")
                     except Exception as _h1_e:
                         logger.error(f"H1 scan error: {_h1_e}")
+
+                    # ── v3.54.0 — Track D: swing DIARIO (D1) en SHADOW ──────────────
+                    # LOGUEA Y NO OPERA. Corta ANTES de add_auto_strategy, o sea que no
+                    # toca auto_strategies (ni su buffer rotativo de 6, ni el rate-limit
+                    # horario, ni el cooldown de profile) y nunca llama a _try_mt5_execute.
+                    # Los otros 3 tracks quedan 100% intactos.
+                    #
+                    # El analyzer D1 tiene su PROPIO _triggered_levels (es otra instancia),
+                    # asi que su dedup no puede suprimir señales del scanner vivo — a
+                    # diferencia de los shadows de pullback/fade-chop, que comparten el
+                    # dict del M5 y dependen de un prefijo de key para no pisarlo.
+                    #
+                    # DELIBERADO: se reproduce la poblacion del backtest, no la del vivo.
+                    #   - se loguean TODAS las señales de la vela (el backtest itero sobre
+                    #     todas), no solo la de mayor confianza como hacen M15/H1;
+                    #   - NO se pasa htf_bias/daily_context (el backtest no los paso, y
+                    #     pasarlos cambia dynamic_conf y por lo tanto quien supera el piso
+                    #     de confianza). Igual se GUARDAN en la fila como contexto, para
+                    #     poder cortar por ellos despues sin haber cambiado la medicion;
+                    #   - NO se aplican counter-both ni anti-spam (el backtest tampoco).
+                    #   - NO se aplica floor de ATR: el backtest no tenia, y el unico gate
+                    #     interno (avg_range < 1.5p) nunca muerde en D1 (ATR ~70p).
+                    try:
+                        if _d1_mode != 'off' and (time.time() - _last_d1_scan) >= D1_SCAN_INTERVAL:
+                            _last_d1_scan = time.time()
+                            # Imports LOCALES con alias propio: en este monolito
+                            # `datetime` NO existe a nivel de modulo y Config/db se
+                            # importan dentro de cada funcion. Un nombre suelto acá
+                            # seria NameError -> track muerto (v3.50.4 / v3.33.0).
+                            from datetime import datetime as _d1_dt
+                            from src.common.db import (log_d1_shadow as _d1_log,
+                                                       d1_shadow_already_logged as _d1_seen)
+                            _d1_candles = tech_d1._fetch_candles()
+                            if not _d1_candles or len(_d1_candles) < 30:
+                                # None = MT5 no fue la fuente (fail-closed del analyzer D1).
+                                # "no escanear" NO es "no hay señal": se loguea distinto.
+                                logger.debug("D1: sin velas del broker este ciclo, skip")
+                            else:
+                                # ts de la vela D1 CERRADA mas reciente. price_feed ya
+                                # descarta la vela en formacion (price_feed.py:142-144),
+                                # asi que candles[-1] siempre esta cerrada.
+                                # El epoch es HORA SERVIDOR (el broker esta en UTC+3): se
+                                # guarda tal cual, porque el scorer compara contra velas
+                                # pedidas al mismo MT5 => misma convencion, sin conversion.
+                                _d1_ts = int(_d1_dt.fromisoformat(
+                                    _d1_candles[-1]['datetime']).timestamp())
+                                if _d1_ts == _last_d1_candle_ts:
+                                    pass  # misma vela que el scan anterior, nada nuevo
+                                elif _d1_seen(_d1_ts):
+                                    # ya procesada en una corrida anterior del exe
+                                    _last_d1_candle_ts = _d1_ts
+                                else:
+                                    _last_d1_candle_ts = _d1_ts
+                                    _d1_state = tech_d1.get_market_state()
+                                    _d1_atr = _d1_state.get('avg_range_pips', 0)
+                                    _d1_signals = tech_d1.detect_structure_signals(
+                                        min_confidence=D1_PROFILE['min_confidence'])
+                                    logger.info(
+                                        f"D1 shadow: vela nueva {_d1_candles[-1]['datetime'][:10]} "
+                                        f"ATR={_d1_atr:.1f}p -> {len(_d1_signals or [])} señal(es)")
+                                    if _d1_signals:
+                                        _d1_m5_trend = tech.get_market_state().get('trend', 'neutral')
+                                        _d1_snap = _d1_candles[-5:]
+                                        for _d1_sig in _d1_signals:
+                                            # SL/TP con la formula del backtest (1,5xATR, R:R 2).
+                                            # Es METADATA: en shadow no se opera, y en active
+                                            # el numero real lo pondria compute_adaptive_sl_tp.
+                                            _d1_sl = round(max(_d1_atr, 1.0) * 1.5, 1)
+                                            _d1_tp = round(_d1_sl * 2.0, 1)
+                                            _d1_log(
+                                                _d1_ts,
+                                                _d1_sig.get('direction'),
+                                                _d1_sig.get('setup_type', 'd1_structure'),
+                                                _d1_state.get('price', 0),
+                                                _d1_sig.get('key_level'),
+                                                _d1_sig.get('level_touches', 0),
+                                                _d1_atr,
+                                                _d1_state.get('rsi', 0),
+                                                htf_bias,
+                                                _d1_m5_trend,
+                                                _d1_sig.get('confidence', 0),
+                                                _d1_sl, _d1_tp, _d1_snap)
+                                            logger.info(
+                                                f"D1 shadow LOG: {_d1_sig.get('direction')} "
+                                                f"{_d1_sig.get('setup_type')} conf={_d1_sig.get('confidence')} "
+                                                f"SL={_d1_sl}p TP={_d1_tp}p (NO opera)")
+                    except Exception as _d1_e:
+                        logger.error(f"D1 shadow scan error: {_d1_e}")
 
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")

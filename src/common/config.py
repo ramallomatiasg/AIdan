@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.53.7"
+APP_VERSION = "3.54.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -251,6 +251,27 @@ class Config:
     # Banda de ATR (pips) que define el "chop" donde el breakout no tiene edge (medido 3-Jul).
     FADE_CHOP_ATR_MIN = float(os.getenv("FADE_CHOP_ATR_MIN", "3.0"))
     FADE_CHOP_ATR_MAX = float(os.getenv("FADE_CHOP_ATR_MAX", "8.0"))
+
+    # v3.54.0 — TRACK D = swing DIARIO (D1) en SHADOW. Medido con tools/backtest_h4_d1.py
+    # sobre 242 señales / 7,3 años de velas D1 del broker (2019 -> 2026):
+    #   PF neto 1,40 · +16,3 pips/trade · 7 de 8 años positivos ·
+    #   sin los 10 mejores trades sigue +6,8/trade ·
+    #   19 de 19 combinaciones de (R:R, hold, SL) positivas => NO es overfit.
+    # H4 se midio en el mismo barrido y se REFUTO (-0,98 pips/trade, 451 señales).
+    # Arranca en SHADOW y no en active por 2 razones medidas, no por prudencia generica:
+    #   1) el SWAP (-0,82 pips/noche comprado, hold medio 8 dias) se come 864 de los
+    #      3.956 pips y deja el bootstrap en CI95 [-0,53, +26,9] => CRUZA CERO.
+    #   2) SL medio 82p => lote = riesgo$/(SL*10) = 0,0078 < lote minimo 0,01 => el piso
+    #      obliga a arriesgar 1,29% en vez de 1% (hasta 3,41%). El sizing no da con $639.
+    #   off    = ni siquiera escanea.
+    #   shadow = escanea y loguea a d1_shadow_log SIN crear estrategia ni mandar orden
+    #            (los otros 3 tracks quedan 100% intactos). Se mide FORWARD con
+    #            tools/score_d1_shadow.py (excursion favorable Y adversa, sin re-sim SL/TP).
+    #   active = opera. NO usar sin resolver (1) y (2) de arriba.
+    D1_TRACK_MODE = (os.getenv("D1_TRACK_MODE", "shadow") or "shadow").lower()
+    # Cada cuanto mira si aparecio una vela D1 nueva. La vela cambia 1 vez por dia;
+    # 15 min es holgado y barato (el scan real solo corre cuando cambio la vela).
+    D1_SCAN_INTERVAL_SEC = int(os.getenv("D1_SCAN_INTERVAL_SEC", "900"))
 
     # v3.50.3 — get_setup_win_rates() tambien mira trade_archive (el cable que faltaba).
     # Auditado en runtime el 5-ago: la funcion devolvia SOLO 'news' porque lee de
