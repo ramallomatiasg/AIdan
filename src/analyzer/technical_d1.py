@@ -15,6 +15,33 @@ Medido el 13-ago-2026 con tools/backtest_h4_d1.py sobre 2000 velas D1 de MT5
     sin los 10 mejores    sigue +6,8/trade
     sensibilidad          19 de 19 combinaciones (R:R, hold, SL) positivas
 
+═══ BASELINE CORREGIDO (16-ago-2026) — USAR ESTE, NO EL DE ARRIBA ════════════
+
+Los numeros de arriba son los de la corrida original y quedan como registro,
+pero NO son el baseline contra el cual leer este shadow. La revision
+adversarial encontro que aquella corrida medía una regla levemente distinta
+de la que corre en vivo:
+
+  (a) uso DEFAULT_PARAMS via _FakeTuner => breakout_dist_max=15, cuando la DB
+      viva tiene 7 (ventana la mitad => menos señales);
+  (b) parcheo time.time() pero NO datetime.now(), que es lo que lee el paso 7
+      de dynamic_conf => las 242 señales recibieron todas el mismo conf_adj de
+      sesion: el de la hora en que se ejecuto el script (resulto off-hours).
+
+Re-medido con los params vivos y barriendo las 4 sesiones (mismas 2000 velas):
+
+    señales           186 - 227   (2,1 - 2,5/mes, no 2,7)
+    neto de comision  +13,7 a +15,3 pips/trade
+    neto + swap       +10,8 a +12,7 pips/trade   (PF 1,25 - 1,30)
+
+Positivo en las CUATRO sesiones => el edge no dependia de la hora del reloj,
+que era el riesgo real de (b). El nivel si baja ~10-15% y la frecuencia ~20%.
+
+Reproducir: tools/backtest_h4_d1.py --tf D1 --variant naive --params live
+            --session sweep   (el titular viejo: --params default --session off)
+
+═══════════════════════════════════════════════════════════════════════════════
+
 Lo ultimo es lo que sostiene la decision: no hay un pico angosto rodeado de
 negativos, que es la firma del overfit (comparar con el TP de h1 refutado el
 8-ago: 8p +21,3 / 10p +30,8 / 12p +8,8).
