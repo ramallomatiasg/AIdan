@@ -431,7 +431,15 @@ def main():
     ap.add_argument('--out', default=os.path.join(ROOT, 'docs', 'fase2_resultado'))
     a = ap.parse_args()
 
+    # setup_logger() deja el logger en CRITICAL + NullHandler (el de Fase 1 no
+    # queria ruido). Aca la corrida dura horas => hace falta ver el progreso.
+    import logging
     logger = setup_logger()
+    logger.setLevel(logging.INFO)
+    _h = logging.StreamHandler(sys.stdout)
+    _h.setFormatter(logging.Formatter('%(asctime)s %(message)s', '%H:%M:%S'))
+    logger.addHandler(_h)
+
     assert_sessions_match_prod(logger)     # falla fuerte si prod cambio la tabla
 
     cache_dir = os.path.join(a.cache_dir, f'{a.tf}_{a.candles}')

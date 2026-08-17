@@ -98,3 +98,6 @@ AIdan_Collector.*
 AIdan_API.*
 LEEME.txt
 COMO_COMPARTIR.txt
+
+# cache de velas de backtest_fase2.py (cientos de MB, regenerable)
+.cache_fase2/
