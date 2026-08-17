@@ -41,8 +41,11 @@ DB = os.path.join(APPDATA, 'AIdan', 'state', 'financial_news.db')
 # La linea que emite el loop (AIdan_TodoEnUno.py, bloque M15).
 RE_SKIP = re.compile(
     r'^(\d{4}-\d{2}-\d{2}) [\d:]+ .*M15: ATR ([\d.]+)p < piso ([\d.]+)p')
-# Contraprueba: si m15 SI escaneo, el analyzer loguea su fetch.
-RE_SCAN = re.compile(r'^(\d{4}-\d{2}-\d{2}) [\d:]+ .*Technical M15: \d+ candles')
+# Contraprueba de vida: el fetch de velas de M15. OJO — esto NO es "m15 escaneo
+# señales": el fetch pasa DENTRO de get_market_state(), que corre ANTES del gate de
+# ATR, asi que se loguea igual cuando el piso frena. Sirve para saber que el bloque
+# de m15 esta vivo y no para contar scans. (Se llamaba 'scans' y confundia.)
+RE_FETCH = re.compile(r'^(\d{4}-\d{2}-\d{2}) [\d:]+ .*Technical M15: \d+ candles')
 
 ACTIVACION = '2026-08-16'   # dia en que se puso M15_ATR_FLOOR=8.0
 
@@ -51,7 +54,7 @@ def leer_logs(desde):
     """Todas las rotaciones, de la mas vieja a la mas nueva."""
     files = sorted(glob.glob(os.path.join(LOG_DIR, 'aidan.log*')),
                    key=lambda p: (0 if p.endswith('.log') else -int(p.rsplit('.', 1)[-1])))
-    skips, scans = [], []
+    skips, fetches = [], []
     for f in files:
         try:
             with open(f, encoding='utf-8', errors='replace') as fh:
@@ -60,12 +63,12 @@ def leer_logs(desde):
                     if m and m.group(1) >= desde:
                         skips.append((m.group(1), float(m.group(2)), float(m.group(3))))
                         continue
-                    m2 = RE_SCAN.match(line)
+                    m2 = RE_FETCH.match(line)
                     if m2 and m2.group(1) >= desde:
-                        scans.append(m2.group(1))
+                        fetches.append(m2.group(1))
         except OSError as e:
             print(f"  (no se pudo leer {os.path.basename(f)}: {e})")
-    return skips, scans
+    return skips, fetches
 
 
 def trades_m15(desde):
@@ -89,8 +92,8 @@ def main():
     print(f'¿MUERDE EL PISO DE ATR DE M15?  (desde {args.desde})')
     print('=' * 72)
 
-    skips, scans = leer_logs(args.desde)
-    if not skips and not scans:
+    skips, fetches = leer_logs(args.desde)
+    if not skips and not fetches:
         print('\nNo hay actividad de m15 en el log desde esa fecha.')
         print('Posibles causas: AIdan no corrio, o sigue en el warmup de 30 min.')
         return 2
@@ -100,7 +103,8 @@ def main():
     bajo5 = [s for s in skips if s[1] < 5.0]             # no distingue nada
 
     print(f'\n  skips logueados  : {len(skips)}   (se loguea 1 por hora, no 1 por ciclo)')
-    print(f'  scans de m15     : {len(scans)}')
+    print(f'  fetches de velas : {len(fetches)}   (señal de vida del bloque m15 — NO son scans:')
+    print(f'                       el fetch corre antes del gate de ATR)')
     print(f'  piso reportado   : {dict(pisos) or "—"}')
 
     print('\n  DESGLOSE POR ATR:')
