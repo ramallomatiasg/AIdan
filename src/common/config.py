@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.54.1"
+APP_VERSION = "3.55.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -321,6 +321,29 @@ class Config:
         _t.strip().upper() for _t in
         (os.getenv("LEVEL_QUALITY_TRACKS", "M15") or "").split(",") if _t.strip()
     ]
+
+    # v3.55.0 — PISO DE ATR DE M15, ahora perilla (antes 5.0 hardcodeado en el loop).
+    #
+    # QUE MIDE: el ATR de la vela M15 al momento de la señal (tech_m15.get_market_state()),
+    # registrado en trade_archive.avg_range_pips EN EL MOMENTO, no reconstruido.
+    #
+    # POR QUE 8 Y NO 5 (medido 16-ago sobre la data limpia, 11-jun -> 14-ago, n=121):
+    #     ATR <= 8p : n=90  WR 27.8%  -$75.59
+    #     ATR >  8p : n=31  WR 51.6%  +$18.80
+    # m15 necesita ~40.5% de WR para empatar (ganador medio +7.8p, perdedor -5.3p).
+    # En chop saca 28%, en expansion 52%. Gate: p=0.0042, CI95 [33.1%, 69.8%] no cruza
+    # el 27.8% del comparador, y los dos buckets cubren el MISMO periodo.
+    #
+    # LO QUE NO DICE (revision adversarial del propio hallazgo): el lado bueno es FRAGIL —
+    # de los +$18.80, unos +$19.49 salen de 2 dias; sin esos dias queda en -$0.69. Lo que
+    # si aguanta es el lado malo: <=8p pierde en las DOS mitades del periodo (28.9% y 26.7%).
+    # Por eso esto NO es "m15 gana en expansion" sino "m15 sangra en chop de forma
+    # confiable". Expectativa honesta: m15 deja de sangrar, no pasa a rentable.
+    #
+    # COSTO: se lleva el 74% de la frecuencia de m15 (3.27 -> 0.84 trades/dia).
+    # El umbral NO se afina sobre esta muestra: 8 es el corte que ya estaba pre-declarado
+    # en NOTAS desde el 17-jul; moverlo buscando el mejor numero seria overfit.
+    M15_ATR_FLOOR = float(os.getenv("M15_ATR_FLOOR", "5.0"))
 
     # v3.49.0 — Feedback de learning_insights -> ajustes vivos (confianza + SL/TP).
     # Contexto: get_learning_adjustments crasheaba en CADA ciclo (TypeError por colision de

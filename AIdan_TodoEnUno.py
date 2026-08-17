@@ -839,6 +839,10 @@ class AIdan:
             # Bug observado: M15 disparaba trades a los 20s post-restart sobre data stale.
             M15_WARMUP_SECONDS = 1800  # 30 min (2 velas M15)
             _last_m15_warmup_log = 0
+            # v3.55.0 — throttle del log del piso de ATR: con el piso en 8 el skip es la
+            # mayoria de los ciclos (74% de los trades vivian debajo), y a 60s por ciclo
+            # eso son ~1.400 lineas por dia. Se loguea 1 vez por hora.
+            _last_m15_floor_log = 0
             # v3.20.0 — Track C H1 experimental (paralelo a M5+M15)
             tech_h1 = TechnicalAnalyzerH1(logger)
             _last_h1_scan = 0  # timestamp last scan H1
@@ -3478,8 +3482,20 @@ class AIdan:
                             _last_m15_scan = time.time()
                             _m15_state = tech_m15.get_market_state()
                             _m15_atr = _m15_state.get('avg_range_pips', 0)
-                            # ATR floor M15: 5p (vs M5 2.5p — M15 atr es ~3x)
-                            if _m15_atr >= 5.0:
+                            # ATR floor M15 (v3.55.0: perilla, antes 5.0 fijo). El default
+                            # sigue siendo 5p (vs M5 2.5p — el ATR de M15 es ~3x). Subirlo a 8
+                            # saca el chop, que es donde m15 pierde de forma consistente
+                            # (<=8p: n=90 WR 27.8% -$75.59 | >8p: n=31 WR 51.6% +$18.80).
+                            # Ver el comentario largo en Config.M15_ATR_FLOOR.
+                            # Se lee en CADA ciclo a proposito: asi cambiar el .env y reiniciar
+                            # alcanza, sin rebuild del exe.
+                            _m15_atr_floor = getattr(Config, 'M15_ATR_FLOOR', 5.0)
+                            if _m15_atr < _m15_atr_floor and (time.time() - _last_m15_floor_log) > 3600:
+                                _last_m15_floor_log = time.time()
+                                logger.info(
+                                    f"M15: ATR {_m15_atr:.1f}p < piso {_m15_atr_floor:.1f}p "
+                                    f"-> sin scan (chop). Perilla: M15_ATR_FLOOR")
+                            if _m15_atr >= _m15_atr_floor:
                                 # v3.33.0 (Fase B): htf_bias y daily_ctx GARANTIZADOS por scope
                                 # superior (se setean siempre, antes del structure scanner).
                                 # Antes usabamos 'in dir()' check que retornaba None cuando M5

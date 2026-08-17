@@ -105,6 +105,53 @@ Anti-contradiction pre_planned (no PUT+CALL simultáneos)
 
 ## Changelog largo (el bloque "Última actualización")
 
+**16 Ago 2026 — v3.55.0: EL PISO DE ATR DE M15 PASA DE 5 A 8, COMO PERILLA DE ENV.**
+Salió de una pregunta del user después del checkpoint: **por qué m15 pierde tanto.** Es el peor
+track por lejos (−$124,33 lifetime sobre 192 trades, y −$24,59 de los −$37 de la última quincena).
+
+**La aritmética primero.** Realizado: ganador medio **+7,8 pips**, perdedor medio **−5,3 pips** ⇒
+necesita **40,5% de WR** para empatar. Entrega **34,9%**. Faltan ~6 puntos. Y un detalle que
+confirma el hallazgo #1 del brain-review del 15-jun, todavía sin arreglar: **ni los ganadores ni
+los perdedores llegan a su objetivo** — los ganadores recorren el **38% del TP** y los perdedores
+el **34% del SL**. El TP nominal de 20p es ficción; nadie lo toca.
+
+**Dónde está la pérdida: en el chop.** Cortando por el ATR de la propia vela M15, medido al entrar
+(`avg_range_pips`, clasificado en el momento — no reconstruido) sobre la data limpia (11-jun →
+14-ago, n=121):
+
+    ATR <= 8p : n=90  WR 27,8%  -$75,59
+    ATR >  8p : n=31  WR 51,6%  +$18,80
+
+Contra los 40,5% que necesita: en chop saca 28%, en expansión 52%. **Pasa el gate completo**:
+p=0,0042, CI95 [33,1% – 69,8%] que no cruza el 27,8% del comparador, y **los dos buckets cubren el
+mismo período** (o sea que no es una época). El comparador elegido es el propio track a ATR ≤8p, no
+el baseline global — mismo track, misma ventana, misma plomería.
+
+**La revisión adversarial del propio hallazgo, que es lo que cambió la recomendación.** Antes de
+proponer nada se le tiraron tres ataques: (1) *¿son pocos días buenos?* — los 31 trades del bucket
+alto están en 15 días distintos, **pero los 2 mejores días aportan +$19,49 de los +$18,80**, o sea
+que sin ellos el bucket queda en **−$0,69**; (2) *¿son un par de ganadores grandes?* — sacando los
+3 mejores, **−$10,88**; (3) *walk-forward* — el bucket alto da 40,0% y 62,5% de WR en las dos
+mitades, y el bajo **26,7% y 28,9%**, consistente. **Conclusión: el lado bueno es frágil, el lado
+malo no.** Por eso la afirmación que se sostiene NO es "m15 imprime en expansión" sino **"m15
+sangra en chop de forma confiable, y el 74% de sus trades son en chop"**, y la expectativa honesta
+del cambio es que **m15 deje de sangrar, no que pase a rentable**. Eso quedó escrito en el
+comentario de `Config.M15_ATR_FLOOR`, en el `.env` y en NOTAS, para que el forward del ~1 sep no se
+lea contra una expectativa inflada.
+
+**Implementación.** El piso vivía hardcodeado (`if _m15_atr >= 5.0:`). Ahora es
+`Config.M15_ATR_FLOOR`, leída **en cada ciclo** a propósito, así cambiarla es editar el `.env` y
+reiniciar — sin rebuild. **El default en código queda en 5.0**: rebuildear sin tocar el `.env` no
+cambia el comportamiento; la activación es el `M15_ATR_FLOOR=8.0` puesto en el `.env`. Revertir es
+volver a 5.0. Se agregó log del skip (throttleado a 1 por hora: con el piso en 8 el skip es la
+mayoría de los ciclos y a 60s/ciclo serían ~1.400 líneas por día) — no un silencio, que es la clase
+de bug que ya mató M15 dos semanas y SMC meses. Y `tools/test_m15_atr_floor_v3550.py` con **test de
+mutación**: extrae la condición real del gate desde el monolito con regex y la evalúa, así que si
+alguien vuelve a hardcodear el 5.0 el test falla — el único modo de que la perilla no sea
+decorativa.
+
+**Costo declarado:** se lleva el **74% de la frecuencia de m15** (3,27 → 0,84 trades/día).
+
 **16 Ago 2026 — v3.54.1: EL BASELINE DEL TRACK D1 ESTABA MAL Y SE CORRIGIÓ ANTES DE LA 1RA LECTURA.**
 Era el último hallazgo accionable que había quedado abierto de la revisión adversarial del 13-ago
 (los otros 5 se arreglaron en el 2do commit de v3.54.0). El problema no era el sistema: era **contra
