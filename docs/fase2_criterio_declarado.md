@@ -154,6 +154,27 @@ las dos le hace el test más fácil al detector.
 
 ---
 
+## ENMIENDA 3 — antes de correr: tope de muestra del bootstrap
+
+**Motivo (medido en el smoke test de plomería, sin mirar P&L):** el detector dispara en el
+**24,5% de las velas**. A 500.000 velas × 26 pares eso da **~3,2 millones de trades por
+sesión**, no miles. Un bootstrap de 10.000 reps sobre 3,2 M serían 3,2 × 10¹⁰ sorteos por
+sesión: inviable.
+
+**Qué cambia:** si n > **250.000**, el CI se calcula sobre una submuestra aleatoria (semilla
+fija) de 250.000 trades.
+
+**Por qué no es conveniente:** menos datos ⇒ **CI más ancho** ⇒ la condición §6.2 (límite
+inferior > 0) se vuelve **más difícil** de cumplir, nunca más fácil.
+
+**Nota estadística para leer el resultado:** con n de este orden el error estándar de la media
+es minúsculo (~0,01 pips). Eso significa que **§6.2 es casi automática si §6.1 se cumple**: a
+esta escala "significativo" no cuesta nada. El poder discriminante real del criterio está en
+**§6.3 (las dos mitades)** y sobre todo en **§6.4 (el control aleatorio)**. Un resultado que
+pase 1 y 2 pero no 4 **no es un edge: es ruido con n grande.**
+
+---
+
 ## 4. Métrica primaria
 
 **Pooled avg pips/trade neto de comisión y de swap**, sobre todos los trades de los 21 pares.
