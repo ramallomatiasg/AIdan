@@ -59,7 +59,7 @@ este mismo archivo.
 | Velas por par | **500.000** (≈ 20,2 años, jun-2006 → ago-2026) |
 | Variante | **`naive`** — constantes en pips SIN escalar |
 | Params | **`live`** (los reales de `optimizer_params`, no los default) |
-| Sesión | **`sweep`** — las 4 sesiones, criterio sobre el pooled de las 4 |
+| Sesión | **`sweep`** — las 4 sesiones, criterio exigido en **CADA UNA** (ver ENMIENDA 1) |
 
 **Por qué M15 y no M5:** al mismo costo de cómputo (500k velas/par), M15 da **20,2 años** y M5
 da 6,7. M15 cubre 2008, 2015, 2020 y 2022 — cuatro regímenes de crisis distintos. Y
@@ -77,6 +77,32 @@ script.
 > mirar ningún resultado) muestra que la corrida es inviable, **se reduce la cantidad de velas
 > por par — nunca el sweep, nunca la lista de pares.** La reducción se escribe en este archivo
 > ANTES de correr, con el número exacto.
+>
+> **Resultado de la medición (17 ago, antes de correr, solo cronómetro):** 193 velas/seg por
+> core; 20 cores disponibles. M15/500k × 21 pares × 4 sesiones = 42 M llamadas ≈ **4,3 h con 14
+> workers**. **Viable ⇒ NO se reduce la ventana. El criterio queda como está declarado.**
+
+---
+
+## ENMIENDA 1 — hecha ANTES de correr, sin ningún resultado a la vista
+
+**Qué decía:** *"sesión sweep, criterio sobre el **pooled de las 4**"*.
+
+**Por qué estaba mal:** las 4 sesiones **no son 4 muestras independientes**. Son 4 supuestos
+alternativos sobre la misma realidad — el mismo trade aparecería hasta 4 veces. Poolearlas
+infla el n de forma artificial y promedia mundos que no coexisten.
+
+**Qué dice ahora:** el criterio de §6 se evalúa **en cada sesión por separado y debe cumplirse
+en las CUATRO**. Es el mismo tratamiento que la v3.54.1 le dio al baseline del D1: *"si el
+resultado aguanta las cuatro, el baseline es robusto a esta perilla; si solo vive en una, el
+titular dependía de la hora del reloj"*.
+
+**Por qué esta enmienda no es un ajuste conveniente:** el criterio nuevo es **más estricto**
+que el que reemplaza (antes bastaba un agregado; ahora tienen que dar las cuatro). Una enmienda
+que se hace más difícil de aprobar no puede estar motivada por querer aprobarla.
+
+**Trazabilidad:** commiteada antes de ejecutar una sola línea del test, en un commit separado
+del que creó este archivo. Sin resultados a la vista.
 
 ---
 
@@ -119,14 +145,15 @@ Esto es lo que faltó en la Fase 1b, y el propio commit lo anotó como falla de 
 
 ## 6. Criterio de éxito — las CUATRO condiciones, todas
 
-Para poder decir **"pasa"**:
+Para poder decir **"pasa"**, en **CADA UNA de las 4 sesiones** (ENMIENDA 1):
 
 1. Pooled avg/trade neto de costos **> 0**
 2. **Límite inferior del CI 95% > 0** (bootstrap)
-3. **Positivo en las DOS mitades** del período (walk-forward temporal, corte a la mitad)
+3. **Positivo en las DOS mitades** del período (walk-forward **temporal**: corte por fecha en
+   el punto medio del período, no por posición en la lista de trades)
 4. **Por encima del percentil 95** del control aleatorio
 
-Si falla **cualquiera** de las cuatro → no pasa.
+Si falla **cualquiera** de las cuatro condiciones, **en cualquiera de las 4 sesiones** → no pasa.
 
 ---
 
