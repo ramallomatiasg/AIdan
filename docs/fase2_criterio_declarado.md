@@ -38,12 +38,19 @@ timeframe donde realmente opera.
 
 ## 2. Universo — CONGELADO, no se re-elige
 
-Los **mismos 21 pares** de `docs/fase1_pares_declarados.md` (los 20 declarados + EURUSD).
+**Ver ENMIENDA 2: la descripción original de este apartado era factualmente incorrecta.**
+
+Los **26 pares** que salen de unir las dos listas pre-declaradas y ya commiteadas:
+los **20** de `docs/fase1_pares_declarados.md` (commit `5a7d57e`) más los **6**
+out-of-sample de `docs/fase1b_prediccion_registrada.md` (commit `2269691`).
 No se agrega ni se saca ninguno por performance.
 
-**Majors (7):** EURUSD, GBPUSD, AUDUSD, NZDUSD, USDCAD, USDCHF, USDJPY
-**Crosses (14):** EURGBP, EURJPY, EURCHF, EURAUD, EURCAD, EURNZD, GBPJPY, GBPCHF, GBPAUD,
-AUDJPY, AUDNZD, AUDCAD, CADJPY
+**Los 20 de Fase 1** — majors (7): EURUSD, GBPUSD, AUDUSD, NZDUSD, USDCAD, USDCHF, USDJPY ·
+crosses (13): EURGBP, EURJPY, EURCHF, EURAUD, EURCAD, EURNZD, GBPJPY, GBPCHF, GBPAUD, AUDJPY,
+AUDNZD, AUDCAD, CADJPY
+
+**Los 6 de Fase 1b** (out-of-sample, con predicción registrada): CHFJPY, NZDJPY, GBPNZD,
+NZDCHF, NZDCAD, GBPCAD
 
 **Única razón admitida para excluir un par: falta de historia** (< 100.000 velas M15
 disponibles). Si pasa, se reporta **cuál y por qué ANTES de mirar cualquier resultado**, en
@@ -103,6 +110,47 @@ que se hace más difícil de aprobar no puede estar motivada por querer aprobarl
 
 **Trazabilidad:** commiteada antes de ejecutar una sola línea del test, en un commit separado
 del que creó este archivo. Sin resultados a la vista.
+
+---
+
+## ENMIENDA 2 — también ANTES de correr, sin resultados a la vista
+
+### 2.a — El universo estaba mal descrito
+
+**Qué decía §2:** *"los mismos 21 pares de `fase1_pares_declarados.md` (los 20 declarados +
+EURUSD)"*. **Es falso: EURUSD ya está entre los 20.**
+
+Lo que realmente pasó en Fase 1: de los 20 declarados corrieron **15** (el resto no pasó el
+mínimo de velas D1), y Fase 1b agregó **6 out-of-sample** ⇒ 15 + 6 = los 21 del titular.
+
+**Qué dice ahora:** el universo es la **unión de las dos listas pre-declaradas = 26 pares**.
+Las dos fueron declaradas y commiteadas antes de ver ningún resultado, así que ninguna está
+contaminada por performance. Es un **superconjunto** de los 21 de Fase 1, no un recorte.
+
+### 2.b — El perfil de SL/TP/hold no estaba fijado, y decide el resultado
+
+El criterio no decía con qué SL/TP/hold simular en M15. Hay dos opciones legítimas que
+responden preguntas distintas, así que se declara cuál es cuál **ahora**:
+
+| | Perfil | Responde |
+|---|---|---|
+| **PRIMARIO** | El **vivo de M15** (`technical_m15.py:M15_PROFILE`): **SL 15p, TP 60p, hold 3 velas** (= expiry 45 min) | *"¿el sistema que YO corro tiene edge?"* |
+| **SECUNDARIO** | El del arnés de Fase 1: **`sl_atr_mult` 1,2 · `rr` 2,0 · hold 10 velas** | *"¿es comparable manzana-con-manzana contra Fase 1?"* |
+
+**Primario = el vivo**, por coherencia con el principio ya declarado en §3 para elegir `naive`:
+*"la pregunta es «¿el sistema que tengo tiene edge?», no «¿podría tenerlo otro sistema?»"*.
+
+**Límite declarado ahora:** el `tp_cap = max(ATR,2)*2` de producción (`technical.py:1430`), que
+en vivo recorta el TP nominal de 60p a ~18p, **NO se replica** en la simulación. El efecto neto
+sobre el resultado es ambiguo (un TP más grande pega menos veces pero paga más), y por eso se
+deja dicho en vez de estimado.
+
+### Por qué estas dos correcciones tampoco son convenientes
+
+2.a **agranda** el universo (26 en vez de 21) e incluye obligatoriamente los 6 pares
+out-of-sample que en Fase 1 salieron casi todos negativos. 2.b elige como primario el perfil de
+**hold más corto** (3 velas contra 10), que es el más hostil a que aparezca un edge. Ninguna de
+las dos le hace el test más fácil al detector.
 
 ---
 
