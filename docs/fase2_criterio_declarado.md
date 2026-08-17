@@ -1,0 +1,202 @@
+# Fase 2 — criterio DECLARADO ANTES de correr el backtest
+
+**Fecha/hora de declaración: 17 Ago 2026, antes de ejecutar una sola línea del test.**
+**Commiteado antes de la corrida. Si este archivo se modifica después de ver resultados,
+el hallazgo no vale nada.**
+
+---
+
+## 1. Qué pregunta responde (y qué NO respondió la Fase 1)
+
+La Fase 1 (commit `579cc22`) midió el detector `detect_structure_signals` sobre **velas D1**
+en 21 pares y 7+ años, y no encontró edge: pooled −0,64 p/trade neto de comisión (PF 0,99),
+−3,76 con swap (PF 0,93), sobre n=3.669.
+
+De ahí el commit concluyó:
+
+> *"el detector medido es el MISMO que alimenta structure, m15 y h1 en vivo […] El problema
+> no son los filtros ni la gestión: es el generador de señal."*
+
+**Esa conclusión es una EXTRAPOLACIÓN, no una medición.** El test corrió sobre D1; los tracks
+vivos corren sobre M5/M15/H1. Nadie midió el detector, a través de instrumentos, en el
+timeframe donde realmente opera.
+
+**Fase 2 mide exactamente eso.**
+
+### Debilidades reconocidas de la Fase 1, anotadas acá para no repetirlas
+
+1. **8 de 21 NO es "menos que el azar".** Con p=0,5 se esperan 10,5 con desvío 2,29 ⇒ 8 está a
+   1,1 desvíos. Es ruido. El titular del commit sobrevendió ese número. **En Fase 2 el conteo
+   de pares positivos queda degradado a DESCRIPTIVO y no forma parte del criterio.**
+2. **Los 21 pares no son 21 experimentos independientes.** Salen de 8 monedas; la dimensión
+   independiente real es ~7. El pooled es la métrica válida, no el conteo.
+3. **Las constantes del detector están en pips de EUR/USD M5** y se aplicaron sin escalar a
+   pares que se mueven 10x más. Se reconoce como límite (ver §9), no se "arregla" acá porque
+   escalar por ATR ya se probó en H4/D1 y **empeoró** (PF 1,40 → 1,02).
+
+---
+
+## 2. Universo — CONGELADO, no se re-elige
+
+Los **mismos 21 pares** de `docs/fase1_pares_declarados.md` (los 20 declarados + EURUSD).
+No se agrega ni se saca ninguno por performance.
+
+**Majors (7):** EURUSD, GBPUSD, AUDUSD, NZDUSD, USDCAD, USDCHF, USDJPY
+**Crosses (14):** EURGBP, EURJPY, EURCHF, EURAUD, EURCAD, EURNZD, GBPJPY, GBPCHF, GBPAUD,
+AUDJPY, AUDNZD, AUDCAD, CADJPY
+
+**Única razón admitida para excluir un par: falta de historia** (< 100.000 velas M15
+disponibles). Si pasa, se reporta **cuál y por qué ANTES de mirar cualquier resultado**, en
+este mismo archivo.
+
+---
+
+## 3. Test PRIMARIO — uno solo
+
+| Dimensión | Valor declarado |
+|---|---|
+| Timeframe | **M15** |
+| Velas por par | **500.000** (≈ 20,2 años, jun-2006 → ago-2026) |
+| Variante | **`naive`** — constantes en pips SIN escalar |
+| Params | **`live`** (los reales de `optimizer_params`, no los default) |
+| Sesión | **`sweep`** — las 4 sesiones, criterio sobre el pooled de las 4 |
+
+**Por qué M15 y no M5:** al mismo costo de cómputo (500k velas/par), M15 da **20,2 años** y M5
+da 6,7. M15 cubre 2008, 2015, 2020 y 2022 — cuatro regímenes de crisis distintos. Y
+`m15_structure` es un track VIVO, no una analogía.
+
+**Por qué `naive` y no `scaled`:** porque `naive` es literalmente lo que corre en producción.
+La pregunta es "¿el sistema que tengo tiene edge?", no "¿podría tenerlo otro sistema?".
+
+**Por qué `sweep`:** lección de v3.54.1. El paso 7 de `dynamic_conf` suma el `conf_adj` de
+sesión, que corre contra `min_confidence=60` y por lo tanto **mueve la población entera** de
+señales. Correr una sola sesión hace que el resultado dependa de la hora en que se ejecutó el
+script.
+
+> **Cláusula de cómputo, declarada ahora:** si la medición de tiempo (solo cronómetro, sin
+> mirar ningún resultado) muestra que la corrida es inviable, **se reduce la cantidad de velas
+> por par — nunca el sweep, nunca la lista de pares.** La reducción se escribe en este archivo
+> ANTES de correr, con el número exacto.
+
+---
+
+## 4. Métrica primaria
+
+**Pooled avg pips/trade neto de comisión y de swap**, sobre todos los trades de los 21 pares.
+
+- **Comisión:** por símbolo, estimada con `trade_tick_value / trade_tick_size` (IC Raw
+  ~$3,50/lote/lado). Si MT5 no la da para un símbolo, se cae al 0,8p de EUR/USD **y se dice en
+  el reporte**, no en silencio.
+- **Swap:** por par Y por lado, leído de `symbol_info`, aplicado por noche efectivamente
+  mantenida según la dirección real del trade.
+- **CI 95%:** bootstrap por percentiles sobre los trades, **10.000 remuestreos**. No
+  aproximación normal: la distribución de P&L es asimétrica.
+
+---
+
+## 5. Control aleatorio — REQUISITO, no adorno
+
+Esto es lo que faltó en la Fase 1b, y el propio commit lo anotó como falla de diseño:
+
+> *"un criterio de conteo de signos necesita siempre su comparación contra la constante,
+> declarada junto con él. No la declaré."*
+
+**Especificación del control (declarada ahora para que no sea ajustable después):**
+
+- Misma **cantidad de entradas por símbolo** que produjo el detector.
+- Momentos de entrada **sorteados uniformemente** del mismo universo de velas (mismo símbolo,
+  mismo período).
+- Dirección sorteada **respetando el ratio long/short que el detector produjo en ese símbolo**.
+  Esto es deliberado: controla por la deriva direccional del par, de modo que lo que se mide es
+  si el detector aporta **selección y timing**, no si el par subió.
+- **Mismo SL/TP/hold**, calculados idénticamente desde el ATR de la vela de entrada sorteada.
+- Mismos costos (comisión + swap) aplicados igual.
+- **200 remuestreos** ⇒ distribución del pooled avg/trade bajo azar.
+
+**El detector debe superar el percentil 95 de esa distribución.**
+
+---
+
+## 6. Criterio de éxito — las CUATRO condiciones, todas
+
+Para poder decir **"pasa"**:
+
+1. Pooled avg/trade neto de costos **> 0**
+2. **Límite inferior del CI 95% > 0** (bootstrap)
+3. **Positivo en las DOS mitades** del período (walk-forward temporal, corte a la mitad)
+4. **Por encima del percentil 95** del control aleatorio
+
+Si falla **cualquiera** de las cuatro → no pasa.
+
+---
+
+## 7. Secundarios y exploratorios — NO pueden dar veredicto solos
+
+Se corren y se reportan **completos**, pero un resultado positivo en cualquiera de estos
+**NO** habilita a decir "pasa". El veredicto declarado en ese caso es
+*"no concluyente, necesita su propio test pre-registrado"*.
+
+- M5 / 500.000 velas / `naive` (≈ 6,7 años)
+- M15 / `scaled`
+- M5 / `scaled`
+
+Están degradados **a propósito**: probar 4 combinaciones y quedarse con la mejor es
+exactamente cómo se fabrica un falso positivo.
+
+---
+
+## 8. Descriptivo — se reporta, NO es criterio
+
+- Tabla de los 21 pares ordenada, **sin recortar los negativos**.
+- Conteo de pares positivos (degradado por §1.1).
+- Desglose por `setup_type`.
+- Frecuencia de señales por par.
+
+---
+
+## 9. Decisión comprometida ANTES de ver los números
+
+| Resultado | Acción comprometida |
+|---|---|
+| **PASA** (las 4 condiciones) | La refutación del D1 **no** se extrapola al vivo. El generador tiene edge en el TF donde opera ⇒ el problema vuelve a ser costo/gestión, que sí es reparable. Se trabaja ahí. |
+| **FALLA** e indistinguible del control | El generador está muerto en el timeframe donde opera. Se apagan `structure`/`m15`/`h1` y se pasa a SMC. |
+| **AMBIGUO** (punto > 0 pero CI cruza, o las mitades no coinciden, o no supera el control) | **NO CONCLUYENTE. No se toca nada, NO se re-corta la data buscando algo.** Se pasa a SMC igual. |
+
+La tercera fila es la que más protege. Es la trampa exacta en la que cayó el modelo de
+Efficiency Ratio de la Fase 1b: in-sample Spearman +0,529, out-of-sample +0,086 (p=0,872).
+
+---
+
+## 10. Límites declarados ANTES, no descubiertos después
+
+- Un backtest típico **infla 20-30%** vs real con fricción.
+- Sin spread variable, sin slippage, sin latencia.
+- Sin los filtros del loop vivo (SIM A, counter-HTF, anti-spam, cooldown, warmup) ⇒ la
+  frecuencia real sería MENOR.
+- `htf_bias = None` (no derivado de SMC live).
+- Solo trigger `structure` (sin news / smc / pre_planned).
+- Constantes en pips calibradas para EUR/USD aplicadas a pares de escala distinta (§1.3).
+
+**Consecuencia declarada ahora: un "PASA" es permiso para investigar más, NUNCA permiso para
+operar.** Si el límite inferior del CI apenas roza el cero por arriba, en la práctica es un no.
+
+---
+
+## 11. Compromisos anti-p-hacking
+
+1. No se re-corta la data buscando un subconjunto que funcione.
+2. No se agregan filtros después de ver resultados.
+3. No se cambia la ventana, ni la lista de pares, ni la variante, después de ver resultados.
+4. Se reportan **los 21 pares**, incluidos los que salgan mal.
+5. Si el resultado es feo, se dice que es feo.
+
+---
+
+## 12. Hipótesis
+
+**H1:** el detector tiene edge en M15 a través de instrumentos ⇒ la extrapolación de la Fase 1
+era incorrecta y el problema del vivo es de costo/gestión.
+
+**H0 (lo que se asume si la evidencia no alcanza):** el detector no genera señal con
+información en ningún timeframe medido ⇒ la Fase 1 generalizaba bien, y el camino no es
+seguir filtrando sino cambiar de generador.
