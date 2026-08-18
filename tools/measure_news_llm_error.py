@@ -226,11 +226,35 @@ def main():
                 pre_fav = ((price - ps) if direction == 'CALL' else (ps - price)) / PIP
 
             rows.append({
+                # v3.56.0 — id/title agregados (ADITIVO, no cambian ningun calculo) para
+                # poder reasociar cada alerta con su noticia en el head-to-head de modelos.
+                'id': r['id'], 'title': r['title'],
                 'dir': direction, 'conf': r['confidence'] or 0, 'impact': r['impact_score'] or 0,
                 'should_op': r['should_operate'], 'month': dt.strftime('%Y-%m'),
                 'cat': classify(r['title']), 'stored': r['stored_result'],
                 'per_h': per_h, 'pre_fav': pre_fav,
             })
+
+        # v3.56.0 — dump opcional por fila (ADITIVO, off por default). Existe para que el
+        # head-to-head de modelos use EXACTAMENTE este mismo outcome en vez de recalcular
+        # el anclaje de velas por su cuenta (esa divergencia silenciosa es lo que este
+        # mismo docstring advierte que ya invirtio la realidad una vez).
+        _dump = os.getenv('NEWS_DUMP_CSV', '')
+        if _dump:
+            import csv as _csv
+            with open(_dump, 'w', newline='', encoding='utf-8') as _f:
+                _w = _csv.writer(_f)
+                _w.writerow(['alert_id', 'dir_70b', 'conf', 'impact', 'month', 'cat',
+                             'mkt_pips', 'signed_pips', 'fav', 'adv', 'pre_fav', 'title'])
+                for _r in rows:
+                    _ph = _r['per_h'].get(PRIMARY_H) or {}
+                    _w.writerow([_r['id'], _r['dir'], _r['conf'], _r['impact'], _r['month'],
+                                 _r['cat'], round(_ph.get('mkt', 0), 2),
+                                 round(_ph.get('signed', 0), 2), round(_ph.get('fav', 0), 2),
+                                 round(_ph.get('adv', 0), 2),
+                                 '' if _r['pre_fav'] is None else round(_r['pre_fav'], 2),
+                                 (_r['title'] or '')[:200]])
+            print(f'  [dump] {len(rows)} filas -> {_dump}')
 
         # ══════════════ AGREGADO ══════════════
         print('=' * 78)
