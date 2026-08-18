@@ -97,6 +97,34 @@ BOOTSTRAP_N_CAP = 250_000        # ver docstring de bootstrap_ci (conservador)
 
 _CACHE = None                    # seteado en main / worker init
 
+# Version de la LOGICA de medicion. Si cambia como se mide (deteccion, costos,
+# control, perfiles), hay que subirla: invalida los checkpoints viejos para que no
+# se mezclen resultados de dos codigos distintos, que seria peor que perderlos.
+LOGIC_VERSION = 1
+
+
+def set_low_priority():
+    """Baja la prioridad del proceso para que el escritorio siga usable.
+
+    Windows le da los cores al programa en foco y el backtest usa lo que sobra.
+    Tarda algo mas de reloj pero permite trabajar en la maquina mientras corre.
+    """
+    try:
+        import ctypes
+        IDLE_PRIORITY_CLASS = 0x00000040
+        k = ctypes.windll.kernel32
+        k.SetPriorityClass(k.GetCurrentProcess(), IDLE_PRIORITY_CLASS)
+        return True
+    except Exception:
+        return False
+
+
+def ckpt_path(cache_dir, sym, session, profile_key, tf):
+    """Un archivo por job. La clave incluye TODO lo que cambia el resultado."""
+    d = os.path.join(cache_dir, 'ckpt')
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f'v{LOGIC_VERSION}_{tf}_{profile_key}_{sym}_{session}.pkl')
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # FASE A — cache de velas (proceso padre, unica vez que se habla con MT5)
@@ -213,9 +241,24 @@ def net_of_costs(out, entry_i, candles, direction, spec):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def run_job(job):
-    sym, session, cache_dir, params, profile_key, tf = job
+    sym, session, cache_dir, params, profile_key, tf, low_prio = job
     t0 = time.perf_counter()
     profile = PROFILES_F2[profile_key]
+
+    # CHECKPOINT: si este job ya se calculo con esta misma LOGIC_VERSION, se
+    # devuelve tal cual. Es lo que hace que pausar la corrida no cueste horas.
+    _cp = ckpt_path(cache_dir, sym, session, profile_key, tf)
+    if os.path.exists(_cp):
+        try:
+            with open(_cp, 'rb') as _f:
+                _r = pickle.load(_f)
+            _r['from_ckpt'] = True
+            return _r
+        except Exception:
+            pass          # checkpoint corrupto -> se recalcula
+
+    if low_prio:
+        set_low_priority()
 
     import logging
     logging.disable(logging.CRITICAL)
@@ -319,7 +362,7 @@ def run_job(job):
     p_long = (n_long / n) if n else 0.5
     control = random_control(n, p_long, candles, spec, profile, pip, sym, session)
 
-    return {
+    _out = {
         'symbol': sym, 'session': session, 'n': n, 'n_err': n_err,
         'netos': np.asarray(tr_neto, dtype=np.float32),
         'times': np.asarray(tr_t, dtype=np.int64),
@@ -330,7 +373,16 @@ def run_job(job):
         't_first': candles[WARMUP]['time_unix'],
         't_last': candles[-1]['time_unix'],
         'secs': round(time.perf_counter() - t0, 1),
+        'from_ckpt': False,
     }
+
+    try:
+        with open(_cp, 'wb') as _f:
+            pickle.dump(_out, _f, protocol=4)
+    except Exception:
+        pass              # no poder cachear no debe tumbar el job
+
+    return _out
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -471,6 +523,10 @@ def main():
     ap.add_argument('--symbols', default=','.join(SYMBOLS))
     ap.add_argument('--cache-dir', default=os.path.join(ROOT, '.cache_fase2'))
     ap.add_argument('--build-cache', action='store_true')
+    ap.add_argument('--low-priority', action='store_true',
+                    help='corre en prioridad IDLE para poder usar la maquina')
+    ap.add_argument('--reset-ckpt', action='store_true',
+                    help='borra los checkpoints de esta combinacion y recalcula todo')
     ap.add_argument('--out', default=os.path.join(ROOT, 'docs', 'fase2_resultado'))
     a = ap.parse_args()
 
@@ -512,8 +568,26 @@ def main():
         from src.optimizer.auto_tuner import DEFAULT_PARAMS
         params, params_diff = dict(DEFAULT_PARAMS), {}
 
-    jobs = [(sym, ses, cache_dir, params, a.profile, a.tf)
+    if a.reset_ckpt:
+        import glob as _glob
+        _pat = os.path.join(cache_dir, 'ckpt',
+                            f'v{LOGIC_VERSION}_{a.tf}_{a.profile}_*.pkl')
+        _n = 0
+        for _f in _glob.glob(_pat):
+            os.remove(_f); _n += 1
+        logger.info(f"--reset-ckpt: {_n} checkpoints borrados")
+
+    if a.low_priority:
+        logger.info("prioridad IDLE (se puede usar la maquina; tarda mas de reloj)"
+                    if set_low_priority() else "no pude bajar la prioridad")
+
+    _hechos = sum(1 for ses in sessions for sym in usables
+                  if os.path.exists(ckpt_path(cache_dir, sym, ses, a.profile, a.tf)))
+    jobs = [(sym, ses, cache_dir, params, a.profile, a.tf, a.low_priority)
             for ses in sessions for sym in usables]
+    if _hechos:
+        logger.info(f"CHECKPOINT: {_hechos} de {len(jobs)} jobs ya calculados "
+                    f"-> se reusan, no se recalculan")
     logger.info(f"FASE B — {len(jobs)} jobs ({len(usables)} pares x {len(sessions)} "
                 f"sesiones), {a.workers} workers, perfil={a.profile}")
 
@@ -524,8 +598,9 @@ def main():
             results.append(r)
             el = time.perf_counter() - t0
             eta = el / i * (len(jobs) - i)
+            _tag = 'ckpt' if r.get('from_ckpt') else f"{r['secs']}s"
             logger.info(f"[{i}/{len(jobs)}] {r['symbol']}/{r['session']} "
-                        f"n={r['n']} ({r['secs']}s) | ETA {eta/3600:.1f} h")
+                        f"n={r['n']} ({_tag}) | ETA {eta/3600:.1f} h")
 
     logger.info("FASE C — agregando y evaluando")
     por_sesion = {}
