@@ -227,6 +227,22 @@ def run_job(job):
     from src.analyzer.technical import TechnicalAnalyzer
     import src.analyzer.technical as tech_mod
 
+    # detect_structure_signals() llama get_setup_win_rates() UNA VEZ POR VELA, y
+    # esa funcion abre SQLite y corre 3 consultas contra la DB de PRODUCCION.
+    # Con 14 workers x ~180 velas/seg eran miles de conexiones por segundo: los
+    # workers pasaban el 66% del tiempo esperando I/O (23,7 min de CPU en 69 de
+    # reloj).
+    #
+    # Pero el problema grave no era la velocidad: AIdan opera y ESCRIBE en esa
+    # misma DB mientras el backtest corre => el valor iria cambiando durante las
+    # horas de corrida y la medicion no seria reproducible.
+    #
+    # Se toma UN snapshot al arrancar el job y se congela. Es a la vez mas rapido
+    # y mas correcto: un backtest tiene que medir contra un estado fijo.
+    import src.common.db as _dbmod
+    _wr_snapshot = _dbmod.get_setup_win_rates()
+    _dbmod.get_setup_win_rates = lambda: _wr_snapshot
+
     class _FakeTuner:
         def __init__(self, *a, **k):
             pass
