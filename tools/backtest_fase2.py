@@ -102,6 +102,32 @@ _CACHE = None                    # seteado en main / worker init
 # FASE A — cache de velas (proceso padre, unica vez que se habla con MT5)
 # ═══════════════════════════════════════════════════════════════════════════
 
+def fetch_with_retry(mt5, sym, tf_attr, count, want, logger,
+                     tries=30, wait=8):
+    """MT5 baja la historia de forma ASINCRONA: el primer pedido de un simbolo
+    que todavia no esta en cache devuelve 0 velas (o unas pocas) mientras el
+    terminal la descarga en background.
+
+    Sin este reintento, 25 de 26 pares se excluirian por 'falta de historia'
+    cuando la historia EXISTE — un artefacto de medicion que habria contaminado
+    el universo del test entero. Cada pedido ademas empuja al terminal a seguir
+    bajando, asi que reintentar es tambien lo que dispara la descarga.
+    """
+    best, best_n = None, 0
+    for k in range(tries):
+        r = mt5.copy_rates_from_pos(sym, tf_attr, 0, count)
+        n = 0 if r is None else len(r)
+        if n > best_n:
+            best, best_n = r, n
+        if best_n >= want:
+            return best
+        if k == 0 or (k + 1) % 5 == 0:
+            logger.info(f"  {sym}: esperando descarga... {best_n}/{want} "
+                        f"(intento {k+1}/{tries})")
+        time.sleep(wait)
+    return best
+
+
 def build_cache(symbols, tf, count, cache_dir, logger):
     import MetaTrader5 as mt5
     import numpy as np
@@ -117,11 +143,12 @@ def build_cache(symbols, tf, count, cache_dir, logger):
             manifest[sym] = {'error': 'symbol_info None'}
             logger.warning(f"{sym}: symbol_info None -> EXCLUIDO")
             continue
-        rates = mt5.copy_rates_from_pos(sym, tf_attr, 0, count)
+        rates = fetch_with_retry(mt5, sym, tf_attr, count, MIN_CANDLES, logger)
         n = 0 if rates is None else len(rates)
         if n < MIN_CANDLES:
-            manifest[sym] = {'error': f'solo {n} velas {tf} (< {MIN_CANDLES})'}
-            logger.warning(f"{sym}: solo {n} velas {tf} -> EXCLUIDO")
+            manifest[sym] = {'error': f'solo {n} velas {tf} (< {MIN_CANDLES}) '
+                                      f'tras 30 reintentos'}
+            logger.warning(f"{sym}: solo {n} velas {tf} tras reintentar -> EXCLUIDO")
             continue
         np.save(os.path.join(cache_dir, f'{sym}.npy'), rates)
         with open(os.path.join(cache_dir, f'{sym}.spec.json'), 'w') as f:
@@ -440,7 +467,7 @@ def main():
     _h.setFormatter(logging.Formatter('%(asctime)s %(message)s', '%H:%M:%S'))
     logger.addHandler(_h)
 
-    assert_sessions_match_prod(logger)     # falla fuerte si prod cambio la tabla
+    assert_sessions_match_prod()           # falla fuerte si prod cambio la tabla
 
     cache_dir = os.path.join(a.cache_dir, f'{a.tf}_{a.candles}')
     syms = [s.strip().upper() for s in a.symbols.split(',') if s.strip()]
