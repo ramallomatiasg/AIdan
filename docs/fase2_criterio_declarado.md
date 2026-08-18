@@ -175,6 +175,20 @@ pase 1 y 2 pero no 4 **no es un edge: es ruido con n grande.**
 
 ---
 
+## ENMIENDA 4 — antes de correr el secundario de M5
+
+**Qué faltaba:** §7 declara el secundario como *"M5 / 500.000 velas / `naive`"* pero **no fijó el
+perfil de SL/TP/hold**, y el perfil `live` del primario son los números de **M15** (SL 15 / TP 60).
+
+**Correrlo así habría medido un sistema que no existe.** El perfil vivo de M5 es otro, leído de
+`get_active_profile()` el 18-ago: **SL 3,5p · TP 20p · expiry 15 min (= 3 velas M5) ·
+min_confidence 60**. Se agrega como perfil propio (`m5live`).
+
+**Sin resultados de M5 a la vista.** El primario (M15) ya está cerrado y publicado; esto no lo
+toca ni lo re-lee.
+
+---
+
 ## 4. Métrica primaria
 
 **Pooled avg pips/trade neto de comisión y de swap**, sobre todos los trades de los 21 pares.

@@ -83,7 +83,13 @@ PROFILE_LIVE = {'kind': 'fixed', 'sl_pips': 15.0, 'tp_pips': 60.0,
 # SECUNDARIO: el del arnes de Fase 1, para comparabilidad manzana-con-manzana.
 PROFILE_ATR = {'kind': 'atr', 'sl_atr_mult': 1.2, 'rr': 2.0,
                'hold': 10, 'min_confidence': 60}
-PROFILES_F2 = {'live': PROFILE_LIVE, 'atr': PROFILE_ATR}
+# SECUNDARIO M5: el perfil VIVO de M5, que NO es el de M15. Leido de
+# get_active_profile() el 18-ago: min_confidence 60, SL 3,5p, TP 20p, expiry 15min
+# (= 3 velas M5). Correr M5 con los numeros de M15 (SL 15 / TP 60) habria medido un
+# sistema que no existe — ver ENMIENDA 4 del criterio.
+PROFILE_M5_LIVE = {'kind': 'fixed', 'sl_pips': 3.5, 'tp_pips': 20.0,
+                   'hold': 3, 'min_confidence': 60}
+PROFILES_F2 = {'live': PROFILE_LIVE, 'atr': PROFILE_ATR, 'm5live': PROFILE_M5_LIVE}
 
 TF_MAP = {'M5': 'TIMEFRAME_M5', 'M15': 'TIMEFRAME_M15',
           'H1': 'TIMEFRAME_H1', 'D1': 'TIMEFRAME_D1'}
@@ -487,10 +493,14 @@ def evaluate_session(rows):
     ctrl_pooled.sort()
     p95 = ctrl_pooled[int(0.95 * len(ctrl_pooled))] if ctrl_pooled else None
 
-    c1 = pooled > 0
-    c2 = ci_lo is not None and ci_lo > 0
-    c3 = h1.size > 0 and h2.size > 0 and h1.mean() > 0 and h2.mean() > 0
-    c4 = p95 is not None and pooled > p95
+    # bool() explicito: las comparaciones de numpy devuelven np.bool_, que json NO
+    # sabe serializar (revento la corrida entera en la ultima linea, con los 84 jobs
+    # ya calculados). No se usa default=str en el dump a proposito: eso lo habria
+    # escondido convirtiendo el tipo raro en texto.
+    c1 = bool(pooled > 0)
+    c2 = bool(ci_lo is not None and ci_lo > 0)
+    c3 = bool(h1.size > 0 and h2.size > 0 and h1.mean() > 0 and h2.mean() > 0)
+    c4 = bool(p95 is not None and pooled > p95)
 
     res.update({
         'pooled_neto': round(pooled, 4),
