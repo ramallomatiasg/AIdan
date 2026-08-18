@@ -5,7 +5,7 @@ Ejecuta durante horario off-market (20:00-23:00 UTC).
 Fetch calendario economico del dia siguiente, filtra HIGH impact EUR/USD,
 y para cada evento AMBAS IAs analizan y votan:
 
-  Groq (Llama 70B) = palabra mayor (modelo mas grande/inteligente)
+  Groq (Config.GROQ_MODEL) = palabra mayor (modelo mas grande/inteligente)
   Gemma 4 (local)  = segunda opinion
 
   Ambos de acuerdo operar  -> crear estrategia (conf +10 bonus)
@@ -290,7 +290,7 @@ def _ask_gemma(prompt):
 
 
 def _ask_groq(prompt):
-    """Ask Groq (Llama 70B, cloud) for a plan."""
+    """Ask Groq (Config.GROQ_MODEL, cloud) for a plan."""
     try:
         keys = Config.GROQ_API_KEYS if hasattr(Config, 'GROQ_API_KEYS') else [getattr(Config, 'GROQ_API_KEY', '')]
         keys = [k for k in keys if k]
@@ -304,13 +304,15 @@ def _ask_groq(prompt):
                     'https://api.groq.com/openai/v1/chat/completions',
                     headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
                     json={
-                        'model': Config.GROQ_MODEL or 'llama-3.3-70b-versatile',
+                        'model': Config.GROQ_MODEL or 'openai/gpt-oss-120b',
                         'messages': [
                             {'role': 'system', 'content': 'Eres un planificador experto de trading EUR/USD. Responde SOLO en JSON valido.'},
                             {'role': 'user', 'content': prompt}
                         ],
                         'temperature': 0.3,
-                        'max_tokens': 400,
+                        # v3.56.0 - 400 no alcanza para un modelo de razonamiento.
+                        'max_tokens': 2500,
+                        'reasoning_effort': getattr(Config, 'GROQ_REASONING_EFFORT', 'low'),
                     },
                     timeout=GROQ_TIMEOUT
                 )
@@ -351,7 +353,7 @@ def _ask_groq(prompt):
 
 def _plan_single_event(event, market_context):
     """
-    Both Groq (Llama 70B) and Gemma 4 analyze the event and vote.
+    Both Groq (Config.GROQ_MODEL) and Gemma 4 analyze the event and vote.
     Groq has final say (bigger/smarter model).
 
     Voting:

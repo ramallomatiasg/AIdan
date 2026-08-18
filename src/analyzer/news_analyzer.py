@@ -112,7 +112,22 @@ class NewsAnalyzer:
                 timeout=5
             )
             if resp.status_code == 200:
-                self.logger.info("Groq API available (Llama 70B)")
+                # v3.56.0 - antes alcanzaba con HTTP 200 y se logueaba "available".
+                # El 16-ago Groq dio de baja llama-3.3-70b: la API seguia
+                # respondiendo 200, el arranque decia "Groq API available" y cada
+                # llamada real fallaba 404. Dos dias reportando salud estando roto.
+                # Ahora se verifica que el modelo CONFIGURADO exista de verdad.
+                try:
+                    ids = {m.get("id") for m in resp.json().get("data", [])}
+                except Exception:
+                    ids = set()
+                if ids and Config.GROQ_MODEL not in ids:
+                    self.logger.error(
+                        f"Groq responde pero el modelo {Config.GROQ_MODEL} NO existe "
+                        f"(dado de baja?). Disponibles: {sorted(ids)[:6]} "
+                        f"-> se usa Ollama. Cambiar GROQ_MODEL.")
+                    return False
+                self.logger.info(f"Groq API available ({Config.GROQ_MODEL})")
                 return True
             self.logger.warning(f"Groq API returned {resp.status_code}")
             return False
@@ -745,7 +760,7 @@ REGLAS OBLIGATORIAS:
         }
 
     def _analyze_with_groq(self, news_id, title, summary, entities, tags):
-        """Analiza con Groq API (Llama 70B) con rotación automática de keys."""
+        """Analiza con Groq API (Config.GROQ_MODEL) con rotacion automatica de keys."""
         import requests
         from src.common.config import Config
 
@@ -758,7 +773,7 @@ REGLAS OBLIGATORIAS:
 
         for i, api_key in enumerate(keys):
             try:
-                self.logger.info(f"Analizando noticia #{news_id} con Groq/Llama-70B (key {i+1}/{len(keys)})...")
+                self.logger.info(f"Analizando noticia #{news_id} con Groq/{Config.GROQ_MODEL} (key {i+1}/{len(keys)})...")
 
                 resp = requests.post(
                     'https://api.groq.com/openai/v1/chat/completions',
@@ -770,14 +785,37 @@ REGLAS OBLIGATORIAS:
                             {'role': 'user', 'content': prompt}
                         ],
                         'temperature': 0.3,
-                        'max_tokens': 500,
+                        # v3.56.0 - 500 alcanzaba para Llama pero NO para un modelo
+                        # de razonamiento: gpt-oss gastaba 498 pensando y devolvia
+                        # content vacio con HTTP 200. Medido con effort=low: ~87
+                        # tokens de razonamiento + ~295 de respuesta.
+                        'max_tokens': 3000,
+                        'reasoning_effort': getattr(Config, 'GROQ_REASONING_EFFORT', 'low'),
                         'stream': False
                     },
                     timeout=30
                 )
 
                 if resp.status_code == 200:
-                    result_text = resp.json()['choices'][0]['message']['content']
+                    _j = resp.json()
+                    result_text = _j['choices'][0]['message'].get('content') or ''
+                    # v3.56.0 - un modelo de razonamiento puede devolver HTTP 200 con
+                    # content VACIO (todo el presupuesto se fue en pensar). Eso antes
+                    # se veia igual que "no hay senal" => fallo silencioso. Fail-loud.
+                    if not result_text.strip():
+                        _fr = _j['choices'][0].get('finish_reason')
+                        _rt = (_j.get('usage', {}).get('completion_tokens_details')
+                               or {}).get('reasoning_tokens')
+                        self.logger.error(
+                            f"Groq devolvio content VACIO (finish_reason={_fr}, "
+                            f"reasoning_tokens={_rt}). Subir max_tokens o bajar "
+                            f"GROQ_REASONING_EFFORT.")
+                        return None
+                    # qwen/deepseek meten el razonamiento dentro de <think>
+                    if '<think>' in result_text:
+                        import re as _re
+                        result_text = _re.sub(r'<think>.*?</think>', '',
+                                              result_text, flags=_re.S).strip()
                     self.logger.debug(f"Groq response: {result_text[:200]}")
                     return self._parse_ai_result(news_id, result_text, 'groq')
                 elif resp.status_code == 429 and i < len(keys) - 1:

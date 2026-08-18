@@ -101,3 +101,6 @@ COMO_COMPARTIR.txt
 
 # cache de velas de backtest_fase2.py (cientos de MB, regenerable)
 .cache_fase2/
+
+# backups del .env (contienen keys) — nunca commitear
+.env.bak_*

@@ -125,13 +125,15 @@ def _ask_groq(prompt: str):
                     'https://api.groq.com/openai/v1/chat/completions',
                     headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
                     json={
-                        'model': getattr(Config, 'GROQ_MODEL_CHAT', None) or 'llama-3.1-8b-instant',
+                        'model': getattr(Config, 'GROQ_MODEL_CHAT', None) or 'openai/gpt-oss-20b',
                         'messages': [
                             {'role': 'system', 'content': 'Eres un gestor de salidas de trading EUR/USD. Responde SOLO JSON valido.'},
                             {'role': 'user', 'content': prompt},
                         ],
                         'temperature': 0.2,
-                        'max_tokens': 150,
+                        # v3.56.0 - 150 era imposible para un modelo de razonamiento.
+                        'max_tokens': 1000,
+                        'reasoning_effort': getattr(Config, 'GROQ_REASONING_EFFORT', 'low'),
                     },
                     timeout=GROQ_TIMEOUT,
                 )

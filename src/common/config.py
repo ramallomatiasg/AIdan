@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.55.0"
+APP_VERSION = "3.56.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -39,9 +39,20 @@ class Config:
         "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",
     ]
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", GROQ_API_KEYS[0])
-    GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    # v3.56.0 - llama-3.3-70b-versatile y llama-3.1-8b-instant fueron DADOS DE
+    # BAJA por Groq el 16-ago-2026. Verificado contra GET /openai/v1/models: ya no
+    # estan. Desde el 17-ago el log muestra 404 model_not_found y todo cae a Ollama.
+    # Reemplazos elegidos MIDIENDO contra el prompt real de news, no por catalogo:
+    #   gpt-oss-120b  1,6s, parsea OK  <- elegido analitico (news, pre-planner)
+    #   gpt-oss-20b   1,1s, parsea OK  <- elegido chat (dashboard, exit advisor)
+    #   qwen3.6-27b   7,2s, 10x tokens <- descartado
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     # Faster, smaller Groq model for dashboard chat — non-critical, latency-sensitive.
-    GROQ_MODEL_CHAT = os.getenv("GROQ_MODEL_CHAT", "llama-3.1-8b-instant")
+    GROQ_MODEL_CHAT = os.getenv("GROQ_MODEL_CHAT", "openai/gpt-oss-20b")
+    # Los gpt-oss son modelos de RAZONAMIENTO: emiten tokens de pensamiento antes de
+    # la respuesta. Sin esta perilla en low gastaban 498 de 500 tokens pensando y
+    # devolvian content VACIO con HTTP 200 (fallo silencioso). Con low: ~87 tokens.
+    GROQ_REASONING_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "low")
     # Local model for non-blocking tasks (audit, post-trade, news pre-filter).
     # qwen2.5:7b chosen after benchmarking vs gemma4: ~3x faster (7s vs 20s),
     # same filter quality (neither adds significant signal). See bench_audit_*.csv.

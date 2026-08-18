@@ -58,6 +58,26 @@ con la razón del cierre.
 - [ ] **🔴 ~28 AGO — VEREDICTO news v3.51.0 (criterio pre-declarado, NO mover).** Medir sobre los news creados desde el 7-ago (n≥15, ~4/semana): **(a) ¿los ganadores pasaron de recorrer 40% del TP a ≥59%?** **(b) ¿los perdedores siguen en ~53% del SL o se estiraron?** (si se estiran, la perilla 2 no está haciendo su trabajo). (c) PnL y WR del track. Query: comparar `|pips|` contra su propio `stop_loss`/`take_profit` por fila (los flags `sl_hit`/`tp_hit` son **tautológicos**, se derivan de `result`+`pips` — no usarlos). **Si no se cumple → `NEWS_MIN_EXPIRY_MIN=15`** (env, sin rebuild) y news vuelve a como estaba. *Decisión del user 7-ago: news NO se apaga, se arregla.*
 - [ ] **🟢 ~1 SEP — FORWARD del piso de ATR de m15 (v3.55.0, `M15_ATR_FLOOR=8`, activo desde el 16-ago).** El hint de "m15 × expansión" creció hasta pasar el gate y se activó: **ATR ≤8p = n=90, WR 27,8%, −$75,59 · ATR >8p = n=31, WR 51,6%, +$18,80** (p=0,0042, CI95 [33,1-69,8%] sin cruzar el 27,8% del comparador, mismo período los dos buckets, ATR clasificado al entrar). El diagnóstico completo: **m15 necesita ~40,5% de WR para empatar** (ganador medio +7,8p, perdedor −5,3p) y en chop saca 28%. **Lo que la revisión adversarial del propio hallazgo encontró y hay que tener presente al leer el forward: el lado BUENO es frágil** — de los +$18,80 unos +$19,49 salen de 2 días, sin ellos queda en −$0,69; sacando los 3 mejores ganadores, −$10,88. **El lado malo sí aguanta** (pierde en las dos mitades: 28,9% y 26,7%). ⇒ **La expectativa correcta es "m15 deja de sangrar", NO "m15 pasa a rentable".** Medir: **(a)** ¿la frecuencia de m15 cayó ~74% como se estimó (3,27 → 0,84 trades/día)? **(b)** ¿el PnL de m15 se acercó a cero, o el bucket >8p también empezó a perder (= el hallazgo era el artefacto de 2 días)? **(c)** ¿cuántos skips loguea (`ATR ... < piso ... -> sin scan (chop)`, 1 por hora)? **Si el bucket que queda pierde igual → `M15_ATR_FLOOR=5.0`** (env, sin rebuild) y m15 vuelve a como estaba. *No afinar el umbral sobre esta muestra: el 8 venía pre-declarado desde el 17-jul; buscar el mejor número sería overfit.*
 
+**🧪 FASE 2 EN CURSO (18 Ago, corriendo) — ¿el detector tiene edge en el TIMEFRAME DONDE OPERA?**
+Fase 1 (`579cc22`) midió `detect_structure_signals` en velas **D1** sobre 21 pares y concluyó que
+el problema es el **generador de señal** — que también alimenta structure/m15/h1 en vivo. **Esa
+última parte es una EXTRAPOLACIÓN, no una medición**: los tracks vivos corren sobre M5/M15/H1.
+Fase 2 mide eso: **M15, 500k velas/par (~20 años), los MISMOS 21 pares** (los 5 que quedaron fuera
+por historia corta son exactamente los mismos 5 que Fase 1 descartó ⇒ comparación directa).
+Criterio + 3 enmiendas commiteados ANTES de correr: `docs/fase2_criterio_declarado.md`
+(`56bbba4`, `d631703`, `2846de6`). **Las 4 condiciones, en las 4 sesiones**: pooled > 0 · CI95
+inferior > 0 · positivo en las dos mitades · **por encima del percentil 95 de un control de
+entradas ALEATORIAS** (el que le faltó a Fase 1b). *Ojo al leer*: con n ~4,7M por sesión el CI es
+minúsculo ⇒ las condiciones 1 y 2 son casi automáticas; **el poder discriminante está en el
+control aleatorio**. Pasa 1 y 2 pero no 4 = ruido con muestra gigante, no edge.
+**Acción comprometida si NO pasa: se apagan structure/m15/h1 y se pasa a SMC.** Si pasa, el
+problema vuelve a ser costo/gestión (reparable) — y un "pasa" es permiso para investigar, NO para
+operar. **4 bugs encontrados en el arnés antes de tener números** (todos de la familia
+"falla en silencio y devuelve algo plausible"): `load_live_params` devolvía tupla y el `except` se
+lo tragaba · MT5 baja la historia async ⇒ iba a excluir 25 de 26 pares como "sin datos" · el
+detector consultaba la DB de PRODUCCIÓN una vez por vela (66% del tiempo en I/O, y el valor
+cambiaba mientras AIdan escribía ⇒ irreproducible) · `except` sin fail-loud.
+
 **🔬 REVISIÓN CRÍTICA DEL CEREBRO (15 Jun, workflow 5 frentes + verificador adversarial; los 3 tracks COMPARTEN la lógica) — VEREDICTO: falla de DISEÑO, no bugs sueltos.** Un patrón roto se repite: **constantes en pips de M5 + confianza que suma factores colineales**, heredado igual por M15/H1 (las subclases solo cambian `_fetch_candles`+profile). Hallazgos VERIFICADOS por mí en código:
 - [ ] **[EL #1, hecho de código no estadística] El R:R que el sistema cree tener es FALSO.** El cap `tp_cap = max(ATR,2)*2` (`technical.py:1430`) recorta el TP nominal. Tracé los 3: **M5 TP 20p→~5p (R:R real 1:1.4)**, **M15 60p→~18p (1:1.2)**, **H1 100p→~48p (1:1.2)**. Con 37% WR + comisión ~1.3p → pérdida matemática (hace falta ~46% WR para empatar a 1:1.2). **Explica mecánicamente "gana poco / avg win 4p".** Todo (sizing, BE, trailing, PM-arm) razona sobre un TP que el motor borra. Ojo: el cap está A PROPÓSITO (20p nunca pegaba en 15min M5) → el fix es **escalarlo por timeframe/expiry**, NO sacarlo (eso de paso arregla H1/M15, donde el cap es claramente erróneo: H1 SÍ puede recorrer 100p en 180min).
 - [ ] **[#2, por qué H1 es el PEOR PF 0.36] SL "adaptativo" es mentira en M15/H1.** `final_sl = max(floor, min(cap, ATR*0.8))` con floor=15p/40p domina siempre al ATR (`technical.py:1357-1359`) → **SL FIJO**, no se adapta. Y TODAS las constantes (breakout_dist_max 7p, proximities 12-15p, cluster 5p, volatility 10/4, momentum_consol 10p) están en pips M5 → en velas H1 (12-30p) son sub-vela → el cerebro dispara fuera de fase. **El fix: escalar todo por ATR/TF — solo toca H1/M15.**
@@ -320,6 +340,7 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 | Version | Cambio | Estado |
 |---|---|---|
+| v3.56.0 | **Groq dio de baja los 2 modelos que usaba AIdan** (16-ago). Reemplazo medido: `gpt-oss-120b` / `gpt-oss-20b` + `reasoning_effort=low` + el health check ahora verifica que el modelo EXISTA | **actual** |
 | v3.55.0 | **Piso de ATR de m15 de 5 a 8** (`M15_ATR_FLOOR`, env): m15 pierde en chop de forma consistente (≤8p: n=90, WR 27,8%, −$75,59). Frena la sangría, no lo vuelve rentable | **actual** |
 | v3.54.1 | Baseline del D1 corregido: el titular corría con params default y una sola sesión. Re-medido con params vivos + sweep de las 4 sesiones (read-only) | vigente |
 | v3.54.0 | **Track D = swing DIARIO (D1) en SHADOW** — 4to track, nace de 7 años de velas (H4 refutado, D1 PF neto 1,40). No toca `auto_strategies`. | vigente |

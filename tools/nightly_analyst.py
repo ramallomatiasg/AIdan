@@ -7,7 +7,7 @@ Workflow:
    ejecuta con modelo cloud only (no usa Ollama local para evitar VRAM contention).
 2. Detecta modelo LLM disponible segun jerarquia:
    1. Claude Code CLI (Opus 4.7 1M) — best
-   2. Groq llama-3.3-70b-versatile — cloud free fallback
+   2. Groq openai/gpt-oss-120b — cloud free fallback
    3. Ollama deepseek-r1:14b (solo si VRAM libre)
    4. Ollama deepseek-r1:7b
    5. Ollama qwen2.5:7b
@@ -128,7 +128,7 @@ def detect_model(force_model=None):
         if force_model == 'opus' and _claude_cli_available():
             return 'opus', 'claude_cli'
         if force_model == 'groq' and _groq_available():
-            return 'llama-3.3-70b-versatile', 'groq'
+            return 'openai/gpt-oss-120b', 'groq'
         if force_model.startswith('ollama:'):
             mname = force_model.split(':', 1)[1]
             if _ollama_available_with_model(mname):
@@ -140,7 +140,7 @@ def detect_model(force_model=None):
     if _claude_cli_available():
         return 'opus', 'claude_cli'
     if _groq_available():
-        return 'llama-3.3-70b-versatile', 'groq'
+        return 'openai/gpt-oss-120b', 'groq'
 
     aidan_running = _aidan_running()
     vram_gb = _vram_free_gb()
@@ -344,7 +344,7 @@ def invoke_claude_cli(stats_json, prompt_template):
         raise RuntimeError("claude CLI timeout (10 min)")
 
 
-def invoke_groq(stats_json, prompt_template, model_name='llama-3.3-70b-versatile'):
+def invoke_groq(stats_json, prompt_template, model_name='openai/gpt-oss-120b'):
     """Invoca Groq API. Returns LLM response as text."""
     from src.common.config import Config
     import requests
@@ -360,6 +360,7 @@ def invoke_groq(stats_json, prompt_template, model_name='llama-3.3-70b-versatile
             ],
             'temperature': 0.2,
             'max_tokens': 4096,
+            'reasoning_effort': 'low',   # v3.56.0 - gpt-oss razona
         },
         timeout=120,
     )
@@ -598,7 +599,7 @@ def main():
 
     _chain = [(kind, model_id)]
     if kind != 'groq' and _groq_available():
-        _chain.append(('groq', 'llama-3.3-70b-versatile'))
+        _chain.append(('groq', 'openai/gpt-oss-120b'))
     if kind != 'ollama':
         try:
             _chain.append(('ollama', Config.GEMMA_MODEL))

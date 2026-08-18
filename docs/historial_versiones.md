@@ -6,6 +6,54 @@ En CLAUDE.md queda la tabla corta de las últimas versiones y un puntero acá.
 
 ---
 
+## v3.56.0 — Groq dio de baja los dos modelos que usaba AIdan (18 Ago 2026)
+
+**Cómo se detectó:** el user reenvió un mail que decía que `llama-3.3-70b-versatile` se daba de
+baja el 16-ago. El mail venía de `developer@groq.co` (**`.co`, no `.com`**) y Gmail lo marcaba como
+sospechoso ⇒ **no se actuó sobre el mail**: se verificó contra `GET /openai/v1/models`. El
+contenido resultó cierto. Los dos modelos que usaba AIdan ya no existen:
+`llama-3.3-70b-versatile` (news, pre-planner, nightly analyst) y `llama-3.1-8b-instant`
+(chat del dashboard, exit advisor).
+
+**Impacto real:** desde el 17-ago el log muestra `404 model_not_found` en cada llamada y **el
+fallback a Ollama venía funcionando** (`Groq failed, falling back to Ollama` → `qwen2.5:7b`). O sea
+que AIdan no se cayó: degradó, como estaba diseñado.
+
+**El bug que lo escondió dos días:** `_check_groq()` pedía la lista de modelos y con HTTP 200
+logueaba `"Groq API available (Llama 70B)"` **sin verificar que el modelo configurado estuviera en
+la lista**. Fallaba ABIERTO. Ahora compara contra `Config.GROQ_MODEL` y, si no está, loguea el
+error con los disponibles y devuelve False. Verificado con test de mutación.
+
+**La trampa que casi se comió el arreglo:** los reemplazos son modelos de **razonamiento**. Con el
+`max_tokens: 500` que tenía news, `gpt-oss-120b` gastaba **498 tokens pensando y devolvía
+`content` VACÍO con HTTP 200** ⇒ el parser devolvía None, AIdan caía a Ollama para siempre y el log
+decía que Groq estaba bien. Un cambio de modelo sin probar habría dejado eso andando.
+
+**Elección medida, no por catálogo** (mismo prompt real de news, mismo parser):
+
+| modelo | config | tiempo | parsea |
+|---|---|---|---|
+| **gpt-oss-120b** | `max_tokens=3000`, `reasoning_effort=low` | 1,6 s | sí — score 78 ALTA |
+| **gpt-oss-20b** | idem | 1,1 s | sí |
+| qwen3.6-27b | `max_tokens=3000` | 7,2 s, 10× tokens | sí, pero descartado |
+
+**Cambios:** `GROQ_MODEL` → `openai/gpt-oss-120b`, `GROQ_MODEL_CHAT` → `openai/gpt-oss-20b`,
+nueva perilla `GROQ_REASONING_EFFORT` (default `low`, ~87 tokens de razonamiento en vez de 498).
+`max_tokens` subido en los 4 call sites que lo tenían chico (news 500→3000, pre-planner 400→2500,
+exit advisor 150→1000, chat 600→2000) + `reasoning_effort` en los 5. Se limpia `<think>` en news.
+**Content vacío con HTTP 200 ahora es error explícito**, no un None silencioso. Sacados los
+`Llama 70B` hardcodeados de logs y docstrings (6 lugares) — eran parte del mismo problema.
+
+**Ojo — el `.env` pisaba todo:** tenía `GROQ_MODEL=llama-3.3-70b-versatile`, así que el cambio en
+`config.py` no habría tenido efecto. Actualizado (backup en `.env.bak_20260818`) + `.env.example`.
+
+**Verificado por los caminos reales del código**, no solo contra la API: config, health check
+(True con el bueno, **False con el muerto** — mutación), `_analyze_with_groq` (ALTA/PUT/78/62,5%),
+y `_call_groq` del dashboard. `exit_advisor` quedó con el cambio aplicado pero **sin probar por
+llamada** (su payload es idéntico en forma al de los otros).
+
+---
+
 ## Versiones recientes (changelog top-of-mind)
 
 | Version | Cambio | Estado |

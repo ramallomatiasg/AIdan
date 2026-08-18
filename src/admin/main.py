@@ -27,10 +27,10 @@ from src.common.db import today_ar
 logger = setup_logging(__name__, Config.LOG_LEVEL)
 
 
-# Groq API helper (free, Llama 70B)
+# Groq API helper (free; modelo en Config.GROQ_MODEL_CHAT / GROQ_MODEL)
 _groq_status = {"ok": True, "last_error": "", "last_error_time": None}
 
-def _call_groq(messages, temperature=0.75, max_tokens=600, model=None):
+def _call_groq(messages, temperature=0.75, max_tokens=2000, model=None):
     """Call Groq API with automatic key rotation on rate limit.
 
     model: defaults to GROQ_MODEL_CHAT (faster llama-3.1-8b-instant for chat use cases).
@@ -53,6 +53,8 @@ def _call_groq(messages, temperature=0.75, max_tokens=600, model=None):
                     'messages': messages,
                     'temperature': temperature,
                     'max_tokens': max_tokens,
+                    # v3.56.0 - gpt-oss razona antes de responder.
+                    'reasoning_effort': getattr(Config, 'GROQ_REASONING_EFFORT', 'low'),
                     'stream': False
                 },
                 timeout=30
