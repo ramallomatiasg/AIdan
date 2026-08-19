@@ -65,8 +65,15 @@ from tools.backtest_fase2 import (  # noqa: E402
     PROFILES_F2, DEDUP_SEC, WARMUP, load_symbol, set_low_priority,
 )
 
-HORIZONS = [1, 2, 3, 6, 12, 24, 48]
-CONTROL_REPS = 20        # menos que en el test: acá se mide una FORMA, no un p-value
+# v2 (18-ago, EXPLORATORIO — declarado como tal): el smoke sobre EURUSD mostro que
+# el close del detector NO cruza al azar en ningun horizonte (=> pullback REFUTADO
+# por el criterio pre-declarado) pero que empeora MONOTONAMENTE: -0,03 a 1 vela y
+# -0,23 a 48. Se extienden los horizontes para responder una pregunta NUEVA, que no
+# es parte del test declarado: ¿el anti-edge sigue creciendo, y llega a superar los
+# ~0,9 pips de costo? A 48 velas vale 0,23; harian falta ~4x mas.
+HORIZONS = [1, 2, 3, 6, 12, 24, 48, 96, 192, 384]
+CONTROL_REPS = 5         # con n~200k senales por simbolo la media ya es precisa;
+                         # aca se mide una FORMA, no se necesita un p-value
 
 
 def excursion(candles, i, direction, pip, horizons):
