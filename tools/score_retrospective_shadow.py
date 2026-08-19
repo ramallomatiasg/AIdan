@@ -50,6 +50,58 @@ def wilson(wins, n, z=1.96):
     return (round(100 * (c - m) / d, 1), round(100 * (c + m) / d, 1))
 
 
+def _report_missed_factor():
+    """v3.57.2 — el otro sentido del lazo: que dice el post-trade que la entrada
+    NO estaba mirando.
+
+    Vive en su propia funcion y se llama en TODAS las salidas a proposito: es
+    independiente de que haya filas de retrospectiva, y si quedaba dentro del
+    flujo principal el early-return de "sin filas todavia" lo dejaba muerto.
+
+    Se lee la ADHERENCIA del modelo antes que el contenido: si un solo valor
+    domina, esta contestando por costumbre y el campo no sirve — es el hallazgo
+    del A/B de v3.53.7 (timing_assessment constante en el 100%).
+
+    SOLO se cuentan los analisis producidos por v3.57.2+, identificados por que su
+    `raw_response` menciona el campo. Las ~210 filas anteriores tienen la columna
+    en '' porque la migracion la agrego con DEFAULT '' — contarlas daba "100%
+    invalido" y disparaba la alarma sobre data que precede a la feature. Se
+    detecta por contenido y no por fecha para no hardcodear un cutover.
+    """
+    conn = sqlite3.connect(f'file:{DB}?mode=ro', uri=True)
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(post_trade_analysis)")]
+        if 'missed_factor' not in cols:
+            print("\n-- missed_factor --\n  columna todavia no migrada "
+                  "(arranca AIdan una vez: init_db la agrega)")
+        else:
+            mf = conn.execute("""
+                SELECT COALESCE(NULLIF(missed_factor,''),'(invalido/vacio)') AS mf, COUNT(*)
+                FROM post_trade_analysis
+                WHERE raw_response LIKE '%missed_factor%'
+                GROUP BY 1 ORDER BY 2 DESC
+            """).fetchall()
+            tot = sum(n for _, n in mf)
+            print("\n-- missed_factor: que NO estaba mirando la entrada (v3.57.2+) --")
+            if not tot:
+                print("  todavia sin analisis post-trade del codigo nuevo (v3.57.2+).\n"
+                      "  Las filas anteriores no tenian el campo y no se cuentan.")
+            else:
+                for v, n in mf:
+                    print(f"  {v:<22} {n:>4}  ({100.0*n/tot:4.1f}%)")
+                top = max(n for _, n in mf)
+                if top / tot >= 0.80:
+                    print(f"\n  !! un solo valor cubre el {100.0*top/tot:.0f}%: el modelo esta "
+                          f"contestando por costumbre, no juzgando. Mismo patron que las\n"
+                          f"     categoricas que v3.53.7 tuvo que sacar del LLM y pasar a codigo.")
+                inval = dict(mf).get('(invalido/vacio)', 0)
+                if tot and inval / tot >= 0.30:
+                    print(f"\n  !! el {100.0*inval/tot:.0f}% quedo invalido/vacio: el modelo no "
+                          f"respeta la lista cerrada. Revisar el prompt antes de usar el campo.")
+    finally:
+        conn.close()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--since', default='', help='YYYY-MM-DD (default: todo)')
@@ -81,6 +133,7 @@ def main():
 
     if not rows:
         print("Sin filas todavia. La retrospectiva escribe una por senal creada.")
+        _report_missed_factor()
         return 0
 
     print(f"=== RETROSPECTIVA PRE-DECISION — shadow ===")
@@ -128,6 +181,7 @@ def main():
     print("\n-- gate pre-declarado --")
     if not c or not o:
         print("  n insuficiente en algun lado: no se concluye. Volver a correr mas adelante.")
+        _report_missed_factor()
         return 0
 
     cond = [
@@ -164,6 +218,8 @@ def main():
         print("  !! 0 consultas: el loop esta escrito pero NO se esta usando. Es el "
               "sintoma exacto de los 7 mecanismos de aprendizaje ya construidos y "
               "desconectados. Revisar el match por familia de setup.")
+
+    _report_missed_factor()
     return 0
 
 

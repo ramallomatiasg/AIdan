@@ -95,6 +95,18 @@ contra la DB real, no leyéndolo.
 lote sale de `sl_pips` ⇒ el nudge es frecuencia- y tamaño-neutro **pero hoy INERTE sobre la
 ejecución**. Su valor es el registro + la muestra. Leer con
 `python tools/score_retrospective_shadow.py` (**regla de shadow: traerlo sin que el user lo pida**).
+**v3.57.1-.2 (mismo dia, modo autonomo):** la leccion **ya no depende de que Ollama este arriba**
+(se deriva tambien en `archive_trade`, que corre para todo trade cerrado y tiene la verdad del
+broker; los 2 paths coexisten porque `add_directional_lesson` es idempotente por `strategy_id`) —
+sin eso, un lazo 100% determinista quedaba de rehen de un 7B y `directional_lessons` dejaba de
+crecer **sin que nada falle**, que es la clase de bug que ya mato a M15, SMC y al reversal. Y el
+**lazo pasa a ser bidireccional**: el post-trade ahora recibe el razonamiento con el que se entro y
+devuelve `missed_factor` (lista cerrada, columna propia) = que condicion del contexto NO estaba
+mirando la entrada. *Al modelo se le pasan los NUMEROS de la comparacion, no el veredicto: si
+leyera "la opuesta pagaba" lo repetiria como loro (el error de la hoja de respuestas de v3.53.7).*
+**Antes de usar `missed_factor` mirar su ADHERENCIA** (el scorer la imprime y avisa): si un solo
+valor cubre >=80%, el modelo contesta por costumbre y el campo es ruido.
+
 **Gate pre-declarado para pasar a `active`, las 4:** n>=25 `contrarian` cerrados · WR por debajo del
 comparador · CI95 de Wilson que NO cruza · PnL/trade negativo y peor. **Si con n>=40 sigue sin
 separar ⇒ `RETRO_MODE=off`, no buscarle la vuelta.** *Ojo al leer: que `aligned` rinda bien NO es
@@ -396,7 +408,9 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 | Version | Cambio | Estado |
 |---|---|---|
-| v3.57.0 | **Retrospectiva PRE-decision en shadow** (`RETRO_MODE`) + se **cablea** `adjust_setup_confidence` (existia desde v3.31.0 y no se llamaba de ningun lado) + loop `directional_lessons` + toggle `ENABLE_NEWS_TRACK` (default ON) | **actual** |
+| v3.57.2 | El **post-trade ve el razonamiento de la entrada** (`{retro_block}` + campo `missed_factor` con lista cerrada, como COLUMNA): cierra el lazo en el sentido que faltaba | **actual** |
+| v3.57.1 | La **leccion direccional deja de depender de Ollama** — se deriva tambien en `archive_trade` (los 2 paths coexisten, idempotente por `strategy_id`) | vigente |
+| v3.57.0 | **Retrospectiva PRE-decision en shadow** (`RETRO_MODE`) + se **cablea** `adjust_setup_confidence` (existia desde v3.31.0 y no se llamaba de ningun lado) + loop `directional_lessons` + toggle `ENABLE_NEWS_TRACK` (default ON) | vigente |
 | v3.56.0 | **Groq dio de baja los 2 modelos que usaba AIdan** (16-ago). Reemplazo medido: `gpt-oss-120b` / `gpt-oss-20b` + `reasoning_effort=low` + el health check ahora verifica que el modelo EXISTA | vigente |
 | v3.55.0 | **Piso de ATR de m15 de 5 a 8** (`M15_ATR_FLOOR`, env): m15 pierde en chop de forma consistente (≤8p: n=90, WR 27,8%, −$75,59). Frena la sangría, no lo vuelve rentable | vigente |
 | v3.54.1 | Baseline del D1 corregido: el titular corría con params default y una sola sesión. Re-medido con params vivos + sweep de las 4 sesiones (read-only) | vigente |
@@ -978,7 +992,16 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 ---
 ---
 
-**Última actualización**: 19 Ago 2026 — **v3.57.0: la retrospectiva PRE-decisión (en shadow), el
+**Última actualización**: 19 Ago 2026 — **v3.57.2: el lazo de decision queda cerrado en los DOS
+sentidos y deja de depender del LLM.** Sobre v3.57.0 (retrospectiva pre-decision en shadow +
+cableado de `adjust_setup_confidence`) se agregaron dos cosas en modo autonomo: **(a)** la leccion
+direccional se deriva tambien en `archive_trade` — antes vivia solo en el path del LLM y con Ollama
+caido el lazo moria en silencio; **(b)** el post-trade recibe el razonamiento de la entrada y
+devuelve `missed_factor` contra lista cerrada, en columna propia. Suite **75 → 136** tests. Todo
+verificado E2E contra copias de la DB, produccion intacta. Detalle y criterio de lectura en
+[`PROGRESS.md`](PROGRESS.md).
+
+**Anterior**: 19 Ago 2026 — **v3.57.0: la retrospectiva PRE-decisión (en shadow), el
 cableado que faltaba, y un research que cierra dos puertas.** Pedido del user: que AIdan pueda razonar
 *"esta señal era CALL y no PUT por X razones"* **antes** de la próxima decisión, sin bajar frecuencia.
 Implementado como **nudge de confianza, nunca filtro** (`RETRO_MODE=shadow` por default: calcula y
