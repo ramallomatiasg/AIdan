@@ -3294,6 +3294,77 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
     finally:
         conn.close()
 
+    # v3.57.1 — LECCION DIRECCIONAL derivada ACA, no solo en el path del LLM.
+    #
+    # Por que se movio: la derivacion vivia unicamente dentro de `analyze_closed_trade`,
+    # que devuelve None ante CUALQUIER problema de Ollama (timeout, HTTP != 200, GPU
+    # ocupada por un juego -> `should_pause_llm`, JSON invalido). O sea que un loop de
+    # aprendizaje 100% DETERMINISTA quedaba de rehen de un modelo de 7B: con Ollama
+    # caido, `directional_lessons` deja de crecer y la retrospectiva pre-trade se queda
+    # ciega SIN QUE NADA FALLE. Es exactamente la clase de bug que en este proyecto ya
+    # mato a M15 dos semanas, a SMC, al reversal y al loop de aprendizaje meses.
+    #
+    # `archive_trade` es el punto correcto: corre para TODO trade cerrado, tiene la
+    # verdad del broker (`mt5_pnl`) y no depende de ningun servicio externo.
+    #
+    # Los dos paths coexisten a proposito: `add_directional_lesson` es idempotente por
+    # `strategy_id` (UNIQUE index + INSERT OR IGNORE), asi que el que llegue primero
+    # gana y el otro es no-op. Redundancia barata en el unico lazo de aprendizaje vivo.
+    try:
+        from src.analyzer.post_trade_analyzer import derive_directional_lesson
+        # El MFE real, si el Position Manager lo muestreo. Con esto la derivacion de aca
+        # es tan buena como la del LLM — y mejor que la del backfill, que usa max(0,pips)
+        # como cota inferior y por eso puede confundir un problema de GESTION con uno de
+        # DIRECCION (limite declarado en tools/backfill_directional_lessons.py).
+        _mfe = None
+        try:
+            _exc = get_trade_excursion(strategy_id)
+            if _exc:
+                _mfe = _exc.get('mfe_pips')
+        except Exception as _ee:
+            import logging
+            logging.getLogger('db').warning(
+                f"archive_trade #{strategy_id}: excursion no disponible ({_ee}) "
+                f"-> se usa max(0,pips) como cota inferior del MFE", exc_info=True)
+        _pips = float(pips or 0)
+        if _mfe is None:
+            _mfe = max(0.0, _pips)
+        _pct_tp = (100.0 * _mfe / tp_pips) if tp_pips and tp_pips > 0 else 0.0
+        _hit_sl = _pips < 0 and sl_pips and sl_pips > 0 and abs(_pips) >= 0.9 * float(sl_pips)
+
+        _lesson = derive_directional_lesson(
+            direction=direction, mt5_pnl=mt5_pnl, pct_tp=_pct_tp,
+            mfe_pips=_mfe, pips=_pips, sl_pips=sl_pips, hit_sl=_hit_sl)
+        if _lesson:
+            _ectx = {}
+            try:
+                import json as _j
+                _ectx = _j.loads(entry_ctx_json) if entry_ctx_json else {}
+                if isinstance(_ectx, str):
+                    _ectx = _j.loads(_ectx)
+                if not isinstance(_ectx, dict):
+                    _ectx = {}
+            except Exception:
+                _ectx = {}
+            _lesson.update({
+                'strategy_id': strategy_id,
+                'setup_type': _setup_type,
+                'trigger_type': trigger or '',
+                'volatility': ctx.get('volatility') or _ectx.get('volatility', ''),
+                'session': session,
+                'htf_bias': ctx.get('htf_bias') or _ectx.get('htf_bias', ''),
+            })
+            if add_directional_lesson(_lesson):
+                import logging
+                logging.getLogger('db').info(
+                    f"Leccion direccional #{strategy_id} (archive): {_lesson['note']} | {_lesson['evidence']}")
+    except Exception as _lex:
+        # Fail-loud: si esto se rompe, el unico lazo de aprendizaje vivo deja de
+        # alimentarse y nadie se entera. WARNING con stack, nunca debug.
+        import logging
+        logging.getLogger('db').warning(
+            f"leccion direccional #{strategy_id} no derivada en archive: {_lex}", exc_info=True)
+
 
 def get_trade_archive(limit=500):
     """Get trades from archive for learning analysis (excludes weekend paper trades)."""
