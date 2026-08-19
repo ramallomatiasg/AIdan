@@ -29,7 +29,7 @@ def _ensure_table():
         conn.commit()
         conn.close()
     except Exception as e:
-        logger.debug(f"slippage_log create: {e}")
+        logger.warning(f"slippage_log create FAILED: {e}")
 
 
 def log_fill(strategy_id, expected_price, actual_price, direction, spread_pips=None):
@@ -52,7 +52,7 @@ def log_fill(strategy_id, expected_price, actual_price, direction, spread_pips=N
         conn.commit()
         conn.close()
     except Exception as e:
-        logger.debug(f"log_fill: {e}")
+        logger.warning(f"log_fill FAILED (TCA sin registrar): {e}")
 
 
 def get_current_spread_pips(mt5_module):

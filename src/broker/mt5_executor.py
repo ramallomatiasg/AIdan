@@ -448,7 +448,7 @@ class MT5Executor:
             "price": price,
             "sl": adjusted_sl,
             "tp": adjusted_tp,
-            "deviation": 50,  # points (0.1 pip each on 5-digit brokers) = 5 pips tolerance
+            "deviation": 50,  # v3.58.0: en Market Execution (esta cuenta) el server IGNORA deviation; queda por si el broker cambia de modo
             "magic": MAGIC_NUMBER,
             "comment": f"AIdan #{strategy_id}",
             "type_time": self._mt5.ORDER_TIME_GTC,
@@ -477,6 +477,18 @@ class MT5Executor:
         if result.retcode == self._mt5.TRADE_RETCODE_DONE:
             ticket = result.order
             update_mt5_ticket(strategy_id, ticket, lot, 'filled', fill_price=price)
+            # v3.58.0 — TCA: registrar precio pedido vs precio de fill + spread al momento.
+            # En esta cuenta (Market Execution, trade_exemode=2 verificado 19-ago) el
+            # "deviation" del request lo IGNORA el servidor => este log es la UNICA
+            # visibilidad real sobre slippage. result.price es el precio ejecutado;
+            # si viene 0 (glitch de respuesta) se cae al pedido y el slippage queda 0.
+            try:
+                from src.common.slippage_tracker import log_fill
+                _actual = getattr(result, 'price', 0) or price
+                _spread_pips = (tick.ask - tick.bid) * 10000
+                log_fill(strategy_id, price, _actual, direction, _spread_pips)
+            except Exception as _tca_e:
+                self.logger.warning(f"TCA log_fill failed for #{strategy_id}: {_tca_e}")
             try:
                 conn = __import__('sqlite3').connect(__import__('src.common.db', fromlist=['DB_PATH']).DB_PATH)
                 conn.execute("UPDATE auto_strategies SET stop_loss = ?, take_profit = ? WHERE id = ?",
@@ -736,7 +748,7 @@ class MT5Executor:
                         "type": close_type,
                         "position": p.ticket,
                         "price": close_price,
-                        "deviation": 50,  # points (0.1 pip each on 5-digit brokers) = 5 pips tolerance
+                        "deviation": 50,  # v3.58.0: en Market Execution (esta cuenta) el server IGNORA deviation; queda por si el broker cambia de modo
                         "magic": MAGIC_NUMBER,
                         "comment": "AIdan orphan close",
                         "type_time": self._mt5.ORDER_TIME_GTC,
@@ -1000,7 +1012,7 @@ class MT5Executor:
                 "type": close_type,
                 "position": p.ticket,
                 "price": close_price,
-                "deviation": 50,  # points (0.1 pip each on 5-digit brokers) = 5 pips tolerance
+                "deviation": 50,  # v3.58.0: en Market Execution (esta cuenta) el server IGNORA deviation; queda por si el broker cambia de modo
                 "magic": MAGIC_NUMBER,
                 "comment": f"AIdan close #{strategy_id}",
                 "type_time": self._mt5.ORDER_TIME_GTC,
@@ -1060,7 +1072,7 @@ class MT5Executor:
                 "type": close_type,
                 "position": p.ticket,
                 "price": close_price,
-                "deviation": 50,  # points (0.1 pip each on 5-digit brokers) = 5 pips tolerance
+                "deviation": 50,  # v3.58.0: en Market Execution (esta cuenta) el server IGNORA deviation; queda por si el broker cambia de modo
                 "magic": MAGIC_NUMBER,
                 "comment": "AIdan close",
                 "type_time": self._mt5.ORDER_TIME_GTC,
