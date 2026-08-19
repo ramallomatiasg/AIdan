@@ -183,6 +183,16 @@ def init_db():
         except:
             pass
 
+    # v3.57.2 — missed_factor: que condicion del contexto NO estaba mirando la entrada.
+    # Va como COLUMNA y no solo dentro de `raw_response`: un campo que hay que sacar con
+    # json_extract no se agrega en la practica, y ese es exactamente el destino de los
+    # 10.736 insights del LearningEngine (escritos, nunca consumidos). Lista cerrada
+    # validada en post_trade_analyzer.VALID_MISSED.
+    try:
+        cursor.execute("ALTER TABLE post_trade_analysis ADD COLUMN missed_factor TEXT DEFAULT ''")
+    except Exception:
+        pass  # ya existe
+
     # Migration: add trigger_type to auto_strategies (news vs structure)
     try:
         cursor.execute("ALTER TABLE auto_strategies ADD COLUMN trigger_type TEXT DEFAULT 'news'")
@@ -3609,6 +3619,35 @@ def save_pre_trade_retrospective(strategy_id, retro: dict, conf_before=None,
         conn.close()
 
 
+def get_pre_trade_retrospective(strategy_id):
+    """v3.57.2 — El razonamiento con el que se ENTRO a este trade.
+
+    Cierra el lazo en la direccion que faltaba. Hasta ahora iba en un solo
+    sentido: post-trade -> `directional_lessons` -> retrospectiva pre-trade. El
+    post-trade nunca veia lo que la entrada habia mirado, asi que no podia decir
+    "el PUT era correcto, pero por Y razon que no estabas considerando".
+
+    Devuelve el dict de la fila o None si esa senal no se evaluo.
+    """
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT * FROM pre_trade_retrospective
+            WHERE strategy_id = ? ORDER BY id DESC LIMIT 1
+        """, (strategy_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except sqlite3.OperationalError as e:
+        # La tabla puede no existir todavia en una DB vieja que no paso por init_db.
+        import logging
+        logging.getLogger('db').warning(f"get_pre_trade_retrospective: {e}")
+        return None
+    finally:
+        conn.close()
+
+
 def save_post_trade_analysis(strategy_id, analysis, result=None):
     """Save post-trade analysis from Gemma 4."""
     import json as _json
@@ -3631,8 +3670,8 @@ def save_post_trade_analysis(strategy_id, analysis, result=None):
             INSERT INTO post_trade_analysis
             (strategy_id, result, entry_quality, exit_quality, news_accuracy,
              timing_assessment, key_lesson, confidence_was, suggested_adjustment, raw_response,
-             analyzed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             analyzed_at, missed_factor)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strategy_id,
             result or analysis.get('result', ''),
@@ -3649,7 +3688,8 @@ def save_post_trade_analysis(strategy_id, analysis, result=None):
             # adelantados (el post-trade de #886 decia 16:11 y ocurrio 13:11). Misma clase
             # que los timestamps UTC arreglados en v3.40.11. Las filas viejas quedan en UTC:
             # cutover 11-ago, tenerlo en cuenta en cualquier forense del panel.
-            now_ar()
+            now_ar(),
+            analysis.get('missed_factor', '') or '',
         ))
         conn.commit()
     finally:

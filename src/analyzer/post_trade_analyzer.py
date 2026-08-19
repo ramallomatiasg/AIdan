@@ -70,6 +70,9 @@ DIAGNOSTICO YA DERIVADO (no lo discutas, escribi la leccion A PARTIR de esto):
 - Calidad de GESTION: {exit_quality}    (poor = devolvio casi todo el pico)
 - El SL/TP: {sl_action}
 
+LO QUE AIdan MIRO AL ENTRAR (retrospectiva pre-decision):
+{retro_block}
+
 COMO ESCRIBIR LA LECCION:
 - Si la ENTRADA es "poor", la leccion va sobre la ENTRADA: que condicion del
   contexto (tendencia, HTF, RSI, sesion, volatilidad, noticia) desaconsejaba
@@ -81,9 +84,17 @@ COMO ESCRIBIR LA LECCION:
   ensanchar el SL NO reduce la perdida en dolares, solo achica el lote y empeora
   el R:R. Es el consejo equivocado mas repetido y ya se midio que no sirve.
 - Concreta y en una oracion. Nada de "monitorear el mercado" ni generalidades.
+- Si el bloque de la retrospectiva dice "no se evaluo", ignoralo y no lo menciones.
+
+`missed_factor`: UNA condicion del contexto de arriba que la entrada NO tuvo en
+cuenta y que, mirando el resultado, la desaconsejaba. Elegi entre estas y nada mas:
+  tendencia | htf | rsi | volatilidad | sesion | nivel | noticia | ninguno
+Poné "ninguno" si la entrada era razonable con lo que se sabia y el trade
+simplemente salio mal. "ninguno" es una respuesta VALIDA y esperada: no todo trade
+perdedor tenia una senal de alerta ignorada.
 
 Responde SOLO este JSON, reemplazando cada <...>:
-{{"key_lesson": "<una oracion accionable>", "suggested_adjustment": "<una oracion: que cambiar en la logica o los parametros>", "news_accuracy": "<accurate|neutral|inaccurate>"}}
+{{"key_lesson": "<una oracion accionable>", "suggested_adjustment": "<una oracion: que cambiar en la logica o los parametros>", "news_accuracy": "<accurate|neutral|inaccurate>", "missed_factor": "<una de la lista>"}}
 
 news_accuracy: si el trigger NO es news ni calendar, poner SIEMPRE "neutral".
 """
@@ -262,6 +273,36 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
         ctx['pct_devuelto'] = round(min(100.0, 100.0 * _dev / _mfe), 0) if _mfe > 0 else 0
         ctx['mins_to_peak'] = _mins_peak
 
+        # v3.57.2 — LO QUE LA ENTRADA MIRO. Se le pasa al modelo el veredicto de la
+        # retrospectiva pre-decision para que la leccion pueda contrastar decision vs
+        # resultado ("el PUT era correcto, pero por Y razon que no considerabas").
+        #
+        # Se le dan los NUMEROS de la comparacion historica, no un juicio: si se le
+        # pasara "la opuesta pagaba" masticado, el modelo lo repetiria como loro — es
+        # el error de la hoja de respuestas que documenta el bloque de v3.53.7.
+        ctx['retro_block'] = '- no se evaluo (retrospectiva apagada o senal previa a v3.57.0)'
+        try:
+            from src.common.db import get_pre_trade_retrospective
+            _r = get_pre_trade_retrospective(_sid) if _sid is not None else None
+            if _r:
+                _l = [f"- Familia comparada: {_r.get('matched_on') or 'n/d'} "
+                      f"(n={_r.get('n_similar') or 0} trades similares)"]
+                if (_r.get('n_same') or 0) or (_r.get('n_opp') or 0):
+                    _l.append(f"- Yendo {_r.get('direction')}: {_r.get('n_same')} trades, "
+                              f"WR {_r.get('wr_same')}%, P&L ${_r.get('pnl_same')}")
+                    _l.append(f"- Yendo al reves: {_r.get('n_opp')} trades, "
+                              f"WR {_r.get('wr_opp')}%, P&L ${_r.get('pnl_opp')}")
+                if (_r.get('lesson_hits') or 0) > 0:
+                    _l.append(f"- Habia {_r['lesson_hits']} leccion(es) previa(s) apuntando "
+                              f"a la direccion contraria")
+                _cd = _r.get('conf_delta_applied') or 0
+                _l.append(f"- Ajuste de confianza aplicado al entrar: {_cd:+d} puntos"
+                          + ("" if _cd else " (modo shadow: se midio pero no se aplico)"))
+                ctx['retro_block'] = '\n'.join(_l)
+        except Exception as _rex:
+            # Fail-loud pero NO bloqueante: sin el bloque el prompt sigue siendo valido.
+            logger.warning(f"retro_block #{_sid} no armado: {_rex}", exc_info=True)
+
         # Etiquetas categoricas: CODIGO, no LLM (ver el bloque de v3.53.7 arriba).
         _hit_sl = bool(trade_data.get('sl_hit')) or (
             _pips < 0 and ctx['sl_pips'] and abs(_pips) >= 0.9 * float(ctx['sl_pips']))
@@ -342,6 +383,11 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
         # las otras 4 listas validaban campos que el LLM ya no emite (los deriva
         # `derive_quality`), asi que se sacaron para no dejar codigo muerto.
         valid_accuracy = ('accurate', 'neutral', 'inaccurate')
+        # v3.57.2 — lista CERRADA. Sin validar, el modelo devuelve texto libre y el
+        # campo no se puede agregar (que es lo que dejo inservible a los 10.736
+        # insights del LearningEngine: escritos, nunca agregables).
+        VALID_MISSED = ('tendencia', 'htf', 'rsi', 'volatilidad', 'sesion',
+                        'nivel', 'noticia', 'ninguno')
 
         # v3.53.7 — las categoricas YA vienen derivadas en codigo; el LLM solo
         # aporta el texto y news_accuracy (que si requiere leer el titular).
@@ -370,6 +416,13 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
             'key_lesson': str(result.get('key_lesson', ''))[:300],
             'confidence_was': derived['confidence_was'],
             'suggested_adjustment': str(result.get('suggested_adjustment', ''))[:300],
+            # v3.57.2 — que NO estaba mirando la entrada. Normalizado contra la lista
+            # cerrada; cualquier cosa fuera de ella cae a '' (no a 'ninguno': hay que
+            # poder distinguir "el modelo dijo que no faltaba nada" de "el modelo
+            # contesto cualquier cosa", si no la tasa de adherencia es inauditable).
+            'missed_factor': (str(result.get('missed_factor', '')).strip().lower()
+                              if str(result.get('missed_factor', '')).strip().lower() in VALID_MISSED
+                              else ''),
             'sl_action': sl_action,
             'recommended_sl_pips': rec_sl,
             'recommended_tp_pips': rec_tp,
