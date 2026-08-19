@@ -340,6 +340,24 @@ class TechnicalAnalyzer:
         except Exception:
             regime = 'uncertain'
 
+        # v3.58.3 — Kaufman Efficiency Ratio (feature pura, ninguna decision la lee).
+        # ER = |cambio neto en N| / suma de |cambios barra a barra| sobre los cierres.
+        # ~1 = movimiento limpio; ~0 = todo ida y vuelta. Distingue lo que el ATR no
+        # puede: ATR mide CUANTO se movio, ER mide SI el movimiento fue a algun lado.
+        # Un agosto con ATR bajo + ER alto es drift limpio operable; ATR bajo + ER bajo
+        # es el chop que el piso de ATR intenta filtrar — hoy los dos casos caen en la
+        # misma bolsa. Se registra en entry_context para medirlo contra mt5_pnl.
+        efficiency_ratio = None
+        try:
+            _er_closes = closes[-21:]  # 20 cambios
+            if len(_er_closes) >= 21:
+                _net = abs(_er_closes[-1] - _er_closes[0])
+                _path = sum(abs(_er_closes[i] - _er_closes[i - 1])
+                            for i in range(1, len(_er_closes)))
+                efficiency_ratio = round(_net / _path, 3) if _path > 0 else None
+        except Exception:
+            efficiency_ratio = None
+
         # Summary
         summary = f"EUR/USD {current_price:.5f} | Tendencia {trend} {trend_strength} | RSI {rsi:.0f} ({rsi_zone}) | MA9 {ma_fast:.5f} MA21 {ma_slow:.5f} | Mom: {momentum} | Regime: {regime}"
 
@@ -357,6 +375,7 @@ class TechnicalAnalyzer:
             'avg_range_pips': round(avg_range, 1),
             'regime': regime,
             'regime_score': regime_score,
+            'efficiency_ratio': efficiency_ratio,  # v3.58.3
             'summary': summary,
             'chart_structures': chart_structures,
             'timestamp': datetime.now().isoformat(),

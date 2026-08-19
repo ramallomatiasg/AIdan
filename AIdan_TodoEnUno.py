@@ -843,6 +843,7 @@ class AIdan:
             # mayoria de los ciclos (74% de los trades vivian debajo), y a 60s por ciclo
             # eso son ~1.400 lineas por dia. Se loguea 1 vez por hora.
             _last_m15_floor_log = 0
+            _last_m15_rej_row = 0  # v3.58.2 — throttle del shadow book (1 fila por vela M15)
             # v3.20.0 — Track C H1 experimental (paralelo a M5+M15)
             tech_h1 = TechnicalAnalyzerH1(logger)
             _last_h1_scan = 0  # timestamp last scan H1
@@ -1922,6 +1923,7 @@ class AIdan:
                                                             _news_entry_ctx = {
                                                                 'rsi': market.get('rsi', 0),
                                                                 'rsi_zone': market.get('rsi_zone', ''),
+                                                                'efficiency_ratio': market.get('efficiency_ratio'),  # v3.58.3
                                                                 'avg_range_pips': market.get('avg_range_pips', 0),
                                                                 'volatility': market.get('volatility', ''),
                                                                 'trend': market.get('trend', ''),
@@ -2269,6 +2271,7 @@ class AIdan:
                                         _cal_entry_ctx = {
                                             'rsi': ms.get('rsi', 0),
                                             'rsi_zone': ms.get('rsi_zone', ''),
+                                            'efficiency_ratio': ms.get('efficiency_ratio'),  # v3.58.3
                                             'avg_range_pips': ms.get('avg_range_pips', 0),
                                             'volatility': ms.get('volatility', ''),
                                             'trend': ms.get('trend', ''),
@@ -2616,6 +2619,7 @@ class AIdan:
                                 _struct_entry_ctx = {
                                     'rsi': ms.get('rsi', 0),
                                     'rsi_zone': ms.get('rsi_zone', ''),
+                                    'efficiency_ratio': ms.get('efficiency_ratio'),  # v3.58.3
                                     'avg_range_pips': ms.get('avg_range_pips', 0),
                                     'volatility': ms.get('volatility', ''),
                                     'trend': ms.get('trend', ''),
@@ -2874,6 +2878,7 @@ class AIdan:
                             _smc_entry_ctx = {
                                 'rsi': ms.get('rsi', 0),
                                 'rsi_zone': ms.get('rsi_zone', ''),
+                                'efficiency_ratio': ms.get('efficiency_ratio'),  # v3.58.3
                                 'avg_range_pips': ms.get('avg_range_pips', 0),
                                 'volatility': ms.get('volatility', ''),
                                 'trend': ms.get('trend', ''),
@@ -3529,6 +3534,26 @@ class AIdan:
                                 logger.info(
                                     f"M15: ATR {_m15_atr:.1f}p < piso {_m15_atr_floor:.1f}p "
                                     f"-> sin scan (chop). Perilla: M15_ATR_FLOOR")
+                            # v3.58.2 — SHADOW BOOK del gate de ATR. El gate skipea el scan
+                            # ENTERO => no hay señal ni direccion (correr el detector en
+                            # shadow contaminaria pullback/fade-chop shadow, que escriben
+                            # desde adentro). Se registra la VENTANA con direction NULL y el
+                            # scorer mide el movimiento ABSOLUTO forward: si en estas
+                            # ventanas el precio no recorre lo que un ganador de m15
+                            # necesita (~7,8p), el gate no costo nada — sin importar el lado.
+                            # 1 fila por vela M15 (900s), no por ciclo de 60s: ventanas
+                            # solapadas no son muestras independientes.
+                            if _m15_atr < _m15_atr_floor and (time.time() - _last_m15_rej_row) > 900:
+                                _last_m15_rej_row = time.time()
+                                try:
+                                    from src.common.db import log_rejected_signal
+                                    log_rejected_signal(
+                                        'm15_structure', 'atr_floor', direction=None,
+                                        confidence=None, price=_m15_state.get('price', 0),
+                                        atr_pips=_m15_atr,
+                                        horizon_min=M15_PROFILE['expiry_minutes'])
+                                except Exception as _rj_e:
+                                    logger.warning(f"shadow book atr_floor: {_rj_e}")
                             if _m15_atr >= _m15_atr_floor:
                                 # v3.33.0 (Fase B): htf_bias y daily_ctx GARANTIZADOS por scope
                                 # superior (se setean siempre, antes del structure scanner).
@@ -3568,8 +3593,30 @@ class AIdan:
 
                                     if _m15_counter_both:
                                         logger.info(f"M15: counter-both blocked {_m15_dir} (htf={htf_bias} m5={_m5_trend_now})")
+                                        # v3.58.2 — shadow book: aca la señal esta FORMADA
+                                        # (direccion + conf) => save-to-miss real medible.
+                                        try:
+                                            from src.common.db import log_rejected_signal
+                                            log_rejected_signal(
+                                                'm15_structure', 'counter_both',
+                                                direction=_m15_dir, confidence=_m15_conf,
+                                                price=_m15_state.get('price', 0),
+                                                atr_pips=_m15_atr,
+                                                horizon_min=M15_PROFILE['expiry_minutes'])
+                                        except Exception as _rj_e:
+                                            logger.warning(f"shadow book counter_both: {_rj_e}")
                                     elif _m15_skip_dup:
                                         logger.info(f"M15: skipping {_m15_dir}, active opposite exists")
+                                        try:
+                                            from src.common.db import log_rejected_signal
+                                            log_rejected_signal(
+                                                'm15_structure', 'active_opposite',
+                                                direction=_m15_dir, confidence=_m15_conf,
+                                                price=_m15_state.get('price', 0),
+                                                atr_pips=_m15_atr,
+                                                horizon_min=M15_PROFILE['expiry_minutes'])
+                                        except Exception as _rj_e:
+                                            logger.warning(f"shadow book active_opposite: {_rj_e}")
                                     else:
                                         _m15_price = _m15_state.get('price', 0)
                                         # Use MT5 tick if available
@@ -3595,6 +3642,7 @@ class AIdan:
                                             _m15_ctx = {
                                                 'rsi': _m15_state.get('rsi'),
                                                 'rsi_zone': _m15_state.get('rsi_zone'),
+                                                'efficiency_ratio': _m15_state.get('efficiency_ratio'),  # v3.58.3
                                                 'avg_range_pips': _m15_atr,
                                                 'volatility': _m15_state.get('volatility'),
                                                 'trend': _m15_state.get('trend'),
@@ -3734,6 +3782,7 @@ class AIdan:
                                             _h1_ctx = {
                                                 'rsi': _h1_state.get('rsi'),
                                                 'rsi_zone': _h1_state.get('rsi_zone'),
+                                                'efficiency_ratio': _h1_state.get('efficiency_ratio'),  # v3.58.3
                                                 'avg_range_pips': _h1_atr,
                                                 'volatility': _h1_state.get('volatility'),
                                                 'trend': _h1_state.get('trend'),
@@ -4009,7 +4058,7 @@ class AIdan:
                     _logger.debug(f"Sync pending orders: {e}")
 
                 from src.common.db import (get_strategies_with_open_mt5, update_mt5_trailing_data,
-                                           update_mt5_high_water)
+                                           update_mt5_high_water, update_mt5_low_water)
                 open_mt5 = get_strategies_with_open_mt5()
                 if not open_mt5:
                     _time.sleep(1)
@@ -4038,6 +4087,18 @@ class AIdan:
 
                     # Update high-water mark (best price reached)
                     high_water = max(stored_hwm or 0, progress)
+
+                    # v3.58.1 — MAE: low-water mark (peor precio alcanzado, <=0). Solo
+                    # instrumentacion: ninguna decision lo lee; se copia al archive al
+                    # cerrar. Se persiste solo cuando hay valle nuevo (mismo criterio que
+                    # el HWM) => costo ~0 en ciclos tranquilos.
+                    stored_lwm = row[14] if len(row) > 14 else None
+                    low_water = min(stored_lwm or 0, progress)
+                    if low_water != (stored_lwm or 0) and low_water < 0:
+                        try:
+                            update_mt5_low_water(sid, low_water)
+                        except Exception as _lw_e:
+                            _logger.warning(f"MAE update_mt5_low_water #{sid}: {_lw_e}")
 
                     # v3.32.0 — Two-stage trailing:
                     # Stage 1 (BE): cuando price reaches BE_TRIGGER del TP, mover SL a BE+offset.

@@ -837,6 +837,62 @@ def init_db():
     except:
         pass
 
+    # v3.58.2 — SHADOW BOOK (PRFS): registro de señales RECHAZADAS con outcome forward.
+    # Asimetria que corrige: el proyecto mide con rigor lo que EJECUTA y nada de lo que
+    # BLOQUEA (2.115 skips de `ATR too low` en 11 dias sin un solo outcome). direction
+    # NULL = rechazo pre-señal (gate de ATR: el detector no corrio, no hay lado — el
+    # scorer mide movimiento ABSOLUTO, no direccional). fav/adv/abs_move los rellena
+    # tools/score_rejected_signals.py al vencer el horizonte; scored_at NULL = pendiente.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rejected_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            direction TEXT,
+            confidence REAL,
+            price REAL,
+            atr_pips REAL,
+            horizon_min INTEGER DEFAULT 45,
+            fav_pips REAL,
+            adv_pips REAL,
+            abs_move_pips REAL,
+            net_drift_pips REAL,
+            scored_at TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
+    # v3.58.1 — MAE (maximum adverse excursion) en unidades de PRECIO (<=0), espejo de
+    # mt5_high_water. Lo muestrea el thread de trailing (1s). Sin esto, "¿entra mal o
+    # gestiona mal?" se contesta con proxies (hwm del PM cada 15s / max(0,pips)).
+    try:
+        cursor.execute("ALTER TABLE auto_strategies ADD COLUMN mt5_low_water REAL")
+    except:
+        pass
+
+    # v3.58.1 — excursion final del trade en el archivo, en PIPS. mfe >= 0, mae <= 0.
+    # NULL = trade anterior a v3.58.1 o el trailing thread nunca lo vio (fill y cierre
+    # entre dos ticks). Muestreo 1s => cota inferior del pico real, pero 15x mejor que
+    # el PM y cubre TODOS los trades, no solo los que el PM evaluo.
+    try:
+        cursor.execute("ALTER TABLE trade_archive ADD COLUMN mfe_pips REAL")
+    except:
+        pass
+    try:
+        cursor.execute("ALTER TABLE trade_archive ADD COLUMN mae_pips REAL")
+    except:
+        pass
+
+    # v3.58.3 — edad de la señal al fill (min). NULL = nunca lleno o pre-v3.58.3.
+    try:
+        cursor.execute("ALTER TABLE auto_strategies ADD COLUMN signal_age_at_fill_min REAL")
+    except:
+        pass
+    try:
+        cursor.execute("ALTER TABLE trade_archive ADD COLUMN signal_age_at_fill_min REAL")
+    except:
+        pass
+
     # Migration: add paused_from_status for toggle pause/resume
     try:
         cursor.execute("ALTER TABLE auto_strategies ADD COLUMN paused_from_status TEXT DEFAULT NULL")
@@ -2455,6 +2511,19 @@ def update_mt5_ticket(strategy_id, ticket, lot, status, fill_price=None):
                 UPDATE auto_strategies SET mt5_ticket = ?, mt5_lot = ?, mt5_status = ?
                 WHERE id = ?
             """, (ticket, lot, status, strategy_id))
+        # v3.58.3 — edad de la señal al FILL, clasificada en el momento (no reconstruida).
+        # Marco: signal half-life — #625 espero 27 min y se ejecuto a mercado dentro de un
+        # spike (la peor perdida del dia). Este campo permite medir con broker-truth si el
+        # fill tardio es toxico. Se setea en el MISMO update que marca 'filled' (cubre el
+        # path normal, el retry y la reutilizacion por idempotencia — todos pasan por aca)
+        # y solo la primera vez (IS NULL): si el status se re-escribe, la edad original
+        # no se pisa. created_at esta en hora AR igual que now_ar() => julianday resta bien.
+        if status == 'filled':
+            cursor.execute("""
+                UPDATE auto_strategies
+                SET signal_age_at_fill_min = ROUND((julianday(?) - julianday(created_at)) * 1440.0, 1)
+                WHERE id = ? AND signal_age_at_fill_min IS NULL
+            """, (now_ar(), strategy_id))
         conn.commit()
     finally:
         conn.close()
@@ -2560,7 +2629,7 @@ def get_strategies_with_open_mt5():
     cursor.execute("""
         SELECT id, mt5_ticket, direction, entry_price, stop_loss, take_profit,
                mt5_lot, created_at, news_title, mt5_trailing_step, mt5_fill_price,
-               mt5_high_water, confidence, trigger_type
+               mt5_high_water, confidence, trigger_type, mt5_low_water
         FROM auto_strategies
         WHERE mt5_status = 'filled' AND mt5_ticket IS NOT NULL
     """)
@@ -2840,7 +2909,11 @@ def get_trade_excursion(strategy_id):
                 "SELECT mt5_high_water FROM auto_strategies WHERE id = ?", (strategy_id,)).fetchone()
             if not r2 or r2[0] is None:
                 return None
-            return {'mfe_pips': float(r2[0]), 'mins_to_peak': 0.0, 'duration_min': 0.0}
+            # v3.58.1 BUGFIX — mt5_high_water esta en unidades de PRECIO (0.00055 = 5.5p);
+            # este fallback lo devolvia crudo como "pips" => un MFE de 7p salia 0.0007 y
+            # cualquier consumidor concluia "nunca se puso a favor". Hoy inejercitado
+            # (0 filas con hwm y sin pm_log) pero era una bomba para el dia que el PM falle.
+            return {'mfe_pips': round(float(r2[0]) / 0.0001, 1), 'mins_to_peak': 0.0, 'duration_min': 0.0}
         peak = conn.execute("""
             SELECT MIN(created_at) FROM position_manager_log
             WHERE strategy_id = ? AND hwm_pips = ?""", (strategy_id, mfe)).fetchone()
@@ -2892,6 +2965,43 @@ def update_mt5_high_water(strategy_id, high_water):
     conn.execute(
         "UPDATE auto_strategies SET mt5_high_water = MAX(COALESCE(mt5_high_water, 0), ?) "
         "WHERE id = ?", (high_water, strategy_id))
+    conn.commit()
+    conn.close()
+
+
+def log_rejected_signal(track, reason, direction=None, confidence=None, price=None,
+                        atr_pips=None, horizon_min=45):
+    """v3.58.2 — Shadow book: una fila por señal/ventana RECHAZADA. Solo escribe;
+    ninguna decision lo lee. El outcome lo completa el scorer despues del horizonte.
+    Fail-loud a WARNING (la clase de bug que mato M15 era el fail-silent)."""
+    conn = None
+    try:
+        conn = _connect()
+        conn.execute("""
+            INSERT INTO rejected_signals
+                (track, reason, direction, confidence, price, atr_pips, horizon_min, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (track, reason, direction, confidence, price, atr_pips, horizon_min, now_ar()))
+        conn.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger('db').warning(f"log_rejected_signal FAILED ({track}/{reason}): {e}")
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def update_mt5_low_water(strategy_id, low_water):
+    """v3.58.1 — Persiste el low-water mark (MAE) en unidades de precio (<=0).
+    Espejo exacto de update_mt5_high_water: el MIN en SQL garantiza que el valle
+    nunca puede subir, aunque un caller futuro mande un valor parcial."""
+    conn = _connect()
+    conn.execute(
+        "UPDATE auto_strategies SET mt5_low_water = MIN(COALESCE(mt5_low_water, 0), ?) "
+        "WHERE id = ?", (low_water, strategy_id))
     conn.commit()
     conn.close()
 
@@ -3173,7 +3283,8 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
         cursor.execute("""
             SELECT direction, entry_price, stop_loss, take_profit, confidence,
                    impact_score, trigger_type, news_title, profile_name, created_at,
-                   mt5_pnl, mt5_fill_price, entry_context, mt5_ticket, mt5_status
+                   mt5_pnl, mt5_fill_price, entry_context, mt5_ticket, mt5_status,
+                   mt5_high_water, mt5_low_water, signal_age_at_fill_min
             FROM auto_strategies WHERE id = ?
         """, (strategy_id,))
         row = cursor.fetchone()
@@ -3183,7 +3294,15 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             conn.close()
             return
         (direction, entry, sl, tp, conf, impact, trigger, title, profile, created,
-         mt5_pnl, fill_price, entry_ctx_json, mt5_ticket, mt5_status) = row
+         mt5_pnl, fill_price, entry_ctx_json, mt5_ticket, mt5_status,
+         _hwm_price, _lwm_price, _sig_age_min) = row
+
+        # v3.58.1 — excursion en pips para el archivo. Los watermarks estan en unidades
+        # de PRECIO (thread de trailing, 1s). NULL se preserva: "no muestreado" y
+        # "excursion 0" son cosas distintas y colapsarlas haria inauditable el campo
+        # (misma logica que missed_factor '' vs 'ninguno' en v3.57.2).
+        _mfe_pips = round(_hwm_price / 0.0001, 1) if _hwm_price is not None else None
+        _mae_pips = round(_lwm_price / 0.0001, 1) if _lwm_price is not None else None
 
         # v3.51.1 — GUARD: trade_archive es la tabla de PLATA REALIZADA. Una estrategia que
         # nunca llego al broker (skipeada por el cooldown, bloqueada por "market closing",
@@ -3270,8 +3389,9 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
                  confidence, impact_score, setup_type, trigger_type,
                  market_trend, trend_strength, rsi_at_entry, htf_bias,
                  volatility, avg_range_pips, session, hour_utc, day_of_week,
-                 profile_name, mt5_pnl, news_title, created_at, entry_context)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 profile_name, mt5_pnl, news_title, created_at, entry_context,
+                 mfe_pips, mae_pips, signal_age_at_fill_min)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strategy_id, direction, result, ref_price, exit_price, pips,
             sl, tp, sl_pips, tp_pips, sl_hit, tp_hit,
@@ -3280,7 +3400,8 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             ctx.get('rsi_at_entry', 0), ctx.get('htf_bias', ''),
             ctx.get('volatility', ''), ctx.get('avg_range_pips', 0),
             session, hour_utc, day_of_week,
-            profile, mt5_pnl, title, created, entry_ctx_json
+            profile, mt5_pnl, title, created, entry_ctx_json,
+            _mfe_pips, _mae_pips, _sig_age_min
         ))
         conn.commit()
 

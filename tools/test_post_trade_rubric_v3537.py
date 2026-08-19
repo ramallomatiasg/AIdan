@@ -119,7 +119,7 @@ c.execute("""CREATE TABLE position_manager_log (strategy_id INTEGER, hwm_pips RE
 c.execute("""CREATE TABLE auto_strategies (id INTEGER PRIMARY KEY, mt5_high_water REAL)""")
 for h, t in ((1.0, '2026-08-11 10:00:00'), (7.5, '2026-08-11 10:05:00'), (7.5, '2026-08-11 10:20:00')):
     c.execute("INSERT INTO position_manager_log VALUES (500, ?, ?)", (h, t))
-c.execute("INSERT INTO auto_strategies VALUES (600, 4.2)")   # sin filas de PM
+c.execute("INSERT INTO auto_strategies VALUES (600, 0.00042)")   # sin filas de PM — PRECIO, no pips (v3.58.1: el fixture viejo asertaba el bug de unidades)
 c.commit(); c.close()
 
 import src.common.db as dbmod
