@@ -98,6 +98,13 @@ class Harness(unittest.TestCase):
         orig_cfg = dbmod.get_mt5_config
         orig_tk = dbmod.update_mt5_ticket
         orig_open = dbmod.get_strategies_with_open_mt5
+        # v3.58.1 — el hook de TCA en _market_order escribe via slippage_tracker,
+        # que conecta a db.DB_PATH DIRECTO (no via _connect). Sin este parche, el
+        # test escribia filas fantasma (SID 4242) en la slippage_log de PRODUCCION
+        # — la clase de incidente v3.53.6. No-op explicito.
+        import src.common.slippage_tracker as _st
+        orig_lf = _st.log_fill
+        _st.log_fill = lambda *a, **k: None
         escrito = {}
         dbmod.get_mt5_config = lambda: {'enabled': 1, 'risk_percent': 1.0,
                                         'max_positions': 4, 'max_lot': 0.1,
@@ -119,6 +126,7 @@ class Harness(unittest.TestCase):
             dbmod.get_mt5_config = orig_cfg
             dbmod.update_mt5_ticket = orig_tk
             dbmod.get_strategies_with_open_mt5 = orig_open
+            _st.log_fill = orig_lf
 
 
 class TestApagado(Harness):
