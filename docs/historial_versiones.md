@@ -6,6 +6,69 @@ En CLAUDE.md queda la tabla corta de las últimas versiones y un puntero acá.
 
 ---
 
+## v3.58.0 / v3.58.1 — Sesion de instrumentacion del roadmap de RESEARCH_INVESTIGATION.md (19 Ago 2026)
+
+Ejecucion de los 5 items del roadmap del research del 19-ago. **Ninguno cambia una decision
+de trading** (todo es instrumentacion o verificacion), a proposito: no contaminan las 4
+lecturas agendadas (22-ago BE h1 · 28-ago news · 1-sep ATR floor · 15-sep D1).
+
+**v3.58.0 — TCA.** `src/common/slippage_tracker.py` existia con `log_fill()` definido y CERO
+call-sites (`slippage_log` = 0 filas) — el 9no mecanismo "construido y desconectado". Ahora
+`_market_order` lo llama en la rama DONE: precio pedido vs `result.price` + spread del tick.
+Verificado contra el broker: `trade_exemode = MARKET` y `filling_mode = 2 (solo IOC)` ⇒ el
+`deviation: 50` que el codigo mandaba con el comentario "5 pips tolerance" **lo ignora el
+servidor** (los 4 comentarios corregidos; explica el slippage de 11,2p de #625 sin rechazo).
+Bonus: el fallback FOK/RETURN del filling nunca puede ser necesario en esta cuenta.
+Los excepts del path de escritura del tracker pasan de `logger.debug` a WARNING (fail-loud).
+Scorer `tools/measure_tca.py` con umbral pre-declarado: mediana > 0,7p = ejecucion material.
+Tests de CALL-SITE (7): un test que solo ejercitara la funcion habria estado verde los meses
+que estuvo muerta.
+
+**v3.58.1 — cuatro piezas:**
+1. **MFE/MAE reales.** El trailing (1s) ya trackeaba el pico (`mt5_high_water`); ahora
+   tambien el valle (`mt5_low_water`, MIN en SQL espejo del MAX). `archive_trade` copia
+   ambos como `mfe_pips`/`mae_pips` con NULL preservado ("no muestreado" != "excursion 0").
+   Con esto el criterio (c) del checkpoint del BE de h1 (~22-ago: ¿corta ganadores?) es una
+   query, y "¿entra mal o gestiona mal?" deja de contestarse con proxies.
+   **BUGFIX encontrado al pasar:** el fallback de `get_trade_excursion` devolvia
+   `mt5_high_water` (PRECIO: 0.0007) como si fueran pips ⇒ cualquier consumidor concluia
+   "nunca se puso a favor". Hoy inejercitado (0 filas caian ahi) pero era una bomba para el
+   dia que el PM falle. El fixture de `test_post_trade_rubric_v3537` asertaba el bug.
+2. **Shadow book (`rejected_signals`, metodologia PRFS — arXiv 2606.08228).** El proyecto
+   media con rigor lo que EJECUTA y nada de lo que BLOQUEA (2.115 skips de `ATR too low` en
+   11 dias sin un solo outcome). 3 hooks en m15: `atr_floor` (SIN direccion — el gate skipea
+   el scan entero, y correr el detector en shadow contaminaria los shadows de pullback y
+   fade-chop que escriben desde adentro; el scorer mide movimiento ABSOLUTO: si la ventana
+   no recorre los ~7,8p de un ganador, el gate no costo nada en NINGUNA direccion; 1 fila
+   por vela M15, ventanas solapadas no son muestras), `counter_both` y `active_opposite`
+   (señal formada ⇒ save-to-miss real). `tools/score_rejected_signals.py` completa el
+   outcome con velas M5 SIN re-simular SL/TP (doctrina del proyecto) y evalua el criterio
+   pre-declarado (ratio < 1 con n>=25 = filtro que bloquea mas ganadores que perdedores;
+   referencia externa de filtro sano: >= 3,7:1). **Aporta a la lectura del ~1-sep del
+   M15_ATR_FLOOR, no la reemplaza.**
+3. **`signal_age_at_fill_min`.** Edad de la señal al fill, seteada en `update_mt5_ticket`
+   al marcar 'filled' (cubre normal + retry + idempotencia; solo la primera vez, no se
+   pisa), copiada al archive. Marco: signal half-life — #625 espero 27 min como pendiente y
+   el retry la ejecuto a mercado dentro del spike. Si el fill tardio resulta toxico con
+   broker-truth, el fix sera un TTL de señal (caduca), no un filtro de familia.
+4. **`efficiency_ratio` (Kaufman)** en `get_market_state` + los 6 `entry_context`:
+   ER = |cambio neto en 20 velas| / suma de |cambios| — separa "poco movimiento" (ATR bajo)
+   de "movimiento sin direccion" (ER bajo), los dos casos que el piso fijo de ATR mete en
+   la misma bolsa (y que explican el -59% de frecuencia del agosto muerto).
+
+**Item 5 del roadmap — cuenta CENT: DESCARTADA por el gate pre-declarado** (>20% peor por
+trade = no). IC Markets no ofrece cent; las cent existentes (Exness/RoboForex/FBS) son
+productos de spread markup (~1,0-1,5p all-in vs ~0,8p actual = +25 a +90%) y **cent + raw
+no existe en el mercado**. Los 4 cuellos (Kelly, meta-labeling, D1 activo, salidas
+parciales) dependen del CAPITAL de verdad. `docs/research_cuenta_cent_2026-08-19.md`.
+
+Suite 136 + 24 tests nuevos, todo verde. E2E contra copias de la DB, produccion intacta.
+Tests con conteos absolutos que se pudrian (`test_prod_write_guards`: 589/585 del snapshot
+del 8-ago, tapado por el OperationalError de `missed_factor`) pasados a invariantes
+relativos.
+
+---
+
 ## v3.56.0 — Groq dio de baja los dos modelos que usaba AIdan (18 Ago 2026)
 
 **Cómo se detectó:** el user reenvió un mail que decía que `llama-3.3-70b-versatile` se daba de

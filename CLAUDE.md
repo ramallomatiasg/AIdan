@@ -58,6 +58,24 @@ con la razón del cierre.
 - [ ] **🔴 ~28 AGO — VEREDICTO news v3.51.0 (criterio pre-declarado, NO mover).** Medir sobre los news creados desde el 7-ago (n≥15, ~4/semana): **(a) ¿los ganadores pasaron de recorrer 40% del TP a ≥59%?** **(b) ¿los perdedores siguen en ~53% del SL o se estiraron?** (si se estiran, la perilla 2 no está haciendo su trabajo). (c) PnL y WR del track. Query: comparar `|pips|` contra su propio `stop_loss`/`take_profit` por fila (los flags `sl_hit`/`tp_hit` son **tautológicos**, se derivan de `result`+`pips` — no usarlos). **Si no se cumple → `NEWS_MIN_EXPIRY_MIN=15`** (env, sin rebuild) y news vuelve a como estaba. *Decisión del user 7-ago: news NO se apaga, se arregla.*
 - [ ] **🟢 ~1 SEP — FORWARD del piso de ATR de m15 (v3.55.0, `M15_ATR_FLOOR=8`, activo desde el 16-ago).** El hint de "m15 × expansión" creció hasta pasar el gate y se activó: **ATR ≤8p = n=90, WR 27,8%, −$75,59 · ATR >8p = n=31, WR 51,6%, +$18,80** (p=0,0042, CI95 [33,1-69,8%] sin cruzar el 27,8% del comparador, mismo período los dos buckets, ATR clasificado al entrar). El diagnóstico completo: **m15 necesita ~40,5% de WR para empatar** (ganador medio +7,8p, perdedor −5,3p) y en chop saca 28%. **Lo que la revisión adversarial del propio hallazgo encontró y hay que tener presente al leer el forward: el lado BUENO es frágil** — de los +$18,80 unos +$19,49 salen de 2 días, sin ellos queda en −$0,69; sacando los 3 mejores ganadores, −$10,88. **El lado malo sí aguanta** (pierde en las dos mitades: 28,9% y 26,7%). ⇒ **La expectativa correcta es "m15 deja de sangrar", NO "m15 pasa a rentable".** Medir: **(a)** ¿la frecuencia de m15 cayó ~74% como se estimó (3,27 → 0,84 trades/día)? **(b)** ¿el PnL de m15 se acercó a cero, o el bucket >8p también empezó a perder (= el hallazgo era el artefacto de 2 días)? **(c)** ¿cuántos skips loguea (`ATR ... < piso ... -> sin scan (chop)`, 1 por hora)? **Si el bucket que queda pierde igual → `M15_ATR_FLOOR=5.0`** (env, sin rebuild) y m15 vuelve a como estaba. *No afinar el umbral sobre esta muestra: el 8 venía pre-declarado desde el 17-jul; buscar el mejor número sería overfit.*
 
+**🧪 SHADOW NUEVO + TCA (19 Ago, v3.58.0/.1) — INSTRUMENTACION, 0 cambios de decision.**
+Ejecucion del roadmap de [`RESEARCH_INVESTIGATION.md`](RESEARCH_INVESTIGATION.md). Lo que quedo
+corriendo y hay que REPORTAR con la regla de shadow: **(a) TCA** — `log_fill()` estaba escrito y
+desconectado (0 filas en meses); ahora cada fill registra pedido-vs-fill + spread. Verificado
+contra el broker: la cuenta es **Market Execution** ⇒ el `deviation` del request lo IGNORA el
+server (el "5 pips tolerance" del codigo era mentira; comentarios corregidos) ⇒ este log es la
+UNICA visibilidad de slippage. Leer con `tools/measure_tca.py` (veredicto a n>=30). **(b) Shadow
+book** (`rejected_signals`, PRFS): outcome forward de lo que los filtros BLOQUEAN — atr_floor de
+m15 (sin direccion, movimiento absoluto vs 7,8p), counter_both y active_opposite (save-to-miss).
+Leer con `tools/score_rejected_signals.py`; **aporta a la lectura del ~1-sep del M15_ATR_FLOOR,
+no la reemplaza**. **(c)** `mfe_pips`/`mae_pips` reales en el archive (trailing 1s) — el criterio
+(c) del checkpoint del BE de h1 (~22-ago) ahora es una query sobre esas columnas. **(d)**
+`signal_age_at_fill_min` (edad señal→fill; #625 espero 27 min) y `efficiency_ratio` (Kaufman, en
+`entry_context`): features puras, medir contra `mt5_pnl` en 6-8 semanas con el gate de siempre.
+**(e) Cuenta CENT: DESCARTADA** por el gate pre-declarado de costo (+25 a +90% por trade; cent+raw
+no existe) — los cuellos de Kelly/meta-labeling/D1 dependen del CAPITAL, no del tipo de cuenta
+(`docs/research_cuenta_cent_2026-08-19.md`). No reabrir.
+
 **📚 RESEARCH DE MERCADO (19 Ago) — [`docs/research_mercado_2026-08-19.md`](docs/research_mercado_2026-08-19.md).**
 Pedido del user. **Consultarlo antes de proponer una idea "nueva"**: tiene una tabla de lo que se
 DESCARTA con fundamento y un ranking de lo accionable. Los 4 titulares:
@@ -408,7 +426,9 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 | Version | Cambio | Estado |
 |---|---|---|
-| v3.57.2 | El **post-trade ve el razonamiento de la entrada** (`{retro_block}` + campo `missed_factor` con lista cerrada, como COLUMNA): cierra el lazo en el sentido que faltaba | **actual** |
+| v3.58.1 | **Instrumentación (0 cambios de decisión)**: MFE/MAE reales por trade (trailing 1s → `mfe_pips`/`mae_pips` en el archive) + **shadow book** (`rejected_signals`, PRFS: outcome forward de lo que se BLOQUEA) + `signal_age_at_fill_min` + `efficiency_ratio` (Kaufman) en `entry_context` | **actual** |
+| v3.58.0 | **TCA real**: `log_fill()` existía DESCONECTADO (0 filas en meses) — ahora registra pedido vs fill + spread en cada entrada. Verificado: la cuenta es **Market Execution** ⇒ el `deviation` del request lo ignora el server | vigente |
+| v3.57.2 | El **post-trade ve el razonamiento de la entrada** (`{retro_block}` + campo `missed_factor` con lista cerrada, como COLUMNA): cierra el lazo en el sentido que faltaba | vigente |
 | v3.57.1 | La **leccion direccional deja de depender de Ollama** — se deriva tambien en `archive_trade` (los 2 paths coexisten, idempotente por `strategy_id`) | vigente |
 | v3.57.0 | **Retrospectiva PRE-decision en shadow** (`RETRO_MODE`) + se **cablea** `adjust_setup_confidence` (existia desde v3.31.0 y no se llamaba de ningun lado) + loop `directional_lessons` + toggle `ENABLE_NEWS_TRACK` (default ON) | vigente |
 | v3.56.0 | **Groq dio de baja los 2 modelos que usaba AIdan** (16-ago). Reemplazo medido: `gpt-oss-120b` / `gpt-oss-20b` + `reasoning_effort=low` + el health check ahora verifica que el modelo EXISTA | vigente |
@@ -656,6 +676,8 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `calibrate_confidence.py` | READ-ONLY: ¿la calibración de Platt vuelve usable la confianza? Split cronológico, Brier held-out, gate pre-declarado <0,230. **Resultado 5-ago: NO PASA** (0,2522 vs constante 0,2424) ⇒ no se activó. Y `conf/100` crudo es 52% PEOR que la constante ⇒ **nunca usar la confianza como probabilidad** (p.ej. sizing). |
 | `audit_code_patterns.py` | Auditoría READ-ONLY de los 7 patrones de bug que ya hicieron daño acá (undefined names, `except` que tragan, ramas mudas de `order_send`, código inalcanzable, umbrales atados al % del TP, DELETE sin guard, estado incoherente). **Lo que lo hace usable es el BASELINE**: solo reporta lo NUEVO. Exit 0 = nada nuevo. Corre sábados vía `aidan-auditoria-semanal`. |
 | `score_retrospective_shadow.py` | Scorer READ-ONLY de la retrospectiva pre-decision (v3.57.0). Compara `contrarian` vs el resto con Wilson, y evalua el **gate pre-declarado de 4 condiciones** (n>=25 · WR peor · CI que no cruza · PnL/trade peor). Tambien reporta si el loop de `directional_lessons` se esta CONSULTANDO — 0 consultas = mecanismo escrito y desconectado, el sintoma clasico de este proyecto. |
+| `measure_tca.py` | TCA READ-ONLY (v3.58.0): mediana/p90 de slippage y spread desde `slippage_log` + breakdown por hora AR. Umbral pre-declarado: mediana > 0,7p = la ejecucion es un problema material. 0 filas + trades nuevos = el hook de `log_fill` murio (buscar WARNING en aidan.log). |
+| `score_rejected_signals.py` | SHADOW BOOK scorer (v3.58.2, PRFS): completa el outcome forward de `rejected_signals` (SU tabla, lo unico que escribe) con velas M5 sin re-simular SL/TP, y evalua el criterio pre-declarado — atr_floor por movimiento ABSOLUTO vs los 7,8p de un ganador; counter_both/active_opposite por save-to-miss (< 1:1 con n>=25 = el filtro bloquea ganadores). **Regla de shadow: traerlo sin que el user lo pida.** Requiere MT5. `--dry-run`. |
 | `backfill_directional_lessons.py` | Siembra `directional_lessons` desde `trade_archive` con el MISMO criterio del path vivo, para que la retrospectiva no arranque ciega (19 lecciones desde el 20-jun). **Dry-run por default.** Limite declarado: el archive no guarda MFE, usa `max(0,pips)` como cota inferior => puede emitir falsos positivos de "gestion" etiquetados como "direccion"; se distinguen por el prefijo `[backfill]` en `evidence`. |
 | `measure_news_latency.py` | READ-ONLY: ¿news llega tarde por construccion? Nace del research del 19-ago (993 eventos USD 2022-2025: la deriva post-release esta **contenida en las velas +1..+5**; desde la +6 los T dan 0,14-0,69, y ~80% del movimiento se completa en **3 minutos**). **Resultado sobre 871 alerts: mediana 8,9 min, solo 7,7% dentro de los 3 min, y el LLM tarda 0,2 min ⇒ el cuello de botella es el FEED, no el analisis** — un prompt no puede arreglarlo (consistente con que v3.47.0 no moviera el edge). El corte `<=3min` da 60,5% WR vs 51,3% pero **CI [45,6-73,6] cruza el baseline ⇒ NO pasa el gate**, y corre sobre `alert_result`, no broker-truth. *Ojo metodologico: la 1ra version reportaba 398 min por sumar `published_at` en UTC con `fetched_at` en hora AR — el script trae ahora un control de sanidad que falla si el offset se rompe.* |
 | `nightly_analyst.py` | LLM analyst on-demand desde el dashboard (▶ Run analyst). Opus → Groq → Ollama. Propone cambios JSON con min-sample + guard-rails; arranca shadow validation vía auto_applier. |
@@ -992,7 +1014,14 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 ---
 ---
 
-**Última actualización**: 19 Ago 2026 — **v3.57.2: el lazo de decision queda cerrado en los DOS
+**Última actualización**: 19 Ago 2026 — **v3.58.0/.1: se ejecutó el roadmap completo del
+research** ([`RESEARCH_INVESTIGATION.md`](RESEARCH_INVESTIGATION.md)): TCA enchufado (log_fill
+estaba muerto), MFE/MAE reales, shadow book de rechazos (PRFS), signal_age + efficiency_ratio, y
+cuenta CENT descartada por costo. Todo instrumentación: **0 cambios de decisión**, no contamina
+las 4 lecturas agendadas. Suite 136 + 24 nuevos en verde. Detalle en
+[`docs/historial_versiones.md`](docs/historial_versiones.md).
+
+**Anterior**: 19 Ago 2026 — **v3.57.2: el lazo de decision queda cerrado en los DOS
 sentidos y deja de depender del LLM.** Sobre v3.57.0 (retrospectiva pre-decision en shadow +
 cableado de `adjust_setup_confidence`) se agregaron dos cosas en modo autonomo: **(a)** la leccion
 direccional se deriva tambien en `archive_trade` — antes vivia solo en el path del LLM y con Ollama
