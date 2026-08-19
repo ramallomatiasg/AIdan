@@ -58,6 +58,62 @@ con la razón del cierre.
 - [ ] **🔴 ~28 AGO — VEREDICTO news v3.51.0 (criterio pre-declarado, NO mover).** Medir sobre los news creados desde el 7-ago (n≥15, ~4/semana): **(a) ¿los ganadores pasaron de recorrer 40% del TP a ≥59%?** **(b) ¿los perdedores siguen en ~53% del SL o se estiraron?** (si se estiran, la perilla 2 no está haciendo su trabajo). (c) PnL y WR del track. Query: comparar `|pips|` contra su propio `stop_loss`/`take_profit` por fila (los flags `sl_hit`/`tp_hit` son **tautológicos**, se derivan de `result`+`pips` — no usarlos). **Si no se cumple → `NEWS_MIN_EXPIRY_MIN=15`** (env, sin rebuild) y news vuelve a como estaba. *Decisión del user 7-ago: news NO se apaga, se arregla.*
 - [ ] **🟢 ~1 SEP — FORWARD del piso de ATR de m15 (v3.55.0, `M15_ATR_FLOOR=8`, activo desde el 16-ago).** El hint de "m15 × expansión" creció hasta pasar el gate y se activó: **ATR ≤8p = n=90, WR 27,8%, −$75,59 · ATR >8p = n=31, WR 51,6%, +$18,80** (p=0,0042, CI95 [33,1-69,8%] sin cruzar el 27,8% del comparador, mismo período los dos buckets, ATR clasificado al entrar). El diagnóstico completo: **m15 necesita ~40,5% de WR para empatar** (ganador medio +7,8p, perdedor −5,3p) y en chop saca 28%. **Lo que la revisión adversarial del propio hallazgo encontró y hay que tener presente al leer el forward: el lado BUENO es frágil** — de los +$18,80 unos +$19,49 salen de 2 días, sin ellos queda en −$0,69; sacando los 3 mejores ganadores, −$10,88. **El lado malo sí aguanta** (pierde en las dos mitades: 28,9% y 26,7%). ⇒ **La expectativa correcta es "m15 deja de sangrar", NO "m15 pasa a rentable".** Medir: **(a)** ¿la frecuencia de m15 cayó ~74% como se estimó (3,27 → 0,84 trades/día)? **(b)** ¿el PnL de m15 se acercó a cero, o el bucket >8p también empezó a perder (= el hallazgo era el artefacto de 2 días)? **(c)** ¿cuántos skips loguea (`ATR ... < piso ... -> sin scan (chop)`, 1 por hora)? **Si el bucket que queda pierde igual → `M15_ATR_FLOOR=5.0`** (env, sin rebuild) y m15 vuelve a como estaba. *No afinar el umbral sobre esta muestra: el 8 venía pre-declarado desde el 17-jul; buscar el mejor número sería overfit.*
 
+**📚 RESEARCH DE MERCADO (19 Ago) — [`docs/research_mercado_2026-08-19.md`](docs/research_mercado_2026-08-19.md).**
+Pedido del user. **Consultarlo antes de proponer una idea "nueva"**: tiene una tabla de lo que se
+DESCARTA con fundamento y un ranking de lo accionable. Los 4 titulares:
+**(1)** un estudio de falsificacion sobre **14 familias de señales intradia / 947 dias** no encontro
+NINGUNA que pase (bruto 0,07-1,50 pts contra 2 pts de friccion) ⇒ el edge bruto por debajo del costo
+**es la norma, no la mala suerte de AIdan**; las 2 que sobrevivieron son de **confluencia + sesion**.
+**(2)** el **pullback-entry** tambien se refuta afuera (80,7% de stop-out, −4,44 pts) ⇒ el hilo #1 del
+19-jun ("el fix de fondo = entrar en el pullback") queda **refutado por dos vias independientes**; lo
+que sigue en pie es el diagnostico de que AIdan entra en el agotamiento, no que el pullback lo cure.
+**(3)** el piso de ATR deberia ser por **PERCENTIL** (ATR contra las ultimas ~100 barras, banda
+~20-90) y no en pips fijos: es lo mismo que ya mide `M15_ATR_FLOOR` pero **autoajustado** — arreglaria
+que en el agosto muerto m15 perdiera 59% de su frecuencia (2.115 skips de `ATR too low`). **Es la
+mejor idea del research porque PROTEGE la frecuencia en vez de recortarla.** No superponerla a la
+lectura del ~1 sep.
+**(4)** de 28,7 M de configuraciones de ORB probadas sobrevivio el **0,51%** al walk-forward ⇒
+valida el gate del proyecto y la regla de no afinar umbrales sobre la muestra propia.
+Falta y es barato: **TCA** (costo esperado vs realizado — spread al enviar, pedido vs fill), que es
+lo unico que distingue "la estrategia empeoro" de "la ejecucion empeoro". **Bloqueante para real.**
+*Y lo que NO se puede hacer todavia: Kelly por track y meta-labeling para sizing chocan los dos con
+el lote minimo 0,01 sobre $639 — dependen del CAPITAL, no del codigo.*
+
+**🧪 SHADOW NUEVO (19 Ago, v3.57.0) — RETROSPECTIVA PRE-DECISION.** Pedido del user: que AIdan
+pueda razonar *"esta señal era CALL y no PUT por X razones"* **antes** de la próxima decisión, sin
+bajar frecuencia. Implementado como **nudge de confianza, nunca filtro**: `RETRO_MODE=shadow`
+(default) calcula y registra en `pre_trade_retrospective` con delta 0.
+**Lo que hace:** compara la señal contra los trades similares de la MISMA FAMILIA de setup y, si la
+dirección opuesta era la que pagaba, emite `contrarian` + delta negativo. Cierra el loop con
+`directional_lessons`, que el post-trade escribe (criterio derivado en CÓDIGO, no por el LLM:
+perdió **y** nunca se puso a favor <20% del TP **y** pegó el SL — las tres juntas).
+**Hallazgo del propio armado:** `setup_type` **codifica la dirección** (`trend_continuation_bull`
+es siempre CALL) ⇒ comparando por setup exacto el lado opuesto tiene n=0 SIEMPRE y la pregunta era
+inrespondible. De ahí las familias dirección-neutras (`SETUP_FAMILIES`). Se descubrió ejecutándolo
+contra la DB real, no leyéndolo.
+**Honestidad sobre el alcance:** los gates de `min_confidence` viven DENTRO de los detectores y el
+lote sale de `sl_pips` ⇒ el nudge es frecuencia- y tamaño-neutro **pero hoy INERTE sobre la
+ejecución**. Su valor es el registro + la muestra. Leer con
+`python tools/score_retrospective_shadow.py` (**regla de shadow: traerlo sin que el user lo pida**).
+**Gate pre-declarado para pasar a `active`, las 4:** n>=25 `contrarian` cerrados · WR por debajo del
+comparador · CI95 de Wilson que NO cruza · PnL/trade negativo y peor. **Si con n>=40 sigue sin
+separar ⇒ `RETRO_MODE=off`, no buscarle la vuelta.** *Ojo al leer: que `aligned` rinda bien NO es
+evidencia — arrastra el sesgo de que lo que venía ganando sigue ganando; lo que tiene que demostrar
+es que detecta lo MALO.*
+
+**🔌 CABLEADO (19 Ago, v3.57.0) — `adjust_setup_confidence` ya se puede aplicar.** Estaba
+implementado desde v3.31.0, con lista cerrada de change_types, guard-rails y validación por shadow,
+y **`get_confidence_adjustment_for_signal` no se llamaba desde ningún lado** ⇒ el change_type era
+inaplicable por construcción. Ahora se invoca en `add_auto_strategy` (el único camino por el que
+nacen todos los trades). Con `setup_type` ya poblado (v3.48.0) las 2 mitades del mecanismo existen
+por primera vez. Los tests son de **call-site**, no solo de la función: un test que solo ejercitara
+la función habría estado en verde los 5 meses en que el mecanismo estuvo muerto.
+
+**🎚️ PERILLA (19 Ago, v3.57.0) — `ENABLE_NEWS_TRACK`, default ON.** Se entrega el mecanismo para
+apagar la EJECUCIÓN de news sin borrar el track (el alert se sigue guardando y midiendo con
+`measure_news_llm_error.py`). **NO se giró**: la decisión del user del 7-ago es "news no se apaga,
+se arregla" y hay veredicto pre-declarado ~28 ago. Girarla es decisión del user, no mía.
+
 **🧪 FASE 2 EN CURSO (18 Ago, corriendo) — ¿el detector tiene edge en el TIMEFRAME DONDE OPERA?**
 Fase 1 (`579cc22`) midió `detect_structure_signals` en velas **D1** sobre 21 pares y concluyó que
 el problema es el **generador de señal** — que también alimenta structure/m15/h1 en vivo. **Esa
@@ -340,8 +396,9 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 | Version | Cambio | Estado |
 |---|---|---|
-| v3.56.0 | **Groq dio de baja los 2 modelos que usaba AIdan** (16-ago). Reemplazo medido: `gpt-oss-120b` / `gpt-oss-20b` + `reasoning_effort=low` + el health check ahora verifica que el modelo EXISTA | **actual** |
-| v3.55.0 | **Piso de ATR de m15 de 5 a 8** (`M15_ATR_FLOOR`, env): m15 pierde en chop de forma consistente (≤8p: n=90, WR 27,8%, −$75,59). Frena la sangría, no lo vuelve rentable | **actual** |
+| v3.57.0 | **Retrospectiva PRE-decision en shadow** (`RETRO_MODE`) + se **cablea** `adjust_setup_confidence` (existia desde v3.31.0 y no se llamaba de ningun lado) + loop `directional_lessons` + toggle `ENABLE_NEWS_TRACK` (default ON) | **actual** |
+| v3.56.0 | **Groq dio de baja los 2 modelos que usaba AIdan** (16-ago). Reemplazo medido: `gpt-oss-120b` / `gpt-oss-20b` + `reasoning_effort=low` + el health check ahora verifica que el modelo EXISTA | vigente |
+| v3.55.0 | **Piso de ATR de m15 de 5 a 8** (`M15_ATR_FLOOR`, env): m15 pierde en chop de forma consistente (≤8p: n=90, WR 27,8%, −$75,59). Frena la sangría, no lo vuelve rentable | vigente |
 | v3.54.1 | Baseline del D1 corregido: el titular corría con params default y una sola sesión. Re-medido con params vivos + sweep de las 4 sesiones (read-only) | vigente |
 | v3.54.0 | **Track D = swing DIARIO (D1) en SHADOW** — 4to track, nace de 7 años de velas (H4 refutado, D1 PF neto 1,40). No toca `auto_strategies`. | vigente |
 | v3.53.7 | Post-trade: el LLM copiaba la hoja de respuestas del template → etiquetas ahora en código, al LLM le queda la lección en texto | vigente |
@@ -584,6 +641,9 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `measure_be_cost.py` | READ-ONLY: cuánto cuesta el break-even del trailing (`position_manager_log` ⋈ `trade_archive`, 4 roles). **Resultado 10-ago: los cortados por el BE terminan en +$2,41 ⇒ no cuesta plata; el 74% nunca arma el BE y ahí vive el 100% de la pérdida ⇒ el lever es la ENTRADA.** Mide la mitad visible de la balanza, nunca un neto. |
 | `calibrate_confidence.py` | READ-ONLY: ¿la calibración de Platt vuelve usable la confianza? Split cronológico, Brier held-out, gate pre-declarado <0,230. **Resultado 5-ago: NO PASA** (0,2522 vs constante 0,2424) ⇒ no se activó. Y `conf/100` crudo es 52% PEOR que la constante ⇒ **nunca usar la confianza como probabilidad** (p.ej. sizing). |
 | `audit_code_patterns.py` | Auditoría READ-ONLY de los 7 patrones de bug que ya hicieron daño acá (undefined names, `except` que tragan, ramas mudas de `order_send`, código inalcanzable, umbrales atados al % del TP, DELETE sin guard, estado incoherente). **Lo que lo hace usable es el BASELINE**: solo reporta lo NUEVO. Exit 0 = nada nuevo. Corre sábados vía `aidan-auditoria-semanal`. |
+| `score_retrospective_shadow.py` | Scorer READ-ONLY de la retrospectiva pre-decision (v3.57.0). Compara `contrarian` vs el resto con Wilson, y evalua el **gate pre-declarado de 4 condiciones** (n>=25 · WR peor · CI que no cruza · PnL/trade peor). Tambien reporta si el loop de `directional_lessons` se esta CONSULTANDO — 0 consultas = mecanismo escrito y desconectado, el sintoma clasico de este proyecto. |
+| `backfill_directional_lessons.py` | Siembra `directional_lessons` desde `trade_archive` con el MISMO criterio del path vivo, para que la retrospectiva no arranque ciega (19 lecciones desde el 20-jun). **Dry-run por default.** Limite declarado: el archive no guarda MFE, usa `max(0,pips)` como cota inferior => puede emitir falsos positivos de "gestion" etiquetados como "direccion"; se distinguen por el prefijo `[backfill]` en `evidence`. |
+| `measure_news_latency.py` | READ-ONLY: ¿news llega tarde por construccion? Nace del research del 19-ago (993 eventos USD 2022-2025: la deriva post-release esta **contenida en las velas +1..+5**; desde la +6 los T dan 0,14-0,69, y ~80% del movimiento se completa en **3 minutos**). **Resultado sobre 871 alerts: mediana 8,9 min, solo 7,7% dentro de los 3 min, y el LLM tarda 0,2 min ⇒ el cuello de botella es el FEED, no el analisis** — un prompt no puede arreglarlo (consistente con que v3.47.0 no moviera el edge). El corte `<=3min` da 60,5% WR vs 51,3% pero **CI [45,6-73,6] cruza el baseline ⇒ NO pasa el gate**, y corre sobre `alert_result`, no broker-truth. *Ojo metodologico: la 1ra version reportaba 398 min por sumar `published_at` en UTC con `fetched_at` en hora AR — el script trae ahora un control de sanidad que falla si el offset se rompe.* |
 | `nightly_analyst.py` | LLM analyst on-demand desde el dashboard (▶ Run analyst). Opus → Groq → Ollama. Propone cambios JSON con min-sample + guard-rails; arranca shadow validation vía auto_applier. |
 | `backtest_parallel.py` · `backtest_weekly.py` | Backtest paralelo de combinaciones de filtros sobre `trade_archive` + wrapper semanal con aviso por Telegram. |
 | `clean_test_rows_v3536.py` | Limpieza de las filas que un TEST escribió en la DB de producción (incidente `#999`). **Dry-run por default.** Criterio = `strategy_id` sobre el máximo jamás asignado (NO «huérfana»), aborta si el id aparece en `aidan.log`. Backup + CSV + rollback. No toca `trade_archive`. |
@@ -918,7 +978,29 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 ---
 ---
 
-**Última actualización**: 16 Ago 2026 — **v3.55.0: el piso de ATR de m15 pasa de 5 a 8, como perilla
+**Última actualización**: 19 Ago 2026 — **v3.57.0: la retrospectiva PRE-decisión (en shadow), el
+cableado que faltaba, y un research que cierra dos puertas.** Pedido del user: que AIdan pueda razonar
+*"esta señal era CALL y no PUT por X razones"* **antes** de la próxima decisión, sin bajar frecuencia.
+Implementado como **nudge de confianza, nunca filtro** (`RETRO_MODE=shadow` por default: calcula y
+registra con delta 0, porque todavía no hay UNA medición de que el veredicto discrimine). Cierra el
+loop con `directional_lessons`, cuyo criterio se deriva en **código** — perdió **y** nunca se puso a
+favor **y** pegó el SL, las tres juntas — no lo escribe el LLM. **Lo que apareció al armarlo:**
+`setup_type` codifica la dirección (`trend_continuation_bull` es siempre CALL) ⇒ el lado opuesto tenía
+n=0 SIEMPRE y la pregunta era inrespondible; de ahí las familias dirección-neutras. Se descubrió
+ejecutándolo contra la DB real, no leyéndolo. **Además** se cableó `adjust_setup_confidence`, que
+existía desde v3.31.0 y **nunca se llamaba desde ningún lado**, y se entregó la perilla
+`ENABLE_NEWS_TRACK` (default ON: la decisión de girarla es del user). **Honestidad sobre el alcance:**
+los gates de `min_confidence` viven dentro de los detectores y el lote sale de `sl_pips` ⇒ el nudge es
+frecuencia- y tamaño-neutro **pero hoy inerte sobre la ejecución**; su valor es el registro y la
+muestra. Suite 75 → 111 tests. Gate de 4 condiciones pre-declarado en
+`tools/score_retrospective_shadow.py`; si con n≥40 no separa, `RETRO_MODE=off`.
+**Del research** ([`docs/research_mercado_2026-08-19.md`](docs/research_mercado_2026-08-19.md)): el
+edge bruto intradía por debajo del costo es la norma (14/14 familias fallaron en 947 días), el
+pullback-entry queda refutado por dos vías, y el piso de ATR debería ser por **percentil** y no en
+pips fijos. Y midiendo la latencia de news salió que **el cuello de botella es el feed (mediana 8,9
+min), no el LLM (0,2 min)** — con lo que ningún prompt puede arreglar ese track.
+
+**Anterior**: 16 Ago 2026 — **v3.55.0: el piso de ATR de m15 pasa de 5 a 8, como perilla
 de env.** Salió de preguntar por qué m15 pierde tanto (es el peor track: −$124 lifetime, −$24,59 de
 los −$37 de la última quincena). La respuesta no es "m15 está roto" sino **"m15 sangra en chop"**:
 necesita ~40,5% de WR para empatar (ganador medio +7,8p, perdedor −5,3p) y con ATR ≤8p saca **27,8%**

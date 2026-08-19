@@ -1933,6 +1933,30 @@ class AIdan:
                                                                 # historico de dynamic_conf + block_setup_type + adjust_setup_confidence.
                                                                 'setup_type': f"news_{result.get('level') or 'unknown'}",
                                                             }
+                                                            # v3.57.0 — LATENCIA de la noticia, clasificada EN EL MOMENTO.
+                                                            # Research 19-ago: sobre 993 eventos USD de alto impacto
+                                                            # (2022-2025) la deriva post-release esta contenida en las velas
+                                                            # +1..+5 (el spike); desde la +6 los T dan 0,14-0,69. Y ~80% del
+                                                            # movimiento se completa en los primeros 3 MINUTOS.
+                                                            # Medido sobre los 871 alerts direccionales de AIdan: mediana de
+                                                            # deteccion 8,9 min y solo el 7,7% dentro de los 3 min => AIdan
+                                                            # entra, tipicamente, cuando el movimiento informativo ya paso.
+                                                            # Retrospectivamente el bucket <=3min rinde 60,5% vs 51,3% de
+                                                            # baseline, PERO n=43 con CI95 [45,6-73,6] que CRUZA el baseline
+                                                            # => NO pasa el gate, y encima corre sobre `alert_result` (no
+                                                            # broker-truth). Por eso aca no se filtra ni se ajusta NADA: se
+                                                            # guarda el numero para poder medirlo limpio contra `mt5_pnl`.
+                                                            try:
+                                                                _pub_ar = get_news_fetch_time(news_id)
+                                                                if _pub_ar:
+                                                                    from datetime import datetime as _ldt
+                                                                    from src.common.db import now_ar as _lnow
+                                                                    _p = _ldt.strptime(str(_pub_ar).split('.')[0].replace('T', ' '),
+                                                                                       '%Y-%m-%d %H:%M:%S')
+                                                                    _news_entry_ctx['news_latency_min'] = round(
+                                                                        (_lnow().replace(tzinfo=None) - _p).total_seconds() / 60.0, 1)
+                                                            except Exception as _lex:
+                                                                logger.warning(f"news_latency_min no calculada para news #{news_id}: {_lex}")
                                                             sid = add_auto_strategy(
                                                                 alert_id=row[0], news_title=title,
                                                                 direction=direction, entry_price=price,
