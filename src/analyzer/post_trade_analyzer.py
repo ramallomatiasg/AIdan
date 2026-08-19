@@ -144,6 +144,56 @@ def derive_quality(pct_tp, pct_devuelto, mfe_pips, confidence, hit_sl):
     }
 
 
+#: por debajo de este % del TP el precio nunca se puso a favor (mismo umbral que
+#: `derive_quality` usa para entry_quality='poor', anclado al hallazgo de v3.53.2).
+LESSON_POOR_PCT_TP = 20.0
+
+
+def derive_directional_lesson(direction, mt5_pnl, pct_tp, mfe_pips, pips, sl_pips, hit_sl):
+    """v3.57.0 — "¿hubiera sido mejor la direccion opuesta?", decidido en CODIGO.
+
+    Se emite leccion SOLO cuando las tres cosas pasan juntas:
+      1. el trade perdio plata (`mt5_pnl < 0`),
+      2. el precio nunca se puso a favor (`pct_tp` < 20 %),
+      3. y se fue en contra de forma decisiva (pego el SL).
+
+    Con esas tres, la afirmacion "la opuesta era la correcta" no es una opinion:
+    el precio recorrio al menos un SL completo en la direccion contraria mientras
+    apenas se movio a favor. Es la unica forma de este juicio que no depende de
+    re-simular nada — y por eso no la escribe el LLM (el A/B de v3.53.7 mostro que
+    el modelo de 7B pone entry_quality='good' en el 93 % de los PERDEDORES).
+
+    Devuelve None cuando NO corresponde. Un `None` es informacion: significa que
+    el trade perdio por gestion o por ruido, no por leer mal la direccion.
+    """
+    try:
+        _pnl = float(mt5_pnl or 0)
+        _pct = float(pct_tp or 0)
+        _sl = float(sl_pips or 0)
+    except (TypeError, ValueError):
+        logger.warning(f"derive_directional_lesson: valores no numericos "
+                       f"(pnl={mt5_pnl!r} pct_tp={pct_tp!r} sl_pips={sl_pips!r})")
+        return None
+
+    d = (direction or '').upper()
+    opp = {'CALL': 'PUT', 'PUT': 'CALL'}.get(d)
+    if not opp or _sl <= 0:
+        return None
+    if _pnl >= 0 or _pct >= LESSON_POOR_PCT_TP or not hit_sl:
+        return None
+
+    return {
+        'direction_taken': d,
+        'better_direction': opp,
+        'mfe_pips': round(float(mfe_pips or 0), 1),
+        'pct_tp': round(_pct, 1),
+        'mt5_pnl': round(_pnl, 2),
+        'evidence': (f"a favor solo {round(float(mfe_pips or 0), 1)}p ({round(_pct, 1)}% del TP); "
+                     f"en contra {round(abs(float(pips or 0)), 1)}p contra un SL de {round(_sl, 1)}p"),
+        'note': f"{d} perdio sin recorrido a favor y pego el SL -> el movimiento fue {opp}",
+    }
+
+
 def analyze_closed_trade(trade_data: dict) -> dict | None:
     """
     Analiza un trade cerrado usando Gemma 4.
@@ -330,6 +380,23 @@ def analyze_closed_trade(trade_data: dict) -> dict | None:
             # Pass trade context for downstream aggregation
             'trigger_type': trade_data.get('trigger_type', ''),
         }
+
+        # v3.57.0 — la leccion DIRECCIONAL, que cierra el loop hacia la
+        # retrospectiva pre-trade. Se adjunta al analisis; la persiste
+        # `save_post_trade_analysis`. Puede ser None (lo normal).
+        _lesson = derive_directional_lesson(
+            direction=ctx['direction'], mt5_pnl=ctx['mt5_pnl'], pct_tp=ctx['pct_tp'],
+            mfe_pips=ctx['mfe_pips'], pips=_pips, sl_pips=ctx['sl_pips'], hit_sl=_hit_sl)
+        if _lesson:
+            _lesson.update({
+                'setup_type': trade_data.get('setup_type', '') or trade_data.get('trigger_type', ''),
+                'trigger_type': trade_data.get('trigger_type', ''),
+                'volatility': ctx['volatility'],
+                'session': ctx['session'],
+                'htf_bias': ctx['htf_bias'],
+            })
+            logger.info(f"Leccion direccional: {_lesson['note']} | {_lesson['evidence']}")
+        analysis['directional_lesson'] = _lesson
 
         logger.info(f"Post-trade analysis: entry={analysis['entry_quality']} exit={analysis['exit_quality']} "
                      f"timing={analysis['timing_assessment']} sl_action={sl_action} rec_sl={rec_sl}p rec_tp={rec_tp}p | {analysis['key_lesson']}")

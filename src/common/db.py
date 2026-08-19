@@ -352,6 +352,69 @@ def init_db():
         )
     """)
 
+    # v3.57.0 — Retrospectiva PRE-decision. Una fila por senal evaluada.
+    # Es el REGISTRO de por que se decidio lo que se decidio: el veredicto contra
+    # los trades similares, la muestra que lo sostiene y el delta sugerido/aplicado.
+    # `conf_delta_applied` != `conf_delta_suggested` cuando RETRO_MODE=shadow.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pre_trade_retrospective (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER,
+            mode TEXT,
+            verdict TEXT,
+            direction TEXT,
+            setup_type TEXT,
+            trigger_type TEXT,
+            volatility TEXT,
+            matched_on TEXT,
+            n_similar INTEGER,
+            n_same INTEGER,
+            n_opp INTEGER,
+            wr_same REAL,
+            wr_opp REAL,
+            pnl_same REAL,
+            pnl_opp REAL,
+            lesson_hits INTEGER,
+            conf_before REAL,
+            conf_delta_suggested INTEGER,
+            conf_delta_applied INTEGER,
+            meta_delta_applied INTEGER,
+            reason TEXT,
+            features_json TEXT,
+            created_at TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_retro_sid ON pre_trade_retrospective(strategy_id)")
+
+    # v3.57.0 — Lecciones DIRECCIONALES. Cierra el loop: el post-trade concluye
+    # "hubiera sido mejor la opuesta" y la retrospectiva pre-trade lo lee en la
+    # proxima senal del mismo setup.
+    #
+    # `better_direction` se deriva en CODIGO, no lo dice el LLM: el A/B de v3.53.7
+    # ya mostro que el modelo de 7B etiqueta por costumbre (entry_quality='good' en
+    # el 93% de los PERDEDORES). La regla esta en `derive_directional_lesson`.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS directional_lessons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id INTEGER,
+            setup_type TEXT,
+            trigger_type TEXT,
+            direction_taken TEXT,
+            better_direction TEXT,
+            volatility TEXT,
+            session TEXT,
+            htf_bias TEXT,
+            mfe_pips REAL,
+            pct_tp REAL,
+            mt5_pnl REAL,
+            evidence TEXT,
+            note TEXT,
+            created_at TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_dirlesson_sid ON directional_lessons(strategy_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dirlesson_setup ON directional_lessons(setup_type, better_direction)")
+
     # Learning insights (what AIdan discovered)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS learning_insights (
@@ -1209,19 +1272,23 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
 
     # v3.31.0 — Meta-optimization filter check.
     # Si hay active_meta_filters que bloquean este signal, no crear el trade.
+    # v3.57.0 — `_ctx`/`_check_signal` se construyen FUERA del try: los consumen
+    # tambien el ajuste de confianza y la retrospectiva de mas abajo, y si una
+    # excepcion aca dejaba sin definir el dict, aquello estallaba con NameError.
+    _ctx = entry_context or {}
+    _check_signal = {
+        'direction': direction,
+        'confidence': confidence,
+        'trigger_type': trigger_type,
+        'setup_type': _ctx.get('setup_type', ''),
+        'session': _ctx.get('session', ''),
+        'hour_utc': _ctx.get('hour_utc'),
+        'day_of_week': _ctx.get('day_of_week'),
+        'htf_bias': _ctx.get('htf_bias', ''),
+        'volatility': _ctx.get('volatility', ''),
+    }
     try:
         from src.optimizer.change_manager import is_signal_blocked_by_meta_filters
-        _ctx = entry_context or {}
-        _check_signal = {
-            'direction': direction,
-            'confidence': confidence,
-            'trigger_type': trigger_type,
-            'setup_type': _ctx.get('setup_type', ''),
-            'session': _ctx.get('session', ''),
-            'hour_utc': _ctx.get('hour_utc'),
-            'day_of_week': _ctx.get('day_of_week'),
-            'htf_bias': _ctx.get('htf_bias', ''),
-        }
         blocked, reason = is_signal_blocked_by_meta_filters(_check_signal)
         if blocked:
             import logging
@@ -1230,6 +1297,51 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
     except Exception as _ex:
         import logging
         logging.getLogger('db').debug(f"meta-filter check err: {_ex}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # v3.57.0 — AJUSTES DE CONFIANZA (nunca bloqueos). Dos fuentes:
+    #
+    #   (a) meta-optimizer `adjust_setup_confidence`. Estaba IMPLEMENTADO y
+    #       validado por shadow desde v3.31.0 pero `get_confidence_adjustment_for_signal`
+    #       no se llamaba desde ningun lado — el cambio existia y no podia aplicarse
+    #       jamas. Este es el cableado que faltaba.
+    #   (b) retrospectiva pre-decision: compara la senal contra los trades
+    #       similares y penaliza si la direccion opuesta era la que pagaba.
+    #       Arranca en RETRO_MODE=shadow => calcula y registra, delta 0.
+    #
+    # POR QUE ESTO NO BAJA LA FRECUENCIA: todos los gates de `min_confidence`
+    # corren DENTRO de los detectores, antes de llegar aca; y el lote sale de
+    # `sl_pips`, no de la confianza (`mt5_executor.open_position`). El ajuste es
+    # frecuencia-neutro y tamano-neutro por construccion, no por disciplina.
+    _conf_before = confidence
+    _meta_delta = 0
+    _retro = None
+    try:
+        from src.optimizer.change_manager import get_confidence_adjustment_for_signal
+        _meta_delta = int(get_confidence_adjustment_for_signal(_check_signal) or 0)
+    except Exception as _ex:
+        import logging
+        logging.getLogger('db').warning(f"meta conf-adjust err: {_ex}", exc_info=True)
+    try:
+        from src.analyzer.pre_trade_retrospective import evaluate as _retro_eval
+        _retro = _retro_eval(_check_signal)
+    except Exception as _ex:
+        import logging
+        logging.getLogger('db').warning(f"retrospectiva pre-trade err: {_ex}", exc_info=True)
+
+    _retro_delta = int((_retro or {}).get('conf_delta', 0) or 0)
+    if _meta_delta or _retro_delta:
+        try:
+            confidence = max(1, min(99, float(confidence) + _meta_delta + _retro_delta))
+            import logging
+            logging.getLogger('db').info(
+                f"Conf ajustada {_conf_before} -> {confidence} "
+                f"(meta {_meta_delta:+d}, retro {_retro_delta:+d}) "
+                f"{direction} {trigger_type} setup={_check_signal.get('setup_type')}")
+        except (TypeError, ValueError) as _ex:
+            import logging
+            logging.getLogger('db').warning(f"conf adjust no aplicado: {_ex}")
+            confidence = _conf_before
 
     conn = _connect()
     cursor = conn.cursor()
@@ -1451,6 +1563,21 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
             except Exception:
                 pass
         conn.commit()
+
+        # v3.57.0 — REGISTRO de la decision. Se escribe siempre que la
+        # retrospectiva corrio, incluido veredicto `insufficient`/`error`: la
+        # ausencia de fila debe significar "no se evaluo", nunca "se evaluo y no
+        # dio nada". Sin esa distincion no hay forma de detectar el subsistema
+        # muerto (asi estuvo roto M15 dos semanas).
+        if _retro is not None:
+            try:
+                save_pre_trade_retrospective(
+                    new_id, _retro, conf_before=_conf_before,
+                    meta_delta=_meta_delta, features=_check_signal)
+            except Exception as _rex:
+                import logging
+                logging.getLogger('db').warning(
+                    f"retro #{new_id} no se registro: {_rex}", exc_info=True)
 
         # v3.31.0 — Meta-optimization shadow runner hook
         # Tras crear el auto_strategy, evaluar contra pending_changes en shadow_validating.
@@ -3260,6 +3387,157 @@ def get_entry_context(strategy_id):
     return {}
 
 
+def get_similar_trades(setup_type='', trigger_type='', volatility='', limit=40,
+                       setup_types=None):
+    """v3.57.0 — Trades CERRADOS parecidos a una senal, para la retrospectiva pre-trade.
+
+    Solo `trade_archive` con `mt5_pnl IS NOT NULL` (broker-truth: la regla del
+    proyecto es no medir nunca sobre outcomes simulados).
+
+    `setup_types` (lista) tiene prioridad sobre `setup_type` (uno solo): la
+    retrospectiva consulta por FAMILIA de setup, porque los nombres codifican la
+    direccion (`trend_continuation_bull` es siempre CALL) y comparando por
+    setup exacto el lado opuesto tiene n=0 siempre. Si no hay ninguno de los dos,
+    cae a `trigger_type`. `volatility` solo se aplica cuando viene con valor: el
+    caller elige el escalon de especificidad y registra cual uso.
+
+    Devuelve los mas RECIENTES primero (created_at DESC), maximo `limit`.
+    """
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    try:
+        where = ["mt5_pnl IS NOT NULL"]
+        params = []
+        _st = [s for s in (setup_types or []) if s]
+        if _st:
+            where.append(f"setup_type IN ({','.join('?' * len(_st))})")
+            params += _st
+        elif setup_type:
+            where.append("setup_type = ?")
+            params.append(setup_type)
+        elif trigger_type:
+            where.append("trigger_type = ?")
+            params.append(trigger_type)
+        if volatility:
+            where.append("volatility = ?")
+            params.append(volatility)
+        params.append(int(limit))
+        cursor.execute(f"""
+            SELECT strategy_id, direction, setup_type, trigger_type, volatility,
+                   session, htf_bias, confidence, pips, mt5_pnl, result, created_at
+            FROM trade_archive
+            WHERE {' AND '.join(where)}
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, params)
+        return [dict(r) for r in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_directional_lessons(setup_type='', better_direction='', days=90, limit=20,
+                            setup_types=None):
+    """v3.57.0 — Lecciones direccionales vigentes para un setup.
+
+    `days` acota la ventana a proposito: una leccion de hace 4 meses describe un
+    regimen que ya se dio vuelta dos veces en este proyecto (el "chop toxico" del
+    3-jul se invirtio el 17-jul).
+    """
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    try:
+        where, params = [], []
+        _st = [s for s in (setup_types or []) if s]
+        if _st:
+            # Igual que `get_similar_trades`: se consulta por FAMILIA de setup.
+            where.append(f"setup_type IN ({','.join('?' * len(_st))})")
+            params += _st
+        elif setup_type:
+            where.append("(setup_type = ? OR trigger_type = ?)")
+            params += [setup_type, setup_type]
+        if better_direction:
+            where.append("better_direction = ?")
+            params.append(better_direction)
+        cutoff = now_ar() - timedelta(days=int(days))
+        where.append("created_at >= ?")
+        params.append(cutoff)
+        params.append(int(limit))
+        cursor.execute(f"""
+            SELECT * FROM directional_lessons
+            WHERE {' AND '.join(where)}
+            ORDER BY created_at DESC LIMIT ?
+        """, params)
+        return [dict(r) for r in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def add_directional_lesson(lesson: dict):
+    """v3.57.0 — Persiste una leccion direccional. Idempotente por strategy_id
+    (UNIQUE index + INSERT OR IGNORE): el post-trade puede correr dos veces para
+    el mismo trade y no debe duplicar evidencia.
+    """
+    conn = _connect()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT OR IGNORE INTO directional_lessons
+                (strategy_id, setup_type, trigger_type, direction_taken, better_direction,
+                 volatility, session, htf_bias, mfe_pips, pct_tp, mt5_pnl, evidence, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            lesson.get('strategy_id'), lesson.get('setup_type', ''), lesson.get('trigger_type', ''),
+            lesson.get('direction_taken', ''), lesson.get('better_direction', ''),
+            lesson.get('volatility', ''), lesson.get('session', ''), lesson.get('htf_bias', ''),
+            lesson.get('mfe_pips'), lesson.get('pct_tp'), lesson.get('mt5_pnl'),
+            lesson.get('evidence', ''), lesson.get('note', '')[:300], now_ar(),
+        ))
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def save_pre_trade_retrospective(strategy_id, retro: dict, conf_before=None,
+                                 meta_delta=0, features=None):
+    """v3.57.0 — Guarda el veredicto de la retrospectiva pre-decision.
+
+    Se llama SIEMPRE que se evalua una senal, incluso con veredicto
+    `insufficient` o `error`: la ausencia de fila tiene que significar "no se
+    evaluo", no "se evaluo y no dio nada". Sin eso no se puede distinguir
+    despues un subsistema muerto de uno que corrio y no encontro patron — que es
+    exactamente como M15 estuvo roto 2 semanas sin que nadie lo viera.
+    """
+    import json as _json
+    conn = _connect()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO pre_trade_retrospective
+                (strategy_id, mode, verdict, direction, setup_type, trigger_type, volatility,
+                 matched_on, n_similar, n_same, n_opp, wr_same, wr_opp, pnl_same, pnl_opp,
+                 lesson_hits, conf_before, conf_delta_suggested, conf_delta_applied,
+                 meta_delta_applied, reason, features_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            strategy_id, retro.get('mode', ''), retro.get('verdict', ''),
+            (features or {}).get('direction', ''), (features or {}).get('setup_type', ''),
+            (features or {}).get('trigger_type', ''), (features or {}).get('volatility', ''),
+            retro.get('matched_on', ''), retro.get('n_similar', 0), retro.get('n_same', 0),
+            retro.get('n_opp', 0), retro.get('wr_same'), retro.get('wr_opp'),
+            retro.get('pnl_same', 0.0), retro.get('pnl_opp', 0.0), retro.get('lesson_hits', 0),
+            conf_before, retro.get('conf_delta_suggested', 0), retro.get('conf_delta', 0),
+            int(meta_delta or 0), retro.get('reason', '')[:400],
+            _json.dumps(features or {}, default=str), now_ar(),
+        ))
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
 def save_post_trade_analysis(strategy_id, analysis, result=None):
     """Save post-trade analysis from Gemma 4."""
     import json as _json
@@ -3305,6 +3583,22 @@ def save_post_trade_analysis(strategy_id, analysis, result=None):
         conn.commit()
     finally:
         conn.close()
+
+    # v3.57.0 — cierre del loop: si el post-trade derivo una leccion direccional,
+    # persistirla para que la retrospectiva pre-trade la lea en la proxima senal
+    # del mismo setup. Fuera del `finally` de arriba a proposito (conexion propia).
+    # Falla RUIDOSA: si esto se rompe, el loop de aprendizaje queda muerto en
+    # silencio, que es la clase de bug que mas dano hizo en este proyecto.
+    _lesson = (analysis or {}).get('directional_lesson')
+    if _lesson:
+        try:
+            _lesson = dict(_lesson)
+            _lesson['strategy_id'] = strategy_id
+            add_directional_lesson(_lesson)
+        except Exception as _le:
+            import logging
+            logging.getLogger('db').warning(
+                f"directional_lesson #{strategy_id} no se guardo: {_le}", exc_info=True)
 
 
 def get_post_trade_analyses(limit=20):
