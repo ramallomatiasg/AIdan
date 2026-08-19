@@ -1900,6 +1900,16 @@ class AIdan:
                                                         elif _news_conf < (30 if result.get('impact_score', 0) >= 55 else prof_min_conf):
                                                             _eff_min = 30 if result.get('impact_score', 0) >= 55 else prof_min_conf
                                                             logger.info(f"Min confidence gate: skipping news {direction}, conf {_news_conf} < effective min {_eff_min} (impact={result.get('impact_score')})")
+                                                        # v3.57.0 — TOGGLE del track news (`ENABLE_NEWS_TRACK`, env, sin rebuild).
+                                                        # Corta la EJECUCION direccional, no la medicion: el alert ya quedo
+                                                        # guardado arriba, asi que la habilidad direccional del LLM se sigue
+                                                        # midiendo con `tools/measure_news_llm_error.py` estando apagado.
+                                                        # DEFAULT = 'true' (news sigue operando) a proposito: el user decidio
+                                                        # el 7-ago "news NO se apaga, se arregla", y hay un veredicto
+                                                        # pre-declarado para ~28 ago (v3.51.0). Esto entrega la PERILLA, no
+                                                        # la decision de girarla.
+                                                        elif os.getenv('ENABLE_NEWS_TRACK', 'true').strip().lower() in ('0', 'false', 'no', 'off'):
+                                                            logger.info(f"News track OFF (ENABLE_NEWS_TRACK): no se crea trade para {direction} conf={_news_conf} — el alert SI queda medido")
                                                         else:
                                                             # FAST PATH: create strategy + MT5 order FIRST, audit async
                                                             # Build entry context for atomic persist (avoids race with fast MT5 fills)
