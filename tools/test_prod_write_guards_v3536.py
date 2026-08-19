@@ -56,7 +56,7 @@ c.execute("""CREATE TABLE strategy_results (id INTEGER PRIMARY KEY AUTOINCREMENT
 c.execute("""CREATE TABLE post_trade_analysis (id INTEGER PRIMARY KEY AUTOINCREMENT,
     strategy_id INTEGER NOT NULL, result TEXT, entry_quality TEXT, exit_quality TEXT,
     news_accuracy TEXT, timing_assessment TEXT, key_lesson TEXT, confidence_was TEXT,
-    suggested_adjustment TEXT, raw_response TEXT, analyzed_at TEXT DEFAULT (datetime('now')))""")
+    suggested_adjustment TEXT, raw_response TEXT, missed_factor TEXT, analyzed_at TEXT DEFAULT (datetime('now')))""")
 c.execute("INSERT INTO auto_strategies (id, direction, status, trigger_type) VALUES (500,'PUT','active','smc')")
 c.commit(); c.close()
 
@@ -123,10 +123,13 @@ n999 = p.execute("SELECT COUNT(*) FROM post_trade_analysis WHERE strategy_id > ?
 check('0 post_trade_analysis con strategy_id imposible', n999 == 0, f'quedan={n999}')
 n999sr = p.execute("SELECT COUNT(*) FROM strategy_results WHERE strategy_id > ?", (max_real,)).fetchone()[0]
 check('0 strategy_results con strategy_id imposible', n999sr == 0, f'quedan={n999sr}')
-n_pt = p.execute("SELECT COUNT(*) FROM post_trade_analysis").fetchone()[0]
-check('los analisis REALES siguen (589 = 619 - 30)', n_pt == 589, f'hay={n_pt}')
-n_arch = p.execute("SELECT COUNT(*) FROM trade_archive").fetchone()[0]
-check('trade_archive INTACTO (585, la limpieza no lo toca)', n_arch == 585, f'hay={n_arch}')
+# v3.58.x — los conteos absolutos (589/585) eran el snapshot del 8-ago y se pudrian
+# con cada trade nuevo (lo tapo el OperationalError de missed_factor hasta hoy). El
+# invariante REAL es relativo: ninguna fila legitima (id <= max_real) desaparecio.
+n_pt = p.execute("SELECT COUNT(*) FROM post_trade_analysis WHERE strategy_id <= ?", (max_real,)).fetchone()[0]
+check('los analisis REALES siguen (>= 589 del snapshot 8-ago)', n_pt >= 589, f'hay={n_pt}')
+n_arch = p.execute("SELECT COUNT(*) FROM trade_archive WHERE strategy_id <= ?", (max_real,)).fetchone()[0]
+check('trade_archive INTACTO (>= 585 del snapshot 8-ago)', n_arch >= 585, f'hay={n_arch}')
 ok = p.execute("PRAGMA integrity_check").fetchone()[0]
 check('integrity_check ok', ok == 'ok', str(ok))
 # el respaldo existe
