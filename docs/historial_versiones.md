@@ -6,6 +6,47 @@ En CLAUDE.md queda la tabla corta de las últimas versiones y un puntero acá.
 
 ---
 
+## v3.59.0 — P calibrada de m15 en FASE REGISTRO (20 Ago 2026)
+
+Contexto: el user reclamo (con razon) que "siempre me decis que la confianza esta mal
+calibrada pero no me das solucion". La solucion siempre tuvo condicion: ~300 trades limpios
+(regla del 11-may; con menos = overfit garantizado, y la calibracion de Platt del 5-ago
+efectivamente NO paso su gate). El 20-ago se contaron **309 limpios** desde el 5-jun ⇒ se
+re-corrio `calibrate_confidence.py` y dio el **primer PASA en 4 meses**:
+
+- **m15_structure: Platt Brier held-out 0.2214 < gate 0.230 y < constante 0.2342** (n=94,
+  train 65 hasta 28-jul, test 29). PASA.
+- structure (0.2533) y el global (0.2384): NO PASAN.
+- La conf cruda sigue siendo pesima como probabilidad (Brier 0.36-0.43).
+
+**Limite conocido, dicho antes de festejar:** el test son ~29 filas y el modelo quedo
+sobre-confiado en TODOS los buckets (predicha 33-51% vs real menor). Por eso lo aprobado por
+el user fue la **fase registro**, no la activacion.
+
+**Implementacion (v3.59.0):**
+- `src/analyzer/confidence_calibration.py` — params **CONGELADOS** del fit que paso
+  (a=0.341758, b=-0.160627, mu=79.923077, sd=10.148600, train_wr=46.15%). Congelados porque
+  si el fit se re-entrenara con cada trade, el forward dejaria de ser un held-out honesto.
+  `calibrated_p()` devuelve None para todo track sin fit aprobado (None, nunca 0.5).
+- Hook en `add_auto_strategy` (db.py), DESPUES de los ajustes meta/retro de v3.57.0: la P se
+  calcula sobre la confianza FINAL (la que se guarda, que es sobre la que se entreno) y se
+  persiste en `entry_context.calibrated_p`. Fail-loud (WARNING con stack).
+- `tools/score_calibrated_p_forward.py` — scorer read-only con gate pre-declarado:
+  **n>=40 cerrados · Brier(calibrada) < Brier(constante train 46.15%) · Brier < 0.230.
+  Si a n>=60 no pasa ⇒ borrar el modulo** (el PASA del 20-ago era artefacto del test chico).
+  Tripwire de subsistema muerto: senal m15 creada post-deploy sin registro = buscar
+  "calibrated_p no registrada" en aidan.log.
+- `tools/test_calibrated_p_v3590.py` — 23 checks: formula identica a `apply_platt` del
+  calibrador · alcance (solo m15; None para el resto y para basura) · **E2E call-site contra
+  DB temporal** (add_auto_strategy real registra, y sobre la conf guardada) · **inercia**
+  (ningun path de decision consume `calibrated_p`; db.py solo la registra).
+
+Regresiones: test_prod_write_guards 23/23, test_skip_status 27/27.
+Lectura: ~10 sep (m15 hace ~1-3 trades/dia ⇒ n=40 son ~3-5 semanas). NO mezclar con la
+lectura del ~1-sep del M15_ATR_FLOOR: cualquier activacion se discute despues de esa.
+
+---
+
 ## v3.58.0 / v3.58.1 — Sesion de instrumentacion del roadmap de RESEARCH_INVESTIGATION.md (19 Ago 2026)
 
 Ejecucion de los 5 items del roadmap del research del 19-ago. **Ninguno cambia una decision

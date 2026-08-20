@@ -1409,6 +1409,22 @@ def add_auto_strategy(alert_id, news_title, direction, entry_price, stop_loss, t
             logging.getLogger('db').warning(f"conf adjust no aplicado: {_ex}")
             confidence = _conf_before
 
+    # v3.59.0 — REGISTRO de la P calibrada (fase registro, 0 efecto en decision).
+    # Se calcula sobre la confianza FINAL (post meta/retro, que es lo que se
+    # guarda y sobre lo que se entreno la calibracion) y se persiste en
+    # entry_context.calibrated_p. Solo devuelve valor para tracks cuyo fit
+    # paso el gate (hoy: m15_structure). Ver src/analyzer/confidence_calibration.py.
+    try:
+        from src.analyzer.confidence_calibration import calibrated_p as _cal_p_fn
+        _cal_p = _cal_p_fn(trigger_type, confidence)
+        if _cal_p is not None:
+            if entry_context is None:
+                entry_context = {}
+            entry_context['calibrated_p'] = _cal_p
+    except Exception as _ex:
+        import logging
+        logging.getLogger('db').warning(f"calibrated_p no registrada: {_ex}", exc_info=True)
+
     conn = _connect()
     cursor = conn.cursor()
     try:
