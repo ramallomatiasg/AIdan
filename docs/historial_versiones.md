@@ -6,6 +6,46 @@ En CLAUDE.md queda la tabla corta de las últimas versiones y un puntero acá.
 
 ---
 
+## v3.60.0 — Shadow trader LLM por Groq: decide en PAPEL, jamas opera (20 Ago 2026)
+
+Pedido del user: un LLM "constantemente controlando, viendo de salir antes, cerrar operacion,
+abrir posicion, ver oportunidades, autorecursivo". La respuesta acordada: NO darle el volante
+(cada LLM medido decidiendo direccion aca perdio — news anti-skill 53% vs drift 63%; y un
+decisor no-determinista destruiria la capacidad de diagnostico), SI darle la oportunidad de
+demostrarlo en papel, con registro limpio y gate.
+
+**Implementacion:**
+- `src/analyzer/shadow_trader.py` — el "operador": arma prompts SOLO con numeros (anti-loro,
+  leccion v3.53.7), llama a Groq gpt-oss-120b (rotacion de keys como pre_planner, timeout 20s,
+  reasoning_effort low), parsea defensivo (JSON directo/fence/embebido; basura = None + WARNING,
+  jamas explota) y registra via `log_shadow_trader_decision`. **Sin path de ejecucion por
+  construccion**: no importa ni contiene order_send/open_position/close_position/TRADE_ACTION
+  (test sobre el fuente). Solo lectura de posiciones (positions_get). Guard de tick fresco:
+  no gasta quota con mercado cerrado.
+- Dos tipos de decision: **open** (CALL/PUT/NONE cada SHADOW_TRADER_SCAN_SEC=900s, evaluado a
+  +45 min neto de 1,3p de friccion — mismo horizonte que el shadow book para comparar; NONE
+  tambien se registra, la frecuencia de accion es dato) y **manage** (CLOSE/HOLD por posicion
+  AIdan abierta cada SHADOW_TRADER_CYCLE_SEC=300s, con pips/PnL/edad/distancias al decidir).
+- Tabla `shadow_trader_log` (init_db) — el scorer completa outcome_pips/scored_at.
+- Monolito: solo un timer + guard `_st_mode != 'off'` + try/except propio (un error del shadow
+  trader no puede matar el analyzer loop). Toda la logica en el modulo.
+- `tools/score_shadow_trader.py`: open por drift direccional neto sobre velas M5 (mismo
+  mecanismo de offset-por-tick que score_rejected_signals, sin re-sim SL/TP); manage por
+  broker-truth (trade_archive JOIN mt5_ticket): saved = pips@decision - pips finales.
+  **Gate pre-declarado: open n>=25 con media Y mediana > 0 (a n>=40 sin pasar =>
+  SHADOW_TRADER_MODE=off); CLOSE n>=15 con ahorro neto > 0.** Advertencia impresa: HOLD que
+  termina bien NO es evidencia (sesgo de continuidad).
+- `tools/test_shadow_trader_v3600.py`: 42 checks (sin path de ejecucion · parse defensivo ·
+  registro en DB temporal · call-site en monolito · anti-loro · aritmetica del scorer ·
+  el scorer solo escribe su tabla).
+- Smoke test real contra Groq: JSON valido, PUT conf 65, 758ms.
+
+Perillas en .env.example: SHADOW_TRADER_MODE=off|shadow (default shadow; 'active' NO existe a
+proposito), SHADOW_TRADER_CYCLE_SEC, SHADOW_TRADER_SCAN_SEC. Quota: ~96 open-scans/dia +
+manage solo con posicion abierta — dentro del free tier.
+
+---
+
 ## v3.59.0 — P calibrada de m15 en FASE REGISTRO (20 Ago 2026)
 
 Contexto: el user reclamo (con razon) que "siempre me decis que la confianza esta mal

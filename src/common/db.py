@@ -862,6 +862,33 @@ def init_db():
         )
     """)
 
+    # v3.60.0 — SHADOW TRADER LLM: decisiones en PAPEL de un operador Groq
+    # (kind='open': CALL/PUT/NONE cada ~15 min · kind='manage': CLOSE/HOLD por
+    # posicion abierta cada ~5 min). NINGUNA decision lo lee; el outcome lo
+    # completa tools/score_shadow_trader.py (scored_at NULL = pendiente).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shadow_trader_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            ticket INTEGER,
+            direction TEXT,
+            price REAL,
+            pips_at_decision REAL,
+            pnl_at_decision REAL,
+            age_min REAL,
+            confidence REAL,
+            horizon_min INTEGER,
+            reasoning TEXT,
+            model TEXT,
+            latency_ms INTEGER,
+            outcome_pips REAL,
+            outcome_detail TEXT,
+            scored_at TEXT,
+            created_at TEXT
+        )
+    """)
+
     # v3.58.1 — MAE (maximum adverse excursion) en unidades de PRECIO (<=0), espejo de
     # mt5_high_water. Lo muestrea el thread de trailing (1s). Sin esto, "¿entra mal o
     # gestiona mal?" se contesta con proxies (hwm del PM cada 15s / max(0,pips)).
@@ -3002,6 +3029,38 @@ def log_rejected_signal(track, reason, direction=None, confidence=None, price=No
     except Exception as e:
         import logging
         logging.getLogger('db').warning(f"log_rejected_signal FAILED ({track}/{reason}): {e}")
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def log_shadow_trader_decision(kind, decision, ticket=None, direction=None,
+                               price=None, pips_at_decision=None,
+                               pnl_at_decision=None, age_min=None,
+                               confidence=None, horizon_min=None,
+                               reasoning=None, model=None, latency_ms=None):
+    """v3.60.0 — Shadow trader LLM: una fila por decision EN PAPEL. Solo escribe;
+    ninguna decision de trading lo lee (test de inercia en test_shadow_trader).
+    Fail-loud a WARNING (la clase de bug que mato M15 era el fail-silent)."""
+    conn = None
+    try:
+        conn = _connect()
+        conn.execute("""
+            INSERT INTO shadow_trader_log
+                (kind, decision, ticket, direction, price, pips_at_decision,
+                 pnl_at_decision, age_min, confidence, horizon_min, reasoning,
+                 model, latency_ms, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (kind, decision, ticket, direction, price, pips_at_decision,
+              pnl_at_decision, age_min, confidence, horizon_min, reasoning,
+              model, latency_ms, now_ar()))
+        conn.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger('db').warning(f"log_shadow_trader_decision FAILED ({kind}/{decision}): {e}")
     finally:
         if conn is not None:
             try:

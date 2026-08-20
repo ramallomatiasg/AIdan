@@ -58,6 +58,21 @@ con la razón del cierre.
 - [ ] **🔴 ~28 AGO — VEREDICTO news v3.51.0 (criterio pre-declarado, NO mover).** Medir sobre los news creados desde el 7-ago (n≥15, ~4/semana): **(a) ¿los ganadores pasaron de recorrer 40% del TP a ≥59%?** **(b) ¿los perdedores siguen en ~53% del SL o se estiraron?** (si se estiran, la perilla 2 no está haciendo su trabajo). (c) PnL y WR del track. Query: comparar `|pips|` contra su propio `stop_loss`/`take_profit` por fila (los flags `sl_hit`/`tp_hit` son **tautológicos**, se derivan de `result`+`pips` — no usarlos). **Si no se cumple → `NEWS_MIN_EXPIRY_MIN=15`** (env, sin rebuild) y news vuelve a como estaba. *Decisión del user 7-ago: news NO se apaga, se arregla.*
 - [ ] **🟢 ~1 SEP — FORWARD del piso de ATR de m15 (v3.55.0, `M15_ATR_FLOOR=8`, activo desde el 16-ago).** El hint de "m15 × expansión" creció hasta pasar el gate y se activó: **ATR ≤8p = n=90, WR 27,8%, −$75,59 · ATR >8p = n=31, WR 51,6%, +$18,80** (p=0,0042, CI95 [33,1-69,8%] sin cruzar el 27,8% del comparador, mismo período los dos buckets, ATR clasificado al entrar). El diagnóstico completo: **m15 necesita ~40,5% de WR para empatar** (ganador medio +7,8p, perdedor −5,3p) y en chop saca 28%. **Lo que la revisión adversarial del propio hallazgo encontró y hay que tener presente al leer el forward: el lado BUENO es frágil** — de los +$18,80 unos +$19,49 salen de 2 días, sin ellos queda en −$0,69; sacando los 3 mejores ganadores, −$10,88. **El lado malo sí aguanta** (pierde en las dos mitades: 28,9% y 26,7%). ⇒ **La expectativa correcta es "m15 deja de sangrar", NO "m15 pasa a rentable".** Medir: **(a)** ¿la frecuencia de m15 cayó ~74% como se estimó (3,27 → 0,84 trades/día)? **(b)** ¿el PnL de m15 se acercó a cero, o el bucket >8p también empezó a perder (= el hallazgo era el artefacto de 2 días)? **(c)** ¿cuántos skips loguea (`ATR ... < piso ... -> sin scan (chop)`, 1 por hora)? **Si el bucket que queda pierde igual → `M15_ATR_FLOOR=5.0`** (env, sin rebuild) y m15 vuelve a como estaba. *No afinar el umbral sobre esta muestra: el 8 venía pre-declarado desde el 17-jul; buscar el mejor número sería overfit.*
 
+**🧪 SHADOW NUEVO (20 Ago, v3.60.0) — SHADOW TRADER LLM (Groq). Regla de shadow aplica.**
+Pedido del user ("un LLM que controle todo, cierre antes, abra, autorecursivo"), implementado en la
+forma medible: un "operador" **gpt-oss-120b decide en PAPEL** y todo va a `shadow_trader_log` —
+**open** (CALL/PUT/NONE cada ~15 min, evaluado a +45 min neto de 1,3p de friccion) y **manage**
+(CLOSE/HOLD por posicion AIdan abierta cada ~5 min, comparado despues contra como termino el trade).
+**El modulo no tiene path de ejecucion por construccion** (test lo verifica sobre el fuente; no
+existe modo 'active'). Anti-loro: al modelo se le pasan NUMEROS, nunca veredictos. Guard de tick
+fresco (no gasta quota en finde/mercado cerrado). ~100-300 llamadas Groq/dia, free tier.
+**Contexto que tiene que refutar:** cada LLM medido decidiendo direccion aca PERDIO (news
+anti-skill 53% vs drift 63%). **Gate pre-declarado** (`tools/score_shadow_trader.py`, correr con
+la regla de shadow): open direccionales n>=25 con media Y mediana de pips netos > 0 (a n>=40 sin
+pasar ⇒ `SHADOW_TRADER_MODE=off`); manage CLOSE n>=15 con ahorro neto > 0. *Ojo al leer: HOLD que
+termina bien NO es evidencia (sesgo de continuidad) — lo que puntua es CLOSE que salva y OPEN que
+gana.* Perillas: `SHADOW_TRADER_MODE/CYCLE_SEC/SCAN_SEC` (env, sin rebuild).
+
 **🧪 FASE REGISTRO (20 Ago, v3.59.0) — P CALIBRADA DE m15 (`calibrated_p`). Leer ~10 SEP.**
 El 20-ago se cruzaron los **309 trades limpios** (el umbral de ~300 que la regla del 11-may pedia) y
 `calibrate_confidence.py` dio su **primer PASA**: m15_structure, Brier held-out 0.2214 < gate 0.230
@@ -441,7 +456,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 | Version | Cambio | Estado |
 |---|---|---|
-| v3.59.0 | **P calibrada de m15 en FASE REGISTRO**: con 309 trades limpios la calibración de Platt PASÓ su gate por 1ra vez (m15 Brier 0.2214 < 0.230); params CONGELADOS en `confidence_calibration.py`, `add_auto_strategy` registra `calibrated_p` en `entry_context` — 0 efecto en decisiones. Leer con `score_calibrated_p_forward.py` (~10 sep) | **actual** |
+| v3.60.0 | **Shadow trader LLM (Groq)**: un "operador" gpt-oss-120b decide en PAPEL (open CALL/PUT/NONE cada 15 min · manage CLOSE/HOLD por posición cada 5 min) → `shadow_trader_log`. Sin path de ejecución por construcción (test). Gate en `score_shadow_trader.py`; a n≥40 sin separar ⇒ off | **actual** |
+| v3.59.0 | **P calibrada de m15 en FASE REGISTRO**: con 309 trades limpios la calibración de Platt PASÓ su gate por 1ra vez (m15 Brier 0.2214 < 0.230); params CONGELADOS en `confidence_calibration.py`, `add_auto_strategy` registra `calibrated_p` en `entry_context` — 0 efecto en decisiones. Leer con `score_calibrated_p_forward.py` (~10 sep) | vigente |
 | v3.58.1 | **Instrumentación (0 cambios de decisión)**: MFE/MAE reales por trade (trailing 1s → `mfe_pips`/`mae_pips` en el archive) + **shadow book** (`rejected_signals`, PRFS: outcome forward de lo que se BLOQUEA) + `signal_age_at_fill_min` + `efficiency_ratio` (Kaufman) en `entry_context` | vigente |
 | v3.58.0 | **TCA real**: `log_fill()` existía DESCONECTADO (0 filas en meses) — ahora registra pedido vs fill + spread en cada entrada. Verificado: la cuenta es **Market Execution** ⇒ el `deviation` del request lo ignora el server | vigente |
 | v3.57.2 | El **post-trade ve el razonamiento de la entrada** (`{retro_block}` + campo `missed_factor` con lista cerrada, como COLUMNA): cierra el lazo en el sentido que faltaba | vigente |
@@ -690,6 +706,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `measure_post_trade_value.py` | READ-ONLY: ¿el post-trade del LLM sirve? **Resultado 11-ago: no juzga, etiqueta** — `entry_quality='good'` en el 93% de los PERDEDORES, `timing_assessment` constante en el 100%, y el único que separa es tautológico. No necesita MT5. |
 | `measure_be_cost.py` | READ-ONLY: cuánto cuesta el break-even del trailing (`position_manager_log` ⋈ `trade_archive`, 4 roles). **Resultado 10-ago: los cortados por el BE terminan en +$2,41 ⇒ no cuesta plata; el 74% nunca arma el BE y ahí vive el 100% de la pérdida ⇒ el lever es la ENTRADA.** Mide la mitad visible de la balanza, nunca un neto. |
 | `calibrate_confidence.py` | READ-ONLY: ¿la calibración de Platt vuelve usable la confianza? Split cronológico, Brier held-out, gate pre-declarado <0,230. **5-ago: NO PASA. 20-ago (309 limpios): m15_structure PASA por 1ra vez (0,2214)** ⇒ fase registro v3.59.0. `conf/100` crudo sigue siendo mucho peor que la constante ⇒ **nunca usar la confianza cruda como probabilidad** (p.ej. sizing). |
+| `score_shadow_trader.py` | Scorer del SHADOW TRADER LLM (v3.60.0): completa outcomes de `shadow_trader_log` (SU tabla, lo único que escribe) — open por drift direccional neto de 1,3p a +45 min (velas M5, sin re-sim SL/TP), manage por broker-truth (`trade_archive` ⋈ `mt5_ticket`). Gate pre-declarado: open n≥25 media y mediana > 0 (n≥40 sin pasar ⇒ off); CLOSE n≥15 ahorro > 0. **Regla de shadow: traerlo sin que el user lo pida.** Requiere MT5 para los open. `--dry-run`. |
 | `score_calibrated_p_forward.py` | Scorer READ-ONLY de la fase registro v3.59.0: Brier forward de `calibrated_p` (fit congelado 20-ago) vs constante train, con gate pre-declarado (n>=40; a n>=60 sin pasar ⇒ borrar el módulo). Trae tripwire de hook muerto (señal m15 post-deploy sin registro = buscar `calibrated_p no registrada` en el log). No requiere MT5. |
 | `audit_code_patterns.py` | Auditoría READ-ONLY de los 7 patrones de bug que ya hicieron daño acá (undefined names, `except` que tragan, ramas mudas de `order_send`, código inalcanzable, umbrales atados al % del TP, DELETE sin guard, estado incoherente). **Lo que lo hace usable es el BASELINE**: solo reporta lo NUEVO. Exit 0 = nada nuevo. Corre sábados vía `aidan-auditoria-semanal`. |
 | `score_retrospective_shadow.py` | Scorer READ-ONLY de la retrospectiva pre-decision (v3.57.0). Compara `contrarian` vs el resto con Wilson, y evalua el **gate pre-declarado de 4 condiciones** (n>=25 · WR peor · CI que no cruza · PnL/trade peor). Tambien reporta si el loop de `directional_lessons` se esta CONSULTANDO — 0 consultas = mecanismo escrito y desconectado, el sintoma clasico de este proyecto. |
@@ -1031,7 +1048,12 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 ---
 ---
 
-**Última actualización**: 20 Ago 2026 — **v3.59.0: la calibración de confianza se desbloqueó
+**Última actualización**: 20 Ago 2026 — **v3.60.0: shadow trader LLM (Groq)** — un
+"operador" gpt-oss-120b decide en PAPEL (open/manage) a `shadow_trader_log`, sin path de
+ejecución por construcción. Gate en `score_shadow_trader.py`; a n≥40 sin separar ⇒ off.
+Smoke test real: JSON válido en 758ms. 42 tests nuevos en verde.
+
+**Anterior**: 20 Ago 2026 — **v3.59.0: la calibración de confianza se desbloqueó
 (309 limpios) y m15 dio el primer PASA del gate** (Brier 0.2214 < 0.230). Fase registro:
 params congelados + `calibrated_p` en `entry_context`, 0 efecto en decisiones. Leer ~10 sep
 con `score_calibrated_p_forward.py`; no mezclar con la lectura del ~1-sep del ATR floor.

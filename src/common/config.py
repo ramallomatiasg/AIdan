@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.59.0"
+APP_VERSION = "3.60.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -283,6 +283,21 @@ class Config:
     # Cada cuanto mira si aparecio una vela D1 nueva. La vela cambia 1 vez por dia;
     # 15 min es holgado y barato (el scan real solo corre cuando cambio la vela).
     D1_SCAN_INTERVAL_SEC = int(os.getenv("D1_SCAN_INTERVAL_SEC", "900"))
+
+    # v3.60.0 — SHADOW TRADER LLM (Groq gpt-oss-120b): un "operador" en PAPEL.
+    # Ve numeros del mercado + posiciones abiertas y decide (open: CALL/PUT/NONE;
+    # manage: CLOSE/HOLD) — todo se registra en shadow_trader_log, NADA se opera
+    # ni se puede operar (el modulo no tiene path de ejecucion, hay test de eso).
+    # Contexto: cada LLM medido decidiendo direccion aca PERDIO (news anti-skill
+    # 53% vs drift 63%); esto existe para refutar o confirmar CON registro limpio.
+    # Gate en tools/score_shadow_trader.py; a n>=40 sin separar => off.
+    #   off    = no corre.
+    #   shadow = decide y registra. NO existe 'active' a proposito.
+    SHADOW_TRADER_MODE = (os.getenv("SHADOW_TRADER_MODE", "shadow") or "shadow").lower()
+    # Ciclo del manage (por posicion abierta) y throttle del open-scan.
+    # Quota Groq: ~96 open-scans/dia + manage solo con posicion abierta.
+    SHADOW_TRADER_CYCLE_SEC = int(os.getenv("SHADOW_TRADER_CYCLE_SEC", "300"))
+    SHADOW_TRADER_SCAN_SEC = int(os.getenv("SHADOW_TRADER_SCAN_SEC", "900"))
 
     # v3.50.3 — get_setup_win_rates() tambien mira trade_archive (el cable que faltaba).
     # Auditado en runtime el 5-ago: la funcion devolvia SOLO 'news' porque lee de

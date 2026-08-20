@@ -862,6 +862,13 @@ class AIdan:
             _d1_mode = getattr(Config, 'D1_TRACK_MODE', 'shadow') or 'shadow'
             D1_SCAN_INTERVAL = getattr(Config, 'D1_SCAN_INTERVAL_SEC', 900)
             logger.info(f"Track D1 (swing diario): modo={_d1_mode} scan cada {D1_SCAN_INTERVAL}s")
+            # v3.60.0 — SHADOW TRADER LLM (Groq): decide en PAPEL, jamas opera.
+            # Sin warmup gate a proposito (no opera; una decision sobre vela
+            # semi-stale al arrancar es una fila mas, no un riesgo).
+            _st_mode = getattr(Config, 'SHADOW_TRADER_MODE', 'shadow')
+            _last_st_cycle = 0
+            ST_CYCLE_SEC = getattr(Config, 'SHADOW_TRADER_CYCLE_SEC', 300)
+            logger.info(f"Shadow trader LLM: modo={_st_mode} ciclo {ST_CYCLE_SEC}s")
 
             # SMC Engine initialization
             from src.analyzer.mtf_analyzer import MTFAnalyzer
@@ -3936,6 +3943,20 @@ class AIdan:
                                                     f"SL={_d1_sl}p TP={_d1_tp}p (NO opera)")
                     except Exception as _d1_e:
                         logger.error(f"D1 shadow scan error: {_d1_e}")
+
+                    # v3.60.0 — SHADOW TRADER LLM (Groq). Decide en PAPEL y
+                    # registra en shadow_trader_log; NO opera (el modulo no
+                    # tiene path de ejecucion). Toda la logica vive en
+                    # src/analyzer/shadow_trader.py; aca solo el timer.
+                    try:
+                        if _st_mode != 'off' and (time.time() - _last_st_cycle) >= ST_CYCLE_SEC:
+                            _last_st_cycle = time.time()
+                            from src.analyzer.shadow_trader import run_cycle as _st_run
+                            _st_summary = _st_run(tech.get_market_state(), mt5_exec)
+                            if _st_summary:
+                                logger.info(f"Shadow trader LLM: {_st_summary} (NO opera)")
+                    except Exception as _st_e:
+                        logger.warning(f"shadow trader cycle error: {_st_e}")
 
                 except Exception as e:
                     logger.error(f"Analyzer error: {e}")
