@@ -11,7 +11,8 @@ tabla que escribe — es SU tabla) y evalua el gate pre-declarado:
     (NONE tambien se puntua — drift absoluto — como contexto, no como gate.)
 
   kind='manage' (CLOSE): "ahorro" = pips_at_decision - pips finales del trade
-    (broker-truth via trade_archive por mt5_ticket). Positivo = cerrar ahi
+    (broker-truth: ticket -> auto_strategies.mt5_ticket -> trade_archive por
+    strategy_id — trade_archive NO tiene columna de ticket). Positivo = cerrar ahi
     hubiera salvado pips; negativo = hubiera cortado recorrido a favor.
     GATE: n>=15 CLOSE resueltos; ahorro neto total > 0.
     (HOLD se reporta como contexto: pips finales - pips al decidir.)
@@ -110,7 +111,8 @@ def score_manage_pending(dry_run=False):
     rows = conn.execute("""
         SELECT s.id, s.decision, s.pips_at_decision, t.pips
         FROM shadow_trader_log s
-        JOIN trade_archive t ON t.mt5_ticket = s.ticket
+        JOIN auto_strategies a ON a.mt5_ticket = s.ticket
+        JOIN trade_archive t ON t.strategy_id = a.id
         WHERE s.kind='manage' AND s.scored_at IS NULL
           AND s.ticket IS NOT NULL AND t.pips IS NOT NULL""").fetchall()
     scored = 0
