@@ -57,6 +57,26 @@ con la razón del cierre.
 - [ ] **🔴 ~28 AGO — VEREDICTO news v3.51.0 (criterio pre-declarado, NO mover).** Medir sobre los news creados desde el 7-ago (n≥15, ~4/semana): **(a) ¿los ganadores pasaron de recorrer 40% del TP a ≥59%?** **(b) ¿los perdedores siguen en ~53% del SL o se estiraron?** (si se estiran, la perilla 2 no está haciendo su trabajo). (c) PnL y WR del track. Query: comparar `|pips|` contra su propio `stop_loss`/`take_profit` por fila (los flags `sl_hit`/`tp_hit` son **tautológicos**, se derivan de `result`+`pips` — no usarlos). **Si no se cumple → `NEWS_MIN_EXPIRY_MIN=15`** (env, sin rebuild) y news vuelve a como estaba. *Decisión del user 7-ago: news NO se apaga, se arregla.*
 - [ ] **🟢 ~1 SEP — FORWARD del piso de ATR de m15 (v3.55.0, `M15_ATR_FLOOR=8`, activo desde el 16-ago).** El hint de "m15 × expansión" creció hasta pasar el gate y se activó: **ATR ≤8p = n=90, WR 27,8%, −$75,59 · ATR >8p = n=31, WR 51,6%, +$18,80** (p=0,0042, CI95 [33,1-69,8%] sin cruzar el 27,8% del comparador, mismo período los dos buckets, ATR clasificado al entrar). El diagnóstico completo: **m15 necesita ~40,5% de WR para empatar** (ganador medio +7,8p, perdedor −5,3p) y en chop saca 28%. **Lo que la revisión adversarial del propio hallazgo encontró y hay que tener presente al leer el forward: el lado BUENO es frágil** — de los +$18,80 unos +$19,49 salen de 2 días, sin ellos queda en −$0,69; sacando los 3 mejores ganadores, −$10,88. **El lado malo sí aguanta** (pierde en las dos mitades: 28,9% y 26,7%). ⇒ **La expectativa correcta es "m15 deja de sangrar", NO "m15 pasa a rentable".** Medir: **(a)** ¿la frecuencia de m15 cayó ~74% como se estimó (3,27 → 0,84 trades/día)? **(b)** ¿el PnL de m15 se acercó a cero, o el bucket >8p también empezó a perder (= el hallazgo era el artefacto de 2 días)? **(c)** ¿cuántos skips loguea (`ATR ... < piso ... -> sin scan (chop)`, 1 por hora)? **Si el bucket que queda pierde igual → `M15_ATR_FLOOR=5.0`** (env, sin rebuild) y m15 vuelve a como estaba. *No afinar el umbral sobre esta muestra: el 8 venía pre-declarado desde el 17-jul; buscar el mejor número sería overfit.*
 
+**⏱️ BARRIDO DE LATENCIA INTERNA (26 Ago, v3.61.1) — la practica del feed aplicada a TODO el pipeline.**
+Pedido del user tras lo del feed: medir cada tramo entre que AIdan analiza y opera. Resultado, broker-truth:
+**(a) El pipeline interno esta SANO.** Noticia bajada→analizada mediana 11s (n=1176) · alerta→estrategia 0,03s ·
+señal→fill **instantaneo en el 98%** (522 trades cruzados con las ordenes del broker, mediana 0,00 min) ·
+vela→señal: M5 8s, M15 39s, h1 1-2 min (frescos) — todo proporcional al timeframe. El loop del analyzer (un
+solo hilo secuencial, ciclo 10s) tuvo solo 12 overruns en 6 dias, max 30s.
+**(b) ARREGLADO (v3.61.1): el retry podia ejecutar a MERCADO una señal de hasta 180 min sin chequeo de edad.**
+Los 11 fills tardios (>2 min) de la historia: **1W/10L, −$2,41/trade**, incluido #625 (27 min vieja, ejecutada
+dentro del spike, −$13,48). El argumento del guard no es n=11: es de construccion — SL/TP y lote se calculan al
+precio de la señal. El umbral 10 min es el que el event-window ya usaba para etiquetar "VIEJA" (no un numero
+nuevo). Marca `skipped_stale` (cubierto por el guard v3.53.6), `SIGNAL_MAX_AGE_MIN=0` lo apaga sin rebuild.
+**(c) MEDIDO Y NO SE TOCA: h1 re-emite el MISMO setup al expirar su dedup de 90 min.** Las señales h1 nacen al
+min ~1 de la vela o al ~31-35 — nunca en el medio; verificado por pares (#763→#764, #772→#773, #815→#817: gaps
+de 90,0-90,5 min, misma direccion). Son 30 de 72 h1 lifetime. **Pero rinden IGUAL que los frescos** (40% WR /
+−$0,65 vs 33% / −$0,64) ⇒ por el principio rector, sin fix. Lo que si hace: **duplica exposicion** sobre el
+mismo setup con el trade anterior aun vivo (expiry 180 min) — tenerlo presente para sizing en cuenta real.
+**(d) Para el veredicto de news del ~28 ago:** los 132 trades de news entraron TODOS ≥29 min despues del dato
+(el feed viejo) ⇒ la muestra historica mide "operar noticias viejas", no "operar noticias". Con Forexlive
+(v3.61.0) por primera vez entra data del camino rapido — no mezclar los universos al leer.
+
 **⚡ FUENTE DE NEWS CAMBIADA (26 Ago, v3.61.0) — leer junto al veredicto de news del ~28 ago.**
 Nace del trade #931 (PUT sobre el Core PCE): el user vio que entró tardísimo. Medido, la cadena
 completa fue **29,7 min** desde el dato: **25,3 min los tardó BLOOMBERG en publicar**, 4,3 min el poll
@@ -472,7 +492,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 | Version | Cambio | Estado |
 |---|---|---|
-| v3.61.0 | **El feed de noticias llegaba 25 min tarde y 4 de 5 fuentes estaban MUERTAS en silencio**: Forexlive publica el dato a **+15 segundos** del release (Bloomberg a +25,3 min) y ahora es la fuente primaria. Fail-loud por fuente, timeout real, orden por fecha antes de cortar. Perilla `NEWS_EXTRA_SOURCES` (default off) + `tools/measure_feed_race.py` | **actual** |
+| v3.61.1 | **Guard de edad en la ejecucion** (clase #625): una senal sin fill >10 min ya NO se ejecuta a mercado (SL/TP calculados para un precio viejo). Broker-truth: fills tardios 1W/10L, y el 98% de los fills es instantaneo ⇒ costo ~0. `SIGNAL_MAX_AGE_MIN` (env), pre_planned/calendar exentos | **actual** |
+| v3.61.0 | **El feed de noticias llegaba 25 min tarde y 4 de 5 fuentes estaban MUERTAS en silencio**: Forexlive publica el dato a **+15 segundos** del release (Bloomberg a +25,3 min) y ahora es la fuente primaria. Fail-loud por fuente, timeout real, orden por fecha antes de cortar. Perilla `NEWS_EXTRA_SOURCES` (default off) + `tools/measure_feed_race.py` | vigente |
 | v3.60.0 | **Shadow trader LLM (Groq)**: un "operador" gpt-oss-120b decide en PAPEL (open CALL/PUT/NONE cada 15 min · manage CLOSE/HOLD por posición cada 5 min) → `shadow_trader_log`. Sin path de ejecución por construcción (test). Gate en `score_shadow_trader.py`; a n≥40 sin separar ⇒ off | vigente |
 | v3.59.0 | **P calibrada de m15 en FASE REGISTRO**: con 309 trades limpios la calibración de Platt PASÓ su gate por 1ra vez (m15 Brier 0.2214 < 0.230); params CONGELADOS en `confidence_calibration.py`, `add_auto_strategy` registra `calibrated_p` en `entry_context` — 0 efecto en decisiones. Leer con `score_calibrated_p_forward.py` (~10 sep) | vigente |
 | v3.58.1 | **Instrumentación (0 cambios de decisión)**: MFE/MAE reales por trade (trailing 1s → `mfe_pips`/`mae_pips` en el archive) + **shadow book** (`rejected_signals`, PRFS: outcome forward de lo que se BLOQUEA) + `signal_age_at_fill_min` + `efficiency_ratio` (Kaufman) en `entry_context` | vigente |
@@ -571,79 +592,13 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 
 **Bloqueos actuales**: PF 0.48 (target >1.3), comisión 87% del drag M5, hardcoding EUR/USD en 104 sitios. NO escalar hasta demostrar rentabilidad en demo.
 
-### Track C — H1 (experimental) — IMPLEMENTADO v3.20.0 (8 May 2026)
+### Tracks B (M15) y C (H1) — implementados may-2026
 
-**Profile H1**:
-- SL: 40p, TP: 100p, expiry: 180min (3h)
-- min_confidence: 60
-- ATR floor: 10p
-- Frecuencia esperada: 1-2 trades/día
-
-**trigger_type**: `h1_structure`
-
-**Por qué H1 también**:
-- Comisión 0.7p / avg win esperado 30p = **2% drag** (vs 17% M5)
-- Cuenta demo, sin riesgo real, stats segregadas
-- Más data > menos data para decidir el mejor timeframe
-
-**Loop H1**: cada 5 min (`H1_SCAN_INTERVAL = 300`). H1 candles cambian cada hora.
-
-**UI elementos H1**:
-- Botón filtro `🌐 H1 (beta)` violeta
-- Badge violeta `🌐 H1 STRUCT` en cards
-- Chip header `🌐 H1 NW/NL · X act`
-- Tercera card en panel comparativo "Triple Track"
-
-### Track B — M15 (experimental, paralelo) — IMPLEMENTADO v3.19.0 (7 May 2026)
-
-**Implementación**:
-
-| Día | Componente | Archivos |
-|---|---|---|
-| 1 | `TechnicalAnalyzerM15` subclass + test standalone | `src/analyzer/technical_m15.py`, `tools/test_m15_feed.py` |
-| 2 | Loop M15 paralelo en analyzer (cada 60s) | `AIdan_TodoEnUno.py` |
-| 3 | UI: filtro `M15`, badge dorado en cards, chip stats | `dashboard_multi_theme.html` |
-| 4 | Endpoint `/strategy-performance-by-track` + panel comparativo | `src/admin/main.py`, `src/common/db.py` |
-| 5 | Verdict robusto + banner alert "M15 supera M5" | `dashboard_multi_theme.html` |
-
-**Profile M15** (constante en `technical_m15.py:M15_PROFILE`):
-- SL: 15p, TP: 60p, expiry: 45min
-- min_confidence: 60
-- Frecuencia: ~1-3 trades/día (M15 candles cambian cada 15min)
-
-**trigger_type**: `m15_structure` (futuro `m15_smc` cuando se agregue)
-
-**Filtros M15** (subset del M5):
-- ATR floor 5p (vs M5 2.5p, M15 escala 3x)
-- Counter-both (HTF + M5 ambos contrarios → block)
-- Conf ceiling 80
-- Anti-spam (no opposite activa)
-- SIN late breakout (escala distinta), SIN hour gate (ya removido v3.17)
-
-**Criterios de decisión** (en `loadTrackComparison` UI):
-- Bajo 10 trades M15: "esperando data"
-- 10-14 trades: comparativa preliminar, no decidir
-- 15+ trades:
-  - **M15 SIGNIFICATIVAMENTE mejor**: PF > 1.0 + PnL positivo + +$20 sobre M5 → banner "considerar migracion"
-  - **M15 mejor moderado**: PF > A_PF * 1.3 + PF >= 0.9
-  - **M5 mejor**: A_PF > B_PF * 1.3 + A_PF >= 0.9
-  - **Empate**: mantener ambos
-
-**UI elementos**:
-- Botón filtro `⏰ M15 (beta)` dorado en barra de filtros del tab Estrategias
-- Cards M15 con badge dorado `⏰ M15 STRUCT` distintivo
-- Chip header `⏰ M15 NW/NL · X act` (auto-hide si 0 trades)
-- Panel "Comparativa Dual-Track" con 2 cards lado a lado
-- Banner dorado destacado cuando M15 supera M5 significativamente
-
-**Riesgo al M5**: cero. Track B vive en try/except aislado. Si M15 falla, M5 sigue normal.
-
-**Próximos pasos abiertos**:
-- M15_PROFILE en DB en lugar de constante (permite ajuste sin rebuild)
-- Cuenta demo MT5 separada para Track B (aislamiento total de capital)
-- Más trigger types M15 (`m15_smc`)
-
----
+> Detalle de implementación (perfiles, filtros, UI, criterios de decisión) bajado a
+> [`docs/historial_notas.md`](docs/historial_notas.md) el 26-ago. Lo operativo: **M15** SL 15p / TP 60p /
+> expiry 45min / trigger `m15_structure` / loop cada 60s (`technical_m15.py:M15_PROFILE`). **H1** SL 40p /
+> TP 100p / expiry 180min / trigger `h1_structure` / loop cada 300s. Ambos en try/except aislado: si fallan,
+> M5 sigue. Dedup: M15 45min, H1 90min (⚠️ ver barrido v3.61.1: al expirar el dedup h1 re-emite el mismo setup).
 
 ## Glosario de patrones observados
 
@@ -698,34 +653,11 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 > eligió cada métrica) están en el **docstring de cada script** — se leen al abrirlo, no cuestan
 > contexto en cada sesión.
 
-### Backtest H1+M15 results (30 días, 27 Mar → 8 May 2026)
+### Backtest H1+M15 (mayo 2026) — resumen
 
-**M15** (693 signals, sin filtros completos):
-- WR 49.2%, PF 1.10, +189.6p, avg 0.27p/trade
-- Setup ganadores: `trend_continuation_bull` (+236p), `trend_continuation_bear` (+82p)
-- Setup perdedores: `momentum_expansion` (-52p), `breakdown_support` (-71p)
-
-**H1** (212 signals):
-- WR 50.5%, PF 1.17, +156.2p, avg **0.74p/trade** (mejor avg)
-- Setup ganador estrella: `breakout_resistance` WR 72% +209p
-- Setup perdedores: `breakdown_support` (-50p), `momentum_expansion` (-15p)
-
-**Lecturas honestas**:
-- 99% de trades terminan en expiry (SL/TP raramente hit) → thresholds holgados vs ATR real
-- Ambos tracks tienen edge MARGINAL estructural sin filtros adicionales (PF 1.1 ≈ break-even con fricción)
-- H1 confirma tesis de comisión drag bajo: avg 0.74p/trade vs M15 0.27p
-- Backtest **infla metricas 20-30%** vs real → PF real estimado ~0.85-0.95 (NO rentable solo)
-- Necesita capas adicionales (htf_bias, anti-spam, LLM auditor) que demo SÍ tiene
-
-### Caveats del backtest H1+M15
-
-1. Solo trigger `structure` (sin news ~30% de signals reales)
-2. Sin htf_bias derivado de SMC live (filtro counter-HTF inactivo)
-3. AutoTuner params actuales sobre data vieja (mild data leakage)
-4. Sin spread variable, slippage, latency execution
-5. Backtest infla metricas vs producción real con fricción
-
----
+> Detalle bajado a [`docs/historial_notas.md`](docs/historial_notas.md) el 26-ago. Titular: ambos tracks
+> con edge MARGINAL sin filtros (M15 PF 1,10 · H1 PF 1,17, avg 0,74p/trade), 99% de los trades cerraban
+> por expiry, y el backtest infla métricas 20-30% vs real ⇒ PF real estimado ~0,85-0,95, no rentable solo.
 
 ## Cosas que NO se deben hacer
 
@@ -1017,7 +949,15 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 ---
 ---
 
-**Última actualización**: 26 Ago 2026 — **v3.61.0: el feed de noticias llegaba 25 minutos
+**Última actualización**: 26 Ago 2026 (2da sesion) — **v3.61.1: barrido de latencia interna + guard
+de edad en la ejecucion.** La practica del feed aplicada al resto del pipeline. El pipeline interno esta
+sano (fills instantaneos en el 98%, LLM 11s, loop sin overruns graves); lo roto era que el retry podia
+ejecutar a mercado una señal de hasta 180 min sin chequeo de edad (clase #625: 1W/10L en los fills
+tardios). Guard `SIGNAL_MAX_AGE_MIN=10` (env, exentos pre_planned/calendar). Hallazgo medido y NO tocado:
+h1 re-emite el mismo setup al expirar el dedup de 90 min (30/72 trades) pero rinde igual que los frescos
+⇒ sin fix, solo registro del riesgo de exposicion duplicada. 15 tests nuevos, suite 173 en verde.
+
+**Anterior**: 26 Ago 2026 — **v3.61.0: el feed de noticias llegaba 25 minutos
 tarde y 4 de las 5 fuentes estaban muertas en silencio.** Salió de que el user vio entrar un PUT
 sobre el Core PCE fuera de tiempo. Medido: 29,7 min desde el dato, de los cuales **25,3 los tardó
 Bloomberg en publicar** y **12 segundos** puso AIdan (LLM + orden). Al probar las fuentes, 4 de 5

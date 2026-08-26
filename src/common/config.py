@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.61.0"
+APP_VERSION = "3.61.1"
 
 class Config:
     VERSION = APP_VERSION
@@ -231,6 +231,19 @@ class Config:
     # SKIPEAN (no se delayean: una senal de la vela de panico no mejora por esperar).
     # 0 = off.
     COOLDOWN_AFTER_LOSS_MIN = float(os.getenv("COOLDOWN_AFTER_LOSS_MIN", "5"))
+
+    # v3.61.1 — Guard de EDAD de la senal en la ejecucion (cierra la clase #625).
+    # El retry de ejecucion podia mandar a MERCADO una senal de hasta 180 min
+    # (el expiry de h1) sin ningun chequeo de edad: #625 espero 27 min y el retry
+    # la ejecuto en el primer minuto de un spike (-$13,48, la peor del dia).
+    # Broker-truth (522 trades): 98% de los fills son instantaneos; los 11
+    # tardios (>2 min) fueron 1W/10L a -$2,41/trade. El argumento del guard no
+    # es la muestra (n=11): es de CONSTRUCCION — el SL/TP y el lote se calculan
+    # al precio de la senal, ejecutarla vieja rompe el modelo de riesgo.
+    # Exentos: pre_planned y calendar (esperan su event_time POR DISENO).
+    # 0 = apagado. El umbral 10 min NO es nuevo: es el mismo que el event-window
+    # usa desde v3.40.14 para etiquetar "senal VIEJA".
+    SIGNAL_MAX_AGE_MIN = float(os.getenv("SIGNAL_MAX_AGE_MIN", "10"))
 
     # v3.40.14 — Event window (conciencia de eventos en la ejecucion). off | shadow
     # (DEFAULT: etiqueta cada ejecucion con proximidad al evento + loguea que bloquearia,

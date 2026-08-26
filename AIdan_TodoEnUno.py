@@ -1003,6 +1003,54 @@ class AIdan:
                     except Exception as e:
                         logger.debug(f"MT5 market-close check: {e}")
 
+                    # v3.61.1 — GUARD DE EDAD (clase #625): una senal sin fill que el
+                    # retry levanta despues puede ejecutarse a MERCADO con el precio ya
+                    # movido — el SL/TP y el lote se calcularon para el precio de la
+                    # senal, asi que ejecutarla vieja rompe el sizing por construccion.
+                    # Broker-truth: 11 fills tardios historicos = 1W/10L, incluido #625
+                    # (27 min vieja, ejecutada dentro de un spike, -$13,48).
+                    # El event-window ya etiquetaba ">10 min = VIEJA" pero solo en shadow
+                    # y solo DENTRO de ventanas de evento; esto lo hace vinculante siempre.
+                    # pre_planned/calendar EXENTOS: esperan su event_time por diseno.
+                    try:
+                        _max_age = float(getattr(Config, 'SIGNAL_MAX_AGE_MIN', 10) or 0)
+                    except Exception:
+                        _max_age = 10.0
+                    if _max_age > 0:
+                        try:
+                            import sqlite3 as _sq_ag
+                            from datetime import datetime as _ag_dt
+                            from src.common.db import now_ar as _ag_now
+                            _cn = _sq_ag.connect(DB_PATH)
+                            _r = _cn.execute(
+                                "SELECT created_at, trigger_type FROM auto_strategies WHERE id=?",
+                                (sid,)).fetchone()
+                            _cn.close()
+                            _ag_trig = (_r[1] if _r and _r[1] else trigger_type) or ''
+                            if _r and _r[0] and _ag_trig not in ('pre_planned', 'calendar'):
+                                _c0 = _ag_dt.strptime(
+                                    str(_r[0]).split('.')[0].replace('T', ' '),
+                                    '%Y-%m-%d %H:%M:%S')
+                                _age_min = (_ag_now() - _c0).total_seconds() / 60.0
+                                if _age_min > _max_age:
+                                    logger.info(
+                                        f"STALE-signal guard: skip #{sid} {_ag_trig} — senal de "
+                                        f"{_age_min:.1f} min (> {_max_age:.0f}). SL/TP calculados para "
+                                        f"un precio que ya no existe (clase #625).")
+                                    try:
+                                        _cn = _sq_ag.connect(DB_PATH)
+                                        _cn.execute(
+                                            "UPDATE auto_strategies SET status='skipped_stale' "
+                                            "WHERE id=? AND status='active'", (sid,))
+                                        _cn.commit(); _cn.close()
+                                    except Exception:
+                                        pass
+                                    return None
+                        except Exception as _age:
+                            # fail-open A PROPOSITO: si el chequeo falla, no frena la
+                            # ejecucion normal (el 98% de los fills son instantaneos).
+                            logger.debug(f"stale-signal check #{sid}: {_age}")
+
                     # v3.32.1 — User awake window: no abrir trades cerca del horario en que
                     # el user duerme. Para H1 (expiry 180min) cerrar 22:00 AR garantiza
                     # cierre antes de 01:00 AR. Para M15 (45min) cerrar 23:00 AR garantiza

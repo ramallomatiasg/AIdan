@@ -245,3 +245,120 @@ Estaban marcados `[ ]` en CLAUDE.md con fechas de jun/jul ya pasadas. Se revisó
 | off | 2 | 0% | -$13.00 |
 
 **Lectura**: TODAS las sessions pierden plata (excepto London con 7 trades = ruido). El problema no es de session específica — es estructural.
+
+
+---
+
+## Implementacion de los tracks B (M15) y C (H1), mayo 2026
+
+*(Bajado de CLAUDE.md el 26-ago-2026 por la regla de tamano. Son las notas de implementacion originales: perfiles completos, filtros, elementos de UI, criterios de comparacion.)*
+
+### Track C — H1 (experimental) — IMPLEMENTADO v3.20.0 (8 May 2026)
+
+**Profile H1**:
+- SL: 40p, TP: 100p, expiry: 180min (3h)
+- min_confidence: 60
+- ATR floor: 10p
+- Frecuencia esperada: 1-2 trades/día
+
+**trigger_type**: `h1_structure`
+
+**Por qué H1 también**:
+- Comisión 0.7p / avg win esperado 30p = **2% drag** (vs 17% M5)
+- Cuenta demo, sin riesgo real, stats segregadas
+- Más data > menos data para decidir el mejor timeframe
+
+**Loop H1**: cada 5 min (`H1_SCAN_INTERVAL = 300`). H1 candles cambian cada hora.
+
+**UI elementos H1**:
+- Botón filtro `🌐 H1 (beta)` violeta
+- Badge violeta `🌐 H1 STRUCT` en cards
+- Chip header `🌐 H1 NW/NL · X act`
+- Tercera card en panel comparativo "Triple Track"
+
+### Track B — M15 (experimental, paralelo) — IMPLEMENTADO v3.19.0 (7 May 2026)
+
+**Implementación**:
+
+| Día | Componente | Archivos |
+|---|---|---|
+| 1 | `TechnicalAnalyzerM15` subclass + test standalone | `src/analyzer/technical_m15.py`, `tools/test_m15_feed.py` |
+| 2 | Loop M15 paralelo en analyzer (cada 60s) | `AIdan_TodoEnUno.py` |
+| 3 | UI: filtro `M15`, badge dorado en cards, chip stats | `dashboard_multi_theme.html` |
+| 4 | Endpoint `/strategy-performance-by-track` + panel comparativo | `src/admin/main.py`, `src/common/db.py` |
+| 5 | Verdict robusto + banner alert "M15 supera M5" | `dashboard_multi_theme.html` |
+
+**Profile M15** (constante en `technical_m15.py:M15_PROFILE`):
+- SL: 15p, TP: 60p, expiry: 45min
+- min_confidence: 60
+- Frecuencia: ~1-3 trades/día (M15 candles cambian cada 15min)
+
+**trigger_type**: `m15_structure` (futuro `m15_smc` cuando se agregue)
+
+**Filtros M15** (subset del M5):
+- ATR floor 5p (vs M5 2.5p, M15 escala 3x)
+- Counter-both (HTF + M5 ambos contrarios → block)
+- Conf ceiling 80
+- Anti-spam (no opposite activa)
+- SIN late breakout (escala distinta), SIN hour gate (ya removido v3.17)
+
+**Criterios de decisión** (en `loadTrackComparison` UI):
+- Bajo 10 trades M15: "esperando data"
+- 10-14 trades: comparativa preliminar, no decidir
+- 15+ trades:
+  - **M15 SIGNIFICATIVAMENTE mejor**: PF > 1.0 + PnL positivo + +$20 sobre M5 → banner "considerar migracion"
+  - **M15 mejor moderado**: PF > A_PF * 1.3 + PF >= 0.9
+  - **M5 mejor**: A_PF > B_PF * 1.3 + A_PF >= 0.9
+  - **Empate**: mantener ambos
+
+**UI elementos**:
+- Botón filtro `⏰ M15 (beta)` dorado en barra de filtros del tab Estrategias
+- Cards M15 con badge dorado `⏰ M15 STRUCT` distintivo
+- Chip header `⏰ M15 NW/NL · X act` (auto-hide si 0 trades)
+- Panel "Comparativa Dual-Track" con 2 cards lado a lado
+- Banner dorado destacado cuando M15 supera M5 significativamente
+
+**Riesgo al M5**: cero. Track B vive en try/except aislado. Si M15 falla, M5 sigue normal.
+
+**Próximos pasos abiertos**:
+- M15_PROFILE en DB en lugar de constante (permite ajuste sin rebuild)
+- Cuenta demo MT5 separada para Track B (aislamiento total de capital)
+- Más trigger types M15 (`m15_smc`)
+
+---
+
+
+---
+
+## Backtest H1+M15, 30 dias (27-mar a 8-may 2026)
+
+*(Bajado de CLAUDE.md el 26-ago-2026 por la regla de tamano.)*
+
+### Backtest H1+M15 results (30 días, 27 Mar → 8 May 2026)
+
+**M15** (693 signals, sin filtros completos):
+- WR 49.2%, PF 1.10, +189.6p, avg 0.27p/trade
+- Setup ganadores: `trend_continuation_bull` (+236p), `trend_continuation_bear` (+82p)
+- Setup perdedores: `momentum_expansion` (-52p), `breakdown_support` (-71p)
+
+**H1** (212 signals):
+- WR 50.5%, PF 1.17, +156.2p, avg **0.74p/trade** (mejor avg)
+- Setup ganador estrella: `breakout_resistance` WR 72% +209p
+- Setup perdedores: `breakdown_support` (-50p), `momentum_expansion` (-15p)
+
+**Lecturas honestas**:
+- 99% de trades terminan en expiry (SL/TP raramente hit) → thresholds holgados vs ATR real
+- Ambos tracks tienen edge MARGINAL estructural sin filtros adicionales (PF 1.1 ≈ break-even con fricción)
+- H1 confirma tesis de comisión drag bajo: avg 0.74p/trade vs M15 0.27p
+- Backtest **infla metricas 20-30%** vs real → PF real estimado ~0.85-0.95 (NO rentable solo)
+- Necesita capas adicionales (htf_bias, anti-spam, LLM auditor) que demo SÍ tiene
+
+### Caveats del backtest H1+M15
+
+1. Solo trigger `structure` (sin news ~30% de signals reales)
+2. Sin htf_bias derivado de SMC live (filtro counter-HTF inactivo)
+3. AutoTuner params actuales sobre data vieja (mild data leakage)
+4. Sin spread variable, slippage, latency execution
+5. Backtest infla metricas vs producción real con fricción
+
+---
