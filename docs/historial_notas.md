@@ -149,3 +149,99 @@ Estaban marcados `[ ]` en CLAUDE.md con fechas de jun/jul ya pasadas. Se revisó
 
 - [x] ✅ **Evaluation gap del news LLM** — Groq malinterpreta news (negaciones de bancos centrales, problema estructural #3) y **no medimos cuán seguido**. Gap de evaluación legítimo (lección LinkedIn 8 Jun). Idea: medir tasa de error con muestra etiquetada. No urgente.
   - **✅ CERRADO — el gap se midió el 24-jul con `tools/measure_news_llm_error.py` sobre 753 alertas: **el LLM no discrimina (edge −1pp, Fisher p=0.92) y es ANTI-SKILL (hit 53% vs drift 63%)**. Ya no es un gap de evaluación: es un resultado.**
+
+
+---
+
+## Cerrado 16 Ago 2026 — baseline del track D1 corregido (v3.54.1)
+
+*(Bajado de CLAUDE.md el 26-ago-2026 por la regla de tamano: el hilo estaba cerrado con ✅ y seguia ocupando lugar en el archivo que se carga entero en cada sesion.)*
+
+- [x] ✅ **CERRADO 16-ago (v3.54.1) — el baseline del D1 estaba mal y ya se corrigió.** Se tomó la opción (1): re-correr el backtest con los params vivos, read-only, sin tocar producción. Lo verificado: **(a)** los params vivos difieren del default en 4 claves, pero solo 2 afectan al D1 (`breakout_dist_max`/`breakdown_dist_max` 15→7); `block_outside_sessions` se aplica en los loops de M5/news/smc/calendar y **NO en el bloque D1**, y `min_pips_for_win` es de etiquetado del tuner. **(b)** El `conf_adj` de sesión en vivo depende de a qué hora el loop ve la vela nueva y **no se puede reconstruir honestamente** ⇒ no se inventó un "auto": se agregó `--session sweep`, que corre las 4 sesiones y reporta el rango. **Resultado — el titular del 13-ago se reproduce exacto con `--params default --session off` (242 señales, PF 1,41, +16,6p), o sea que aquella corrida fue en off-hours.** Baseline corregido (params vivos, 4 sesiones): **186-227 señales · 2,1-2,5/mes (no 2,7) · +13,7 a +15,3p neto de comisión · +10,8 a +12,7p post-swap · PF 1,25-1,30.** **Positivo en las CUATRO sesiones** ⇒ el edge no dependía de la hora del reloj, que era el riesgo real de (b); el nivel sí baja ~10-15% y la frecuencia ~20%. El número quedó escrito en el docstring de `technical_d1.py` y lo imprime `score_d1_shadow.py` al final. *(La revisión del 13-ago devolvió 28 hallazgos; los 5 accionables se arreglaron en el 2do commit de v3.54.0, este era el 6to y último accionable. El resto son menores.)*
+
+
+---
+
+## Checkpoints de junio 2026 (obs 11-jun, checkpoints 12-jun, barrido 14-jun)
+
+*(Bajado de CLAUDE.md el 26-ago-2026 por la regla de tamano — el archivo estaba 9 KB por encima de su propio limite de 100 KB y estos son exactamente los "checkpoints viejos" que la regla manda mover. Nada de esto es un hilo abierto: el cooldown ya se activo, el PM ya tiene veredicto, los candidatos a vigilar tienen sus propios medidores. Consultar con grep antes de re-proponer.)*
+
+**Obs 11 Jun (día PPI/ECB: 14 trades, 3W/11L, −$29.22 — 3er día seguido de eventos) — para el checkpoint del viernes:**
+- [ ] **PM tuvo su PRIMER día real en ambas direcciones** (evidencia viva para el punto 2 de la agenda): **primer CLOSE_PROFIT de la historia** (#621: se extendió **118min** más allá del expiry —comportamiento nuevo v3.40.11—, llegó a HWM 84% del TP, retrocedió y el PM aseguró +$4.52) + **6 CLOSE_PROTECT** cortando sangrías a −1.4/−1.8/−2.2/−2.9p en vez de SL completo + #627 TP completo (+$9.04). En el peor régimen, el management mostró su cara buena por primera vez. n chico, pero es exactamente lo que el experimento debía demostrar.
+- [ ] **[obs, familia del bug #615 pero más leve] Edad/expiry corren desde la SEÑAL, no desde el FILL** — #625 esperó **27min como limit order pendiente** y el fill le llegó con 27 de sus 45min de vida ya comidos (el PM lo evaluó "28/45min" a los 17s del fill). Evaluar si la edad debería correr desde el fill para TODOS los trades → requiere timestamp de fill (columna `mt5_filled_at`, hoy NO existe). No urgente; decidir si vale la migración.
+- [ ] **[obs] SL puede ejecutar con slippage GRANDE en spikes**: #625 cerró 1.15504 vs SL 1.15392 = **11p más allá del stop** en una vela de ~30p (el broker llena al siguiente precio). No es bug — es microestructura — pero significa que el "riesgo 1% por trade" puede excederse en velas violentas. Dato para sizing y CRÍTICO para la futura cuenta real.
+- [ ] **[obs NUEVA, forense del spike 11 Jun] El retry de ejecución puede vender/comprar a MERCADO una señal VIEJA adentro de un spike** — #625: señal creada 14:01 AR, sin fill por 27min, y el bloque "MT5 retry" la ejecutó a mercado a las 14:28:58 — **dentro del primer minuto del spike** (vela de 19.1p tras un mercado planchado de 0.5p/min). Encima el SL (21.8p, estructural ancho) ejecutó con 11.2p de slippage por los gaps (precio saltando 13-15p/min) → −$13.48, la peor del día. La señal estaba obsoleta: "mejor precio" de fill en plena reversa violenta = selección adversa (te llenan justo cuando el mercado corre en contra). **Candidato a medir (no actuar aún): WR de fills tardíos (fill − señal > 10min) vs fills inmediatos** — medible con broker-truth (order setup time vs created_at). Sumar al script de sospechosos si da el tiempo el viernes.
+- *Contexto:* la racha 10-11 Jun cerró en ~−$53 los dos días (CPI whipsaw + PPI/ECB). Verificado de nuevo: sin pérdida de datos, sin bugs de ejecución nuevos (el −13.48 fue slippage de spike), threads vivos, daily loss limit (−$30/día) armado y sin disparar.
+
+**Checkpoint 12 Jun — RESULTADOS DEL REVIEW COMPLETO (workflow 4 frentes + verificador, tarde):**
+- [ ] **Bounce log infla por retries**: 304 filas = solo 65 estrategias (#625 logueado 121 veces) → **todo análisis debe dedupear por strategy_id (primera fila)**; dedup real: 28/65 (43%) son bounce — eso es PREVALENCIA, no WR (no confundir). 3 estrategias cambian de clase entre intentos.
+- [ ] **⚠️ Universos lifetime SIN reconciliar (no usar ninguno como baseline canónico):** broker 617 posiciones/−$512 vs DB 377/−$352 vs balance-implícito −$273 vs suspects n=363. Pueden coexistir (deals sin linkage, mt5_pnl NULL viejos) pero nadie lo reconcilió. Item para el 19 Jun.
+**Checkpoint 12 Jun — DECISIONES TOMADAS:**
+**Barrido exhaustivo 14 Jun (broker-truth, 617 posiciones, 4 frentes + verificador) — RESULTADO: el pozo de data sucia está SECO:**
+- [ ] **Candidatos a VIGILAR con data limpia (hoy RUIDO, no tocar):** (a) racha "4+ pérdidas seguidas" (n=118, WR 30%, p=0.058, CI cruza por 0.01 — el más cercano); (b) hora 11h AR (peor bucket, p=0.049 pero CI cruza, mismo perfil que las 11h-UTC removidas); (c) vol baja peor que alta (32% vs 41%, roza pero no pasa) → posible ATR-floor, no detector. Re-medir 26 Jun/17 Jul con `tools/measure_streak_recency.py` y `measure_regime_x_trigger.py`.
+- [ ] **"m15 sin techo de ATR" NO medible retrospectivo**: `avg_range_pips=0` (sentinel del doble-encode) en 71/87 m15 — solo medible hacia adelante con data limpia v3.40.x.
+- *Lección metodológica reconfirmada (workflow):* el gate rechazó correctamente 2 borderline (hora 11h, racha 4+) por CI-cruza-baseline aunque p<0.05 — exactamente para lo que se diseñó. Y un hallazgo "significativo" (régimen×vol) resultó lookahead. Tools nuevos read-only: `measure_streak_recency.py`, `measure_regime_x_trigger.py` (env CUT_BEFORE_S).
+
+**Deudas técnicas / gaps:**
+- [ ] **OLLAMA_API/URL/MODEL sin definir** — GUI-only, no afecta trading. Spawneado como task aparte. Baja prioridad.
+- [ ] **`calendar` trigger (0 trades en 325) — en SHADOW desde v3.40.4** · `CALENDAR_MODE=shadow`. Investigado 8 Jun, 2 causas: **(1) Feed FF 429** — el cache solo guardaba éxitos (`and events`) → con events vacío re-fetcheaba CADA ciclo → AIdan **se auto-baneó la IP** (hammering). ARREGLADO v3.40.4 (`main.py`): cachea el intento 1h SIEMPRE + User-Agent + loguea el 429 (antes silencio). Ahora le pega a FF máx 1/hora → la IP debería destrabarse en horas/días (no controlable desde acá). **(2) Straddle ROTO** — la anti-contradicción bloquea la 2da pata → solo dispararía CALL. Por eso quedó en shadow (`calendar_shadow_log`): loguea ambas patas SIN operar. **Para activar a vivo:** esperar que FF devuelva data → revisar shadow → arreglar el straddle (ambas patas; OJO doble comisión = problema #1) → recién ahí `CALENDAR_MODE=active`. El path 'active' TODAVÍA tiene el bug del straddle (no flippear sin arreglarlo).
+
+
+---
+
+## Analisis 11 May 2026 — calibracion de confidence (tablas completas)
+
+*(Bajado de CLAUDE.md el 26-ago-2026. Superado por v3.59.0, que consiguio el 1er PASA del gate de calibracion con 309 trades limpios. Se guarda porque las tablas son la evidencia de por que NO se sube el piso de confianza.)*
+
+### Análisis 11 May 2026 — Calibración de confidence
+
+**Descubrimiento via what-if simulator**: la confidence score (0-100) NO es predictor monotónico del win rate. Subir `min_confidence` empeora resultados porque elimina ganadores chiquitos sin filtrar perdedores.
+
+**Tabla WR por bucket de confidence (165 trades histórico)**:
+
+| Conf | Trades | WR | PnL |
+|---|---|---|---|
+| 30-39 | 5 | 40% | -$2.70 |
+| **40-49** | **7** | **43%** | **+$8.60** ✓ |
+| 50-59 | 22 | 36% | -$32.21 |
+| 60-64 | 37 | 38% | -$12.56 |
+| 65-69 | 17 | 35% | -$36.06 |
+| **70-74** | **32** | **34%** | **-$60.12** ✗ |
+| 75-79 | 16 | 44% | +$1.00 |
+| 80-84 | 11 | 36% | -$1.50 |
+| 85-89 | 8 | 50% | -$11.96 |
+| **90-94** | **6** | **0%** | **-$23.38** ✗✗ |
+| 95-100 | 4 | 50% | +$3.30 |
+
+**Hallazgos clave**:
+- Conf **90-94: 0% WR** → las más "confiadas" son las peores
+- Conf **40-49: 43% WR** → mejor que muchos buckets altos
+- Conf **70-74: -$60.12** (32 trades) → el bucket más perdedor en absoluto
+- **NO existe correlación monotónica conf→WR**
+
+**Cumulative "si filtro min_conf >= X"**:
+
+| min_conf | n | WR | PnL |
+|---|---|---|---|
+| ≥0 | 165 | 37.0% | -$167.59 (baseline) |
+| ≥50 | 153 | 36.6% | -$173.49 (peor) |
+| ≥60 | 131 | 36.6% | -$141.28 |
+| ≥70 | 77 | 36.4% | -$92.66 |
+| ≥75 | 45 | 37.8% | -$32.54 |
+| ≥85 | 18 | 33.3% | -$32.04 |
+
+**Subir el piso no ayuda**. AIdan ya tiene `conf_ceiling 80` desde v3.11 (anti-predictive) — esto valida que el TECHO sí aporta, no el piso.
+
+**Root cause (hipótesis)**: la fórmula `dynamic_conf` (technical.py:451) suma puntos de factores redundantes (MA trend + HTF + RSI + momentum miden lo mismo). Cuando todos alinean = conf 90+ = **exhaustion entry** (mercado ya se movió, por revertir). Es por eso que existe SIM A (block fully-aligned).
+
+**Análisis por session (165 trades)**:
+
+| Session | Trades | WR | PnL |
+|---|---|---|---|
+| **london** | 7 | 28.6% | +$2.40 ✓ (muestra inútil) |
+| late_ny | 55 | 36.4% | -$50.89 |
+| ny | 68 | 38.2% | -$61.40 |
+| overlap | 33 | 39.4% | -$44.70 |
+| off | 2 | 0% | -$13.00 |
+
+**Lectura**: TODAS las sessions pierden plata (excepto London con 7 trades = ruido). El problema no es de session específica — es estructural.

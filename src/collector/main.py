@@ -19,10 +19,11 @@ def run_collector():
     
     fetcher = FeedFetcher(logger)
     
-    # Default sources if config file doesn't exist
+    # Default sources if config file doesn't exist.
+    # v3.61.0: FT y Reuters devuelven 0 entries desde hace meses (medido 26-ago),
+    # asi que el fallback ya no las incluye: un default con fuentes muertas hacia
+    # que "5 fuentes configuradas" fuera 1 fuente real.
     default_sources = [
-        {"name": "Financial Times", "url": "https://feeds.ft.com/markets"},
-        {"name": "Reuters", "url": "https://feeds.reuters.com/reuters/businessNews"},
         {"name": "Bloomberg", "url": "https://feeds.bloomberg.com/markets/news.rss"},
     ]
     

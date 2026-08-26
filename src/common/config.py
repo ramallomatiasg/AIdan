@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.60.0"
+APP_VERSION = "3.61.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -411,12 +411,32 @@ class Config:
     # Rate-limit: minimo de minutos entre consultas LLM por posicion (evita spam/costo).
     PM_LLM_COOLDOWN_MIN = float(os.getenv("PM_LLM_COOLDOWN_MIN", "5"))
 
+    # v3.61.0 - Perilla de las fuentes de noticias EXTRA (config/sources.yaml ->
+    # `extra_sources`). Default FALSE a proposito: las 4 fuentes candidatas estan
+    # vivas y medidas, pero enchufarlas multiplica el volumen de news x15-166
+    # (Bloomberg publica 1,1 items/hora) y news pierde $0,91/trade sobre n=132
+    # broker-truth => activarlas sin medir antes multiplicaria la perdida.
+    # Cual merece entrar lo decide tools/measure_feed_race.py (quien reporta los
+    # datos del calendario PRIMERO, no quien publica mas).
+    NEWS_EXTRA_SOURCES = os.getenv("NEWS_EXTRA_SOURCES", "false").lower() in ('true', '1', 'yes')
+
     @staticmethod
     def get_sources():
-        """Load news sources from config file"""
+        """Load news sources from config file.
+
+        Devuelve `sources` siempre, y le suma `extra_sources` solo si
+        NEWS_EXTRA_SOURCES esta en true (env, sin rebuild).
+        """
         config_path = "config/sources.yaml"
-        if os.path.exists(config_path):
-            import yaml
-            with open(config_path) as f:
-                return yaml.safe_load(f).get("sources", [])
-        return []
+        if not os.path.exists(config_path):
+            return []
+        import yaml
+        # encoding EXPLICITO: en Windows open() default es cp1252 y cualquier
+        # caracter no-ASCII en un comentario del yaml tiraba UnicodeDecodeError
+        # -> get_sources() explotaba y el collector quedaba sin fuentes.
+        with open(config_path, encoding='utf-8') as f:
+            data = yaml.safe_load(f) or {}
+        srcs = list(data.get("sources") or [])
+        if Config.NEWS_EXTRA_SOURCES:
+            srcs += list(data.get("extra_sources") or [])
+        return srcs

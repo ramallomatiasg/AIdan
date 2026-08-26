@@ -775,9 +775,10 @@ class AIdan:
             init_db()
             
             fetcher = FeedFetcher(logger)
+            # v3.61.0: FT y Reuters devuelven 0 entries desde hace meses (medido
+            # 26-ago), asi que el fallback ya no las incluye: un default con
+            # fuentes muertas hacia que "5 fuentes configuradas" fuera 1 real.
             default_sources = [
-                {"name": "Financial Times", "url": "https://feeds.ft.com/markets"},
-                {"name": "Reuters", "url": "https://feeds.reuters.com/reuters/businessNews"},
                 {"name": "Bloomberg", "url": "https://feeds.bloomberg.com/markets/news.rss"},
             ]
             

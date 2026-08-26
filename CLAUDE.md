@@ -51,12 +51,47 @@ con la razón del cierre.
 - [ ] **No hay tweak nuevo con evidencia para hoy.** Cooldown ya activo, bias refutado, R:R/BE ya arreglados (v3.40.18/19, miden hacia adelante, 18-19 jun aún rojo pero n=2 días + varios pre-fix). El único cambio que la data SÍ respalda es estructural: el **pullback-entry en shadow** (arriba). Hacer otro tweak a ciegas = el error que la metodología evita.
 - [ ] **news = fuga confirmada (n=34, 18% WR, −$55, p=0.011, CI [8-34%] debajo del baseline; reciente 0/11).** Todos los buckets de conf pierden → subir el piso no sirve. NO se apagó (el user pidió mejorar no sacar). Candidato: medir tasa de error del LLM de news (backlog) y/o ver si el fade-chop cubre lo que news pierde en chop.
 - [ ] **🟢 ~15 SEP — 1ra lectura del TRACK D1 (v3.54.0, criterio pre-declarado).** Correr `python tools/score_d1_shadow.py` (regla de shadow: traerlo **sin que el user lo pida** cada vez que hablemos del estado de AIdan). Esperado a esa altura: **~7-8 señales** (2,1-2,5/mes según el baseline corregido del 16-ago) ⇒ **n insuficiente para concluir, y eso está previsto**: a este ritmo n=25 son ~11 meses. Qué mirar igual: **(a)** ¿el `close neto` a 10 velas se parece a los **+11 a +13p** del backtest post-swap (baseline corregido — el viejo +12,8p salía de una corrida no comparable), o está claramente abajo? **(b)** ¿`adv` es mucho mayor que `fav`? Si sí, el setup te pasa por arriba antes de darte la razón — es exactamente lo que refutó fade-chop (fav ~1p vs adv ~9p) y sería señal temprana de que el backtest no se sostiene. **(c)** ¿la frecuencia real coincide con 2,7/mes? Si es mucho menor, los filtros del loop vivo están recortando más de lo que el backtest asumía. **NO activar por una lectura buena**: para pasar a `active` faltan resolver las DOS razones por las que nació en shadow — el swap (CI cruza cero) y el lote mínimo (no se puede respetar el 1% con SL de 82p en una cuenta de $639). La segunda es una decisión de CUENTA, no de código.
-- [x] ✅ **CERRADO 16-ago (v3.54.1) — el baseline del D1 estaba mal y ya se corrigió.** Se tomó la opción (1): re-correr el backtest con los params vivos, read-only, sin tocar producción. Lo verificado: **(a)** los params vivos difieren del default en 4 claves, pero solo 2 afectan al D1 (`breakout_dist_max`/`breakdown_dist_max` 15→7); `block_outside_sessions` se aplica en los loops de M5/news/smc/calendar y **NO en el bloque D1**, y `min_pips_for_win` es de etiquetado del tuner. **(b)** El `conf_adj` de sesión en vivo depende de a qué hora el loop ve la vela nueva y **no se puede reconstruir honestamente** ⇒ no se inventó un "auto": se agregó `--session sweep`, que corre las 4 sesiones y reporta el rango. **Resultado — el titular del 13-ago se reproduce exacto con `--params default --session off` (242 señales, PF 1,41, +16,6p), o sea que aquella corrida fue en off-hours.** Baseline corregido (params vivos, 4 sesiones): **186-227 señales · 2,1-2,5/mes (no 2,7) · +13,7 a +15,3p neto de comisión · +10,8 a +12,7p post-swap · PF 1,25-1,30.** **Positivo en las CUATRO sesiones** ⇒ el edge no dependía de la hora del reloj, que era el riesgo real de (b); el nivel sí baja ~10-15% y la frecuencia ~20%. El número quedó escrito en el docstring de `technical_d1.py` y lo imprime `score_d1_shadow.py` al final. *(La revisión del 13-ago devolvió 28 hallazgos; los 5 accionables se arreglaron en el 2do commit de v3.54.0, este era el 6to y último accionable. El resto son menores.)*
 - [ ] **🔧 PENDIENTE APARTE (no urgente, no se metió en v3.54.0 para no romper "un cambio a la vez"): las claves de intervalo de `price_feed` no coinciden entre fuentes.** MT5 mapea `'1d'`/`'4h'`; Yahoo y FXCM mapean `'1day'`. Y `_map_interval_to_yahoo` tiene **default silencioso `('5m','1d')`** (`price_feed.py:263`) ⇒ pedir `'1d'` con MT5 caído devuelve **velas de 5 minutos etiquetadas como diarias**, y el log encima miente (`from yahoo (1d)`). Verificado ejecutándolo. Efectos hoy: (a) el track D1 es **inmune** (exige MT5 y valida el espaciado real de las velas); (b) `mtf_analyzer` pide `'1day'` para su D1 ⇒ **nunca usa MT5**, siempre sale por Yahoo (funciona, pero es red innecesaria y otro instrumento); (c) `'4h'` en Yahoo devuelve velas H1 a propósito (comentado en el código) — aproximación silenciosa. Fix propuesto: aceptar ambos alias en las 3 fuentes y cambiar el default de Yahoo a `None` + warning (fail-loud). Verificado que es seguro: todos los callers vivos usan intervalos que **sí** están mapeados. **Ojo también** `mt5_executor.py:512`, que tiene el tf_map duplicado con default `TIMEFRAME_M5` — misma bomba.
 - [ ] **🟢 ~1 SEP — RE-MEDIR el castigo por nivel flojo en m15 (v3.50.0). Corrido el 16-ago (3 días antes): NO se sube a 25, y la razón importa.** El gatillo pre-declarado era "si los flojos siguen pasando → `PENALTY=25`". **Pasan** (12 de 15 señales castigadas sobrevivieron = 80%, y son las de conf alta: 86→71, 88→73, 91→76 — exactamente la fuga que se había previsto). **Pero la premisa detrás del gatillo se cayó**: en el forward los flojos ya no son la mitad mala. Flojos n=5 → −$7,10 (1 win); validados (>10 toques) n=4 → −$10,63 (0 wins). Antes del castigo era al revés (flojos avg −$2,97 vs validados +$0,85, n=83). Subir a 25 hoy bloquearía la mitad **menos** mala ⇒ es el "fix que no arregla nada" del principio rector. **n=9 en total, muy por debajo de cualquier gate ⇒ no se toca la perilla, se re-mide.** Lo demás medido: **(a) frecuencia** m15 3,11 → 1,29 trades/día activo (−59%), pero **el castigo NO es la causa**: solo logueó **3 DROP** en 11 días, mientras `ATR too low` pasó de 0 a **2.115 skips** — es el mercado muerto de agosto (el resto de los tracks también bajó, 3,33 → 3,00). El costo atribuible al castigo es ~3 señales de ~12 (−25%), más que el ~12% estimado pero del mismo orden. **(b) WR del resto: no mejoró** — m15 32,1% (n=28) → 11,1% (n=9), PnL −$17,26 → −$17,73. *Contexto original de por qué 15 y no 25: contra los 10 niveles flojos reales, −15 bloquea 4/10 y evita ~$11,3 de los −$29,7, pero se le escapan los dos peores (#683 y #834, conf 90 y 83); −25 bloquearía 8/10 (~$25,2) pero a n=10 ya es casi un block de la familia.*
 - [ ] **🔵 ~22 AGO — 1ra lectura del BE de h1 (v3.52.0, criterio pre-declarado).** Medir sobre los h1 creados desde el 8-ago: **(a) ¿cuántos armaron el BE?** (esperado ~32% de los trades, los que tocan ≥5p — buscar en el log `SL movido a BE` / `mt5_trailing_step`); **(b) de los que armaron, ¿cuántos cerraron en ~+1p en vez de negativo?** (el rescate esperado); **(c) ¿algún ganador se cortó en +1p que antes hubiera corrido?** — este es el contra a vigilar, la evidencia decía que no pasa (los 8 ganadores históricos nunca bajaron de +3,9p) pero es exactamente lo que un contrafáctico puede errar. Query: `position_manager_log` ⋈ `trade_archive` por `strategy_id`, comparar `MAX(hwm_pips)` contra `pips` de cierre. **Si (c) aparece seguido → `BE_TRIGGER_MAX_PIPS=8`** (arma más tarde, solo 26% de los trades); **si no rescata nada → `=0`** y queda como estaba. Ambas por env, sin rebuild. *Ojo con el volumen: h1 hace ~1-2 trades/día ⇒ puede que a las 2 semanas haya n~10 y no alcance para concluir; en ese caso extender, no forzar.*
 - [ ] **🔴 ~28 AGO — VEREDICTO news v3.51.0 (criterio pre-declarado, NO mover).** Medir sobre los news creados desde el 7-ago (n≥15, ~4/semana): **(a) ¿los ganadores pasaron de recorrer 40% del TP a ≥59%?** **(b) ¿los perdedores siguen en ~53% del SL o se estiraron?** (si se estiran, la perilla 2 no está haciendo su trabajo). (c) PnL y WR del track. Query: comparar `|pips|` contra su propio `stop_loss`/`take_profit` por fila (los flags `sl_hit`/`tp_hit` son **tautológicos**, se derivan de `result`+`pips` — no usarlos). **Si no se cumple → `NEWS_MIN_EXPIRY_MIN=15`** (env, sin rebuild) y news vuelve a como estaba. *Decisión del user 7-ago: news NO se apaga, se arregla.*
 - [ ] **🟢 ~1 SEP — FORWARD del piso de ATR de m15 (v3.55.0, `M15_ATR_FLOOR=8`, activo desde el 16-ago).** El hint de "m15 × expansión" creció hasta pasar el gate y se activó: **ATR ≤8p = n=90, WR 27,8%, −$75,59 · ATR >8p = n=31, WR 51,6%, +$18,80** (p=0,0042, CI95 [33,1-69,8%] sin cruzar el 27,8% del comparador, mismo período los dos buckets, ATR clasificado al entrar). El diagnóstico completo: **m15 necesita ~40,5% de WR para empatar** (ganador medio +7,8p, perdedor −5,3p) y en chop saca 28%. **Lo que la revisión adversarial del propio hallazgo encontró y hay que tener presente al leer el forward: el lado BUENO es frágil** — de los +$18,80 unos +$19,49 salen de 2 días, sin ellos queda en −$0,69; sacando los 3 mejores ganadores, −$10,88. **El lado malo sí aguanta** (pierde en las dos mitades: 28,9% y 26,7%). ⇒ **La expectativa correcta es "m15 deja de sangrar", NO "m15 pasa a rentable".** Medir: **(a)** ¿la frecuencia de m15 cayó ~74% como se estimó (3,27 → 0,84 trades/día)? **(b)** ¿el PnL de m15 se acercó a cero, o el bucket >8p también empezó a perder (= el hallazgo era el artefacto de 2 días)? **(c)** ¿cuántos skips loguea (`ATR ... < piso ... -> sin scan (chop)`, 1 por hora)? **Si el bucket que queda pierde igual → `M15_ATR_FLOOR=5.0`** (env, sin rebuild) y m15 vuelve a como estaba. *No afinar el umbral sobre esta muestra: el 8 venía pre-declarado desde el 17-jul; buscar el mejor número sería overfit.*
+
+**⚡ FUENTE DE NEWS CAMBIADA (26 Ago, v3.61.0) — leer junto al veredicto de news del ~28 ago.**
+Nace del trade #931 (PUT sobre el Core PCE): el user vio que entró tardísimo. Medido, la cadena
+completa fue **29,7 min** desde el dato: **25,3 min los tardó BLOOMBERG en publicar**, 4,3 min el poll
+del RSS, **10 segundos el LLM y 2 segundos la orden**. El cuello nunca fue AIdan.
+**Lo que apareció al medirlo:** (a) **4 de las 5 fuentes estaban MUERTAS y calladas** — FT y Reuters ni
+resuelven DNS; 1225 de 1225 noticias de 30 días venían de bloomberg.com, y `fetch_feeds` devolvía lista
+vacía sin loguear (la clase de bug que mató M15/SMC). (b) El feed de Bloomberg markets es de **opinión y
+video, no un cable**: de 76 noticias que gatillaron operación en 7 días, **74 no correspondían a ningún
+evento del calendario**. (c) El gate de frescura existente (`age_min <= 30`, AIdan_TodoEnUno.py:1733)
+mide la edad del **ARTÍCULO, no del DATO** ⇒ un recap publicado hace 4 min pasa con el número ya 29 min
+viejo. (d) El LLM dijo *"superando la expectativa de 0.1% mensual"* cuando el forecast era **0,2%** y
+0,1% era el **PREVIO** — inventó una sorpresa hawkish confundiendo previous con forecast.
+**El reemplazo, medido no elegido a dedo** (`tools/measure_feed_race.py`): **Forexlive publicó el Core
+PCE a las 09:30:15 contra un release de 09:30:00 = +15 SEGUNDOS**, el GDP a +36s y durable goods a +11s,
+con el formato *"X vs Y expected"* en el título (que hace mucho más difícil el error (d)). Y a **2,0
+items/hora contra 1,1 de Bloomberg** ⇒ no es una explosión de volumen. Las otras candidatas quedaron en
+`extra_sources` **apagadas** (`NEWS_EXTRA_SOURCES=false`): ninguna es más rápida y una llega a 149
+items/hora de transcripts de earnings.
+**⚠️ LO QUE ESTO NO ARREGLA, Y HAY QUE TENERLO PRESENTE AL LEER EL VEREDICTO DEL 28-AGO.** Medí los 132
+trades de news con broker-truth por bucket de latencia y **todos pierden, y los más frescos NO son
+mejores**: ≤3min −$0,82/trade (n=6) · 3-6min **−$1,44** (n=50, el peor) · 6-10min −$0,34 (n=45) ·
+10-20min −$0,91 (n=29). Ningún corte `≤X` mejora el baseline de −$0,91. *Pero eso mide la edad del
+ARTÍCULO, y ningún trade de la muestra entró antes de ~29 min del DATO* ⇒ el camino rápido está **sin
+medir, no refutado**. Esta es la primera vez que se puede medir.
+**Gate pre-declarado (NO mover):** sobre los news creados desde el 26-ago, con n≥25, **(1)** ¿qué
+fracción de los trades nace de una nota de Forexlive con el dato dentro de los 3 min del release?
+**(2)** ¿esos rinden mejor que el −$0,91/trade del baseline, con CI95 de Wilson que no cruce?
+**(3)** ¿el volumen de news subió más de 2x?  **Si (3) sí y (2) no ⇒ `ENABLE_NEWS_TRACK=false`** (env,
+sin rebuild) y se decide con el user. **Si (1) es ~0 ⇒ Forexlive no está gatillando y el problema es el
+prompt/los filtros, no la fuente.** *No afinar el gate de frescura sobre esta muestra: el 30 viene de
+antes y buscar el mejor número sería overfit.*
+**⚠️ TRAMPA DE CONFIG DESCUBIERTA:** `config/sources.yaml` se lee de **%APPDATA%/AIdan/config/**, y el
+exe solo copia `config/` **si la carpeta no existe** ⇒ editar el del repo NO afecta producción (el vivo
+era del 25-feb). Al tocar cualquier cosa de `config/`, copiar a mano. Eso mismo lo hace reversible sin
+rebuild.
 
 **🧪 SHADOW NUEVO (20 Ago, v3.60.0) — SHADOW TRADER LLM (Groq). Regla de shadow aplica.**
 Pedido del user ("un LLM que controle todo, cierre antes, abra, autorecursivo"), implementado en la
@@ -213,25 +248,6 @@ cambiaba mientras AIdan escribía ⇒ irreproducible) · `except` sin fail-loud.
 - [ ] **Event-window (conciencia de eventos, v3.40.14)** · `EVENT_WINDOW_MODE=shadow`. Respuesta al pedido del user "tiene que operar alrededor de eventos, pero bien" (12 Jun). Hook en `_try_mt5_execute` (cubre ejecución normal Y retry): etiqueta CADA ejecución con proximidad al evento HIGH/MED más cercano (`event_window_log`, clasificación en el momento) + marca `would_block` si una señal CIEGA (structure/m15/h1/smc) o VIEJA (>10min, caso #625) cae dentro de la ventana (HIGH 15min antes/30 después; MED 5/15). news/pre_planned/calendar NO se marcan (jugadas de evento por diseño). **Plan "operar eventos bien"**: (1) este etiquetado junta data limpia de eventos, (2) shadow del straddle ya corre (feed FF REVIVIDO 12 Jun — verificado: /calendar con eventos), (3) en 2-4 sem decidir LA jugada de evento con data: straddle vs momentum post-release (única con evidencia viva: #604 ganó +5.30 entrando 7min post-CPI) vs skip. Flip a `active` solo con data del shadow.
 - [ ] **Bounce-entry** · `SKIP_BOUNCE_ENTRY=shadow`. Juntar clasificación **limpia** en vivo (log al ejecutar, no reconstruida). No activar sin señal robusta varias semanas. Clasificación retrospectiva = frágil.
 
-**Obs 11 Jun (día PPI/ECB: 14 trades, 3W/11L, −$29.22 — 3er día seguido de eventos) — para el checkpoint del viernes:**
-- [ ] **PM tuvo su PRIMER día real en ambas direcciones** (evidencia viva para el punto 2 de la agenda): **primer CLOSE_PROFIT de la historia** (#621: se extendió **118min** más allá del expiry —comportamiento nuevo v3.40.11—, llegó a HWM 84% del TP, retrocedió y el PM aseguró +$4.52) + **6 CLOSE_PROTECT** cortando sangrías a −1.4/−1.8/−2.2/−2.9p en vez de SL completo + #627 TP completo (+$9.04). En el peor régimen, el management mostró su cara buena por primera vez. n chico, pero es exactamente lo que el experimento debía demostrar.
-- [ ] **[obs, familia del bug #615 pero más leve] Edad/expiry corren desde la SEÑAL, no desde el FILL** — #625 esperó **27min como limit order pendiente** y el fill le llegó con 27 de sus 45min de vida ya comidos (el PM lo evaluó "28/45min" a los 17s del fill). Evaluar si la edad debería correr desde el fill para TODOS los trades → requiere timestamp de fill (columna `mt5_filled_at`, hoy NO existe). No urgente; decidir si vale la migración.
-- [ ] **[obs] SL puede ejecutar con slippage GRANDE en spikes**: #625 cerró 1.15504 vs SL 1.15392 = **11p más allá del stop** en una vela de ~30p (el broker llena al siguiente precio). No es bug — es microestructura — pero significa que el "riesgo 1% por trade" puede excederse en velas violentas. Dato para sizing y CRÍTICO para la futura cuenta real.
-- [ ] **[obs NUEVA, forense del spike 11 Jun] El retry de ejecución puede vender/comprar a MERCADO una señal VIEJA adentro de un spike** — #625: señal creada 14:01 AR, sin fill por 27min, y el bloque "MT5 retry" la ejecutó a mercado a las 14:28:58 — **dentro del primer minuto del spike** (vela de 19.1p tras un mercado planchado de 0.5p/min). Encima el SL (21.8p, estructural ancho) ejecutó con 11.2p de slippage por los gaps (precio saltando 13-15p/min) → −$13.48, la peor del día. La señal estaba obsoleta: "mejor precio" de fill en plena reversa violenta = selección adversa (te llenan justo cuando el mercado corre en contra). **Candidato a medir (no actuar aún): WR de fills tardíos (fill − señal > 10min) vs fills inmediatos** — medible con broker-truth (order setup time vs created_at). Sumar al script de sospechosos si da el tiempo el viernes.
-- *Contexto:* la racha 10-11 Jun cerró en ~−$53 los dos días (CPI whipsaw + PPI/ECB). Verificado de nuevo: sin pérdida de datos, sin bugs de ejecución nuevos (el −13.48 fue slippage de spike), threads vivos, daily loss limit (−$30/día) armado y sin disparar.
-
-**Checkpoint 12 Jun — RESULTADOS DEL REVIEW COMPLETO (workflow 4 frentes + verificador, tarde):**
-- [ ] **Bounce log infla por retries**: 304 filas = solo 65 estrategias (#625 logueado 121 veces) → **todo análisis debe dedupear por strategy_id (primera fila)**; dedup real: 28/65 (43%) son bounce — eso es PREVALENCIA, no WR (no confundir). 3 estrategias cambian de clase entre intentos.
-- [ ] **⚠️ Universos lifetime SIN reconciliar (no usar ninguno como baseline canónico):** broker 617 posiciones/−$512 vs DB 377/−$352 vs balance-implícito −$273 vs suspects n=363. Pueden coexistir (deals sin linkage, mt5_pnl NULL viejos) pero nadie lo reconcilió. Item para el 19 Jun.
-**Checkpoint 12 Jun — DECISIONES TOMADAS:**
-**Barrido exhaustivo 14 Jun (broker-truth, 617 posiciones, 4 frentes + verificador) — RESULTADO: el pozo de data sucia está SECO:**
-- [ ] **Candidatos a VIGILAR con data limpia (hoy RUIDO, no tocar):** (a) racha "4+ pérdidas seguidas" (n=118, WR 30%, p=0.058, CI cruza por 0.01 — el más cercano); (b) hora 11h AR (peor bucket, p=0.049 pero CI cruza, mismo perfil que las 11h-UTC removidas); (c) vol baja peor que alta (32% vs 41%, roza pero no pasa) → posible ATR-floor, no detector. Re-medir 26 Jun/17 Jul con `tools/measure_streak_recency.py` y `measure_regime_x_trigger.py`.
-- [ ] **"m15 sin techo de ATR" NO medible retrospectivo**: `avg_range_pips=0` (sentinel del doble-encode) en 71/87 m15 — solo medible hacia adelante con data limpia v3.40.x.
-- *Lección metodológica reconfirmada (workflow):* el gate rechazó correctamente 2 borderline (hora 11h, racha 4+) por CI-cruza-baseline aunque p<0.05 — exactamente para lo que se diseñó. Y un hallazgo "significativo" (régimen×vol) resultó lookahead. Tools nuevos read-only: `measure_streak_recency.py`, `measure_regime_x_trigger.py` (env CUT_BEFORE_S).
-
-**Deudas técnicas / gaps:**
-- [ ] **OLLAMA_API/URL/MODEL sin definir** — GUI-only, no afecta trading. Spawneado como task aparte. Baja prioridad.
-- [ ] **`calendar` trigger (0 trades en 325) — en SHADOW desde v3.40.4** · `CALENDAR_MODE=shadow`. Investigado 8 Jun, 2 causas: **(1) Feed FF 429** — el cache solo guardaba éxitos (`and events`) → con events vacío re-fetcheaba CADA ciclo → AIdan **se auto-baneó la IP** (hammering). ARREGLADO v3.40.4 (`main.py`): cachea el intento 1h SIEMPRE + User-Agent + loguea el 429 (antes silencio). Ahora le pega a FF máx 1/hora → la IP debería destrabarse en horas/días (no controlable desde acá). **(2) Straddle ROTO** — la anti-contradicción bloquea la 2da pata → solo dispararía CALL. Por eso quedó en shadow (`calendar_shadow_log`): loguea ambas patas SIN operar. **Para activar a vivo:** esperar que FF devuelva data → revisar shadow → arreglar el straddle (ambas patas; OJO doble comisión = problema #1) → recién ahí `CALENDAR_MODE=active`. El path 'active' TODAVÍA tiene el bug del straddle (no flippear sin arreglarlo).
 **Auditoría 8 Jun (multi-agente, 5 frentes) — hallazgos CONFIRMados (ninguno rompe trading HOY):**
 - [ ] **[LOW/hipótesis] `sync_pending_orders` 'expired' en respuesta vacía transitoria** (`mt5_executor.py:552-589`): clase v3.35.2 al revés. HIPÓTESIS (necesita confirmación runtime). Hardening: confirmar con `history_orders_get` antes de escribir 'expired'.
 - [ ] **[LOW] Idempotency `startswith` colisión** (`mt5_executor.py:164`): "AIdan #5" matchea #50/#565; hoy inalcanzable (siempre el id más nuevo). Fix defensa: match delimitado.
@@ -456,7 +472,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 | Version | Cambio | Estado |
 |---|---|---|
-| v3.60.0 | **Shadow trader LLM (Groq)**: un "operador" gpt-oss-120b decide en PAPEL (open CALL/PUT/NONE cada 15 min · manage CLOSE/HOLD por posición cada 5 min) → `shadow_trader_log`. Sin path de ejecución por construcción (test). Gate en `score_shadow_trader.py`; a n≥40 sin separar ⇒ off | **actual** |
+| v3.61.0 | **El feed de noticias llegaba 25 min tarde y 4 de 5 fuentes estaban MUERTAS en silencio**: Forexlive publica el dato a **+15 segundos** del release (Bloomberg a +25,3 min) y ahora es la fuente primaria. Fail-loud por fuente, timeout real, orden por fecha antes de cortar. Perilla `NEWS_EXTRA_SOURCES` (default off) + `tools/measure_feed_race.py` | **actual** |
+| v3.60.0 | **Shadow trader LLM (Groq)**: un "operador" gpt-oss-120b decide en PAPEL (open CALL/PUT/NONE cada 15 min · manage CLOSE/HOLD por posición cada 5 min) → `shadow_trader_log`. Sin path de ejecución por construcción (test). Gate en `score_shadow_trader.py`; a n≥40 sin separar ⇒ off | vigente |
 | v3.59.0 | **P calibrada de m15 en FASE REGISTRO**: con 309 trades limpios la calibración de Platt PASÓ su gate por 1ra vez (m15 Brier 0.2214 < 0.230); params CONGELADOS en `confidence_calibration.py`, `add_auto_strategy` registra `calibrated_p` en `entry_context` — 0 efecto en decisiones. Leer con `score_calibrated_p_forward.py` (~10 sep) | vigente |
 | v3.58.1 | **Instrumentación (0 cambios de decisión)**: MFE/MAE reales por trade (trailing 1s → `mfe_pips`/`mae_pips` en el archive) + **shadow book** (`rejected_signals`, PRFS: outcome forward de lo que se BLOQUEA) + `signal_age_at_fill_min` + `efficiency_ratio` (Kaufman) en `entry_context` | vigente |
 | v3.58.0 | **TCA real**: `log_fill()` existía DESCONECTADO (0 filas en meses) — ahora registra pedido vs fill + spread en cada entrada. Verificado: la cuenta es **Market Execution** ⇒ el `deviation` del request lo ignora el server | vigente |
@@ -503,56 +520,7 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 ### Análisis 11 May 2026 — Calibración de confidence
 
-**Descubrimiento via what-if simulator**: la confidence score (0-100) NO es predictor monotónico del win rate. Subir `min_confidence` empeora resultados porque elimina ganadores chiquitos sin filtrar perdedores.
-
-**Tabla WR por bucket de confidence (165 trades histórico)**:
-
-| Conf | Trades | WR | PnL |
-|---|---|---|---|
-| 30-39 | 5 | 40% | -$2.70 |
-| **40-49** | **7** | **43%** | **+$8.60** ✓ |
-| 50-59 | 22 | 36% | -$32.21 |
-| 60-64 | 37 | 38% | -$12.56 |
-| 65-69 | 17 | 35% | -$36.06 |
-| **70-74** | **32** | **34%** | **-$60.12** ✗ |
-| 75-79 | 16 | 44% | +$1.00 |
-| 80-84 | 11 | 36% | -$1.50 |
-| 85-89 | 8 | 50% | -$11.96 |
-| **90-94** | **6** | **0%** | **-$23.38** ✗✗ |
-| 95-100 | 4 | 50% | +$3.30 |
-
-**Hallazgos clave**:
-- Conf **90-94: 0% WR** → las más "confiadas" son las peores
-- Conf **40-49: 43% WR** → mejor que muchos buckets altos
-- Conf **70-74: -$60.12** (32 trades) → el bucket más perdedor en absoluto
-- **NO existe correlación monotónica conf→WR**
-
-**Cumulative "si filtro min_conf >= X"**:
-
-| min_conf | n | WR | PnL |
-|---|---|---|---|
-| ≥0 | 165 | 37.0% | -$167.59 (baseline) |
-| ≥50 | 153 | 36.6% | -$173.49 (peor) |
-| ≥60 | 131 | 36.6% | -$141.28 |
-| ≥70 | 77 | 36.4% | -$92.66 |
-| ≥75 | 45 | 37.8% | -$32.54 |
-| ≥85 | 18 | 33.3% | -$32.04 |
-
-**Subir el piso no ayuda**. AIdan ya tiene `conf_ceiling 80` desde v3.11 (anti-predictive) — esto valida que el TECHO sí aporta, no el piso.
-
-**Root cause (hipótesis)**: la fórmula `dynamic_conf` (technical.py:451) suma puntos de factores redundantes (MA trend + HTF + RSI + momentum miden lo mismo). Cuando todos alinean = conf 90+ = **exhaustion entry** (mercado ya se movió, por revertir). Es por eso que existe SIM A (block fully-aligned).
-
-**Análisis por session (165 trades)**:
-
-| Session | Trades | WR | PnL |
-|---|---|---|---|
-| **london** | 7 | 28.6% | +$2.40 ✓ (muestra inútil) |
-| late_ny | 55 | 36.4% | -$50.89 |
-| ny | 68 | 38.2% | -$61.40 |
-| overlap | 33 | 39.4% | -$44.70 |
-| off | 2 | 0% | -$13.00 |
-
-**Lectura**: TODAS las sessions pierden plata (excepto London con 7 trades = ruido). El problema no es de session específica — es estructural.
+> Bajado a [`docs/historial_notas.md`](docs/historial_notas.md) el 26-ago. Titular: la confianza **no es monotónica** con el win rate (conf 90-94 daba 0% WR y 40-49 daba 43%), subir el piso empeora, y **todas las sesiones pierden** ⇒ el problema es estructural, no de sesión. **Superado por v3.59.0**: con 309 trades limpios la calibración de Platt pasó su gate por 1ra vez para m15 (Brier 0,2214) y está en fase registro. La conf CRUDA sigue siendo inutilizable como probabilidad.
 
 ### Opciones para corregir confidence (post-Fase 1)
 
@@ -713,6 +681,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `measure_tca.py` | TCA READ-ONLY (v3.58.0): mediana/p90 de slippage y spread desde `slippage_log` + breakdown por hora AR. Umbral pre-declarado: mediana > 0,7p = la ejecucion es un problema material. 0 filas + trades nuevos = el hook de `log_fill` murio (buscar WARNING en aidan.log). |
 | `score_rejected_signals.py` | SHADOW BOOK scorer (v3.58.2, PRFS): completa el outcome forward de `rejected_signals` (SU tabla, lo unico que escribe) con velas M5 sin re-simular SL/TP, y evalua el criterio pre-declarado — atr_floor por movimiento ABSOLUTO vs los 7,8p de un ganador; counter_both/active_opposite por save-to-miss (< 1:1 con n>=25 = el filtro bloquea ganadores). **Regla de shadow: traerlo sin que el user lo pida.** Requiere MT5. `--dry-run`. |
 | `backfill_directional_lessons.py` | Siembra `directional_lessons` desde `trade_archive` con el MISMO criterio del path vivo, para que la retrospectiva no arranque ciega (19 lecciones desde el 20-jun). **Dry-run por default.** Limite declarado: el archive no guarda MFE, usa `max(0,pips)` como cota inferior => puede emitir falsos positivos de "gestion" etiquetados como "direccion"; se distinguen por el prefijo `[backfill]` en `evidence`. |
+| `measure_feed_race.py` | **CARRERA DE FEEDS** (v3.61.0): poleea 9 feeds candidatos y mide, contra la hora de release del calendario FF, **quien publica cada dato primero**. Separa las 2 mitades de la latencia (culpa de la FUENTE vs culpa del POLL) porque solo la 1ra justifica cambiar de fuente. Escribe en su PROPIO archivo (`%APPDATA%/AIdan/state/feed_race.db`), no toca produccion. `--list-events`, `--dry-run`, `--hours N`, `--report`. **Resultado 26-ago: Forexlive +15 segundos vs Bloomberg +25,3 min sobre el mismo Core PCE.** Limite declarado: el match titulo<->evento es por keywords => los conteos son cota inferior. |
 | `measure_news_latency.py` | READ-ONLY: ¿news llega tarde por construccion? Nace del research del 19-ago (993 eventos USD 2022-2025: la deriva post-release esta **contenida en las velas +1..+5**; desde la +6 los T dan 0,14-0,69, y ~80% del movimiento se completa en **3 minutos**). **Resultado sobre 871 alerts: mediana 8,9 min, solo 7,7% dentro de los 3 min, y el LLM tarda 0,2 min ⇒ el cuello de botella es el FEED, no el analisis** — un prompt no puede arreglarlo (consistente con que v3.47.0 no moviera el edge). El corte `<=3min` da 60,5% WR vs 51,3% pero **CI [45,6-73,6] cruza el baseline ⇒ NO pasa el gate**, y corre sobre `alert_result`, no broker-truth. *Ojo metodologico: la 1ra version reportaba 398 min por sumar `published_at` en UTC con `fetched_at` en hora AR — el script trae ahora un control de sanidad que falla si el offset se rompe.* |
 | `nightly_analyst.py` | LLM analyst on-demand desde el dashboard (▶ Run analyst). Opus → Groq → Ollama. Propone cambios JSON con min-sample + guard-rails; arranca shadow validation vía auto_applier. |
 | `backtest_parallel.py` · `backtest_weekly.py` | Backtest paralelo de combinaciones de filtros sobre `trade_archive` + wrapper semanal con aviso por Telegram. |
@@ -1048,7 +1017,21 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 ---
 ---
 
-**Última actualización**: 20 Ago 2026 — **v3.60.0: shadow trader LLM (Groq)** — un
+**Última actualización**: 26 Ago 2026 — **v3.61.0: el feed de noticias llegaba 25 minutos
+tarde y 4 de las 5 fuentes estaban muertas en silencio.** Salió de que el user vio entrar un PUT
+sobre el Core PCE fuera de tiempo. Medido: 29,7 min desde el dato, de los cuales **25,3 los tardó
+Bloomberg en publicar** y **12 segundos** puso AIdan (LLM + orden). Al probar las fuentes, 4 de 5
+devolvían 0 entries desde hacía meses sin loguear nada (1225/1225 noticias eran de Bloomberg).
+Reemplazo elegido midiendo, no a dedo: **Forexlive publicó el Core PCE a +15 SEGUNDOS del release**,
+con el formato "X vs Y expected" en el título, y a 2,0 items/hora ⇒ sin explosión de volumen. Se
+arreglaron además 3 bugs del fetcher (fail-loud por fuente, timeout que estaba asignado y no se usaba,
+`entries[:5]` sobre un feed no ordenado) y uno de encoding que dejaba al collector sin fuentes.
+**Lo honesto:** los 132 trades de news pierden en TODOS los buckets de latencia y los más frescos no
+son mejores ⇒ esto puede no alcanzar. Pero ningún trade entró antes de ~29 min del dato, así que el
+camino rápido estaba sin medir, no refutado. Gate pre-declarado en NOTAS, junto al veredicto del
+~28 ago. 21 tests nuevos, suite 158 en verde.
+
+**Anterior**: 20 Ago 2026 — **v3.60.0: shadow trader LLM (Groq)** — un
 "operador" gpt-oss-120b decide en PAPEL (open/manage) a `shadow_trader_log`, sin path de
 ejecución por construcción. Gate en `score_shadow_trader.py`; a n≥40 sin separar ⇒ off.
 Smoke test real: JSON válido en 758ms. 42 tests nuevos en verde.

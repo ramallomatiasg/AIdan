@@ -1,11 +1,60 @@
+# Fuentes de noticias del collector.
+# (ASCII puro a proposito: este archivo lo lee el exe y un caracter raro con el
+#  locale de Windows en cp1252 dejaba al collector sin fuentes.)
+#
+# OJO: ESTE ARCHIVO SE LEE DESDE %APPDATA%/AIdan/config/sources.yaml, NO del repo.
+#   El arranque del exe copia config/ a %APPDATA% SOLO SI la carpeta no existe
+#   (AIdan_TodoEnUno.py: `if os.path.isdir(src) and not os.path.isdir(dst)`).
+#   Editar este archivo en el repo NO afecta a produccion: hay que editar tambien
+#   el de %APPDATA%. Verificado el 26-ago-2026 (el vivo era del 25-feb).
+#   Eso mismo lo hace reversible: se edita el de %APPDATA% y al proximo ciclo del
+#   collector (60s) toma efecto, sin rebuild.
+#
+# --- Medicion del 26-ago-2026 ------------------------------------------------
+# Origen: el trade #931 (PUT sobre el Core PCE) entro 29,7 min despues del dato.
+# Desglose: 25,3 min los tardo BLOOMBERG en publicar, 4,3 min el poll, 10 segundos
+# el LLM, 2 segundos la orden. El cuello era la fuente, no AIdan.
+#
+# Al probar las 5 fuentes configuradas, 4 devolvian CERO entries desde hacia meses,
+# EN SILENCIO: FT y Reuters ni resuelven DNS, MarketWatch e Investing.com cambiaron
+# de dominio. Resultado: 1225 de 1225 noticias de los ultimos 30 dias venian de
+# bloomberg.com. El fail-loud de feed_fetcher.py ahora avisa si vuelve a pasar.
+#
+# Latencia REAL contra el release del calendario (lo unico que decide):
+#   Forexlive  "US July core PCE 3.3% y/y vs 3.3% expected"    09:30:15 -> +15 SEGUNDOS
+#   Forexlive  "US GDP 2nd estimate for Q2 1.5% vs 1.5% prelim" 09:30:36 -> +36 segundos
+#   Forexlive  "US July durable goods +1.1% vs +0.5% expected"  09:45:11 -> +11 segundos
+#   Bloomberg  "US Core PCE Rises 0.2% in July..."              09:55:16 -> +25,3 MINUTOS
+#
+# Forexlive es un CABLE: publica el numero contra lo esperado, en el titulo, en el
+# minuto del release. Y a 2,0 items/hora contra 1,1 de Bloomberg, o sea que sumarlo
+# NO es una explosion de volumen (el resto de los candidatos si lo era).
+#
+# Bonus medido: el LLM de news habia dicho "superando la expectativa de 0.1%
+# mensual" cuando el forecast era 0,2% y 0,1% era el PREVIO -> invento una sorpresa
+# hawkish confundiendo previous con forecast. El formato "X vs Y expected" de
+# Forexlive hace ese error mucho mas dificil.
+
 sources:
-  - name: "Financial Times"
-    url: "https://feeds.ft.com/markets"
-  - name: "Reuters"
-    url: "https://feeds.reuters.com/reuters/businessNews"
+  # El cable rapido. Publica el dato en segundos, con el numero vs lo esperado.
+  - name: "Forexlive"
+    url: "https://www.forexlive.com/feed"
+  # Se deja: aporta contexto/color que Forexlive no cubre, y es de bajo volumen.
   - name: "Bloomberg"
     url: "https://feeds.bloomberg.com/markets/news.rss"
-  - name: "MarketWatch"
-    url: "https://feeds.marketwatch.com/marketpulse"
-  - name: "Investing.com"
-    url: "https://feeds.investing.com/news/latest-news"
+
+# --- Candidatas medidas pero NO activas --------------------------------------
+# Solo se cargan con NEWS_EXTRA_SOURCES=true (env, sin rebuild). Estan apagadas
+# porque su tasa de publicacion multiplica el volumen de un track que pierde
+# $0,91 por trade (n=132, broker-truth), y ninguna reporta datos mas rapido que
+# Forexlive. La peor es "Investing News" con 149,3 items/hora de transcripts de
+# earnings: ruido puro. Yahoo Finance quedo afuera por fechas de publicacion rotas.
+extra_sources:
+  - name: "FXStreet"            # 4,5 items/hora - analisis, reporta el dato a +27 min
+    url: "https://www.fxstreet.com/rss/news"
+  - name: "Investing Economy"   # 10,0 items/hora - reporto el GDP a +18,6 min
+    url: "https://www.investing.com/rss/news_14.rss"
+  - name: "MarketWatch"         # 16,9 items/hora
+    url: "https://feeds.content.dowjones.io/public/rss/mw_topstories"
+  - name: "Forexlive CB"        # 0,5 items/hora - solo bancos centrales
+    url: "https://www.forexlive.com/feed/centralbank"
