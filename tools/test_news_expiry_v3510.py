@@ -6,11 +6,14 @@ PERILLA 2: el soft-expiry que ve el Position Manager para news queda anclado en 
 
 Corre standalone:  python tools/test_news_expiry_v3510.py
 """
+import importlib
 import os
+import re
 import sys
 import logging
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 logging.basicConfig(level=logging.CRITICAL)
 
 from src.common.config import Config
@@ -26,6 +29,30 @@ def check(name, cond, detail=''):
     print(f"  {'OK  ' if cond else 'FAIL'} {name}" + (f"  ({detail})" if detail else ''))
     if not cond:
         fails.append(name)
+
+
+def _reload_news_floor(env_value):
+    """Re-importa Config con NEWS_MIN_EXPIRY_MIN seteado (o borrado) en el entorno.
+
+    Restaura SIEMPRE el valor previo y vuelve a recargar: el resto del test lee
+    Config y no tiene que quedar contaminado por esto.
+    """
+    prev = os.environ.get("NEWS_MIN_EXPIRY_MIN")
+    if env_value is None:
+        os.environ.pop("NEWS_MIN_EXPIRY_MIN", None)
+    else:
+        os.environ["NEWS_MIN_EXPIRY_MIN"] = env_value
+    try:
+        import src.common.config as _cfg
+        importlib.reload(_cfg)
+        return _cfg.Config.NEWS_MIN_EXPIRY_MIN
+    finally:
+        if prev is None:
+            os.environ.pop("NEWS_MIN_EXPIRY_MIN", None)
+        else:
+            os.environ["NEWS_MIN_EXPIRY_MIN"] = prev
+        import src.common.config as _cfg2
+        importlib.reload(_cfg2)
 
 
 def sl_tp(profile, atr, direction='CALL', price=1.1550):
@@ -142,8 +169,37 @@ d = pm.evaluate(ctx('news', 45, 95, -1.0))
 check("news a los 95min -> CLOSE_MAXHOLD (M5 = 90min)", d.action == 'CLOSE_MAXHOLD', d.action)
 
 print("\n=== Config expone las dos perillas ===")
-check(f"NEWS_MIN_EXPIRY_MIN = {Config.NEWS_MIN_EXPIRY_MIN}", Config.NEWS_MIN_EXPIRY_MIN == 45)
-check(f"NEWS_PM_BASE_EXPIRY_MIN = {Config.NEWS_PM_BASE_EXPIRY_MIN}", Config.NEWS_PM_BASE_EXPIRY_MIN == 15)
+# OJO (28-ago-2026): estos checks miraban Config.NEWS_MIN_EXPIRY_MIN == 45, o sea
+# el valor EFECTIVO. Eso estaba mal: load_dotenv mete el .env en el entorno, asi
+# que en cuanto la perilla se gira de verdad (se giro a 15 el 28-ago, tras el
+# veredicto pre-declarado que no paso) el test se ponia rojo sin que hubiera
+# ninguna regresion. Lo que hay que fijar es el DEFAULT DEL CODIGO -- "rebuildear
+# sin tocar el .env no cambia el comportamiento" -- y eso se lee del SOURCE.
+# Mismo patron que tools/test_m15_atr_floor_v3550.py, que ya tenia este problema
+# resuelto (default 5.0 en el codigo, 8.0 en el .env).
+_cfg_src = open(os.path.join(ROOT, 'src', 'common', 'config.py'), encoding='utf-8').read()
+
+for _name, _default in (("NEWS_MIN_EXPIRY_MIN", "45"), ("NEWS_PM_BASE_EXPIRY_MIN", "15")):
+    _m = re.search(
+        r'%s\s*=\s*int\(os\.getenv\(\s*"%s"\s*,\s*"(\d+)"\s*\)\)' % (_name, _name),
+        _cfg_src)
+    check(f"Config declara {_name} con default literal", _m is not None)
+    if _m:
+        check(f"  su default en el codigo es {_default}", _m.group(1) == _default,
+              f"es {_m.group(1)}")
+    check(f"  Config.{_name} es int", isinstance(getattr(Config, _name), int),
+          f"efectivo={getattr(Config, _name)!r}")
+
+# La env var tiene que pisar de verdad; si no, la perilla es decorativa.
+for _val, _exp in (("15", 15), ("0", 0), ("45", 45)):
+    _got = _reload_news_floor(_val)
+    check(f"NEWS_MIN_EXPIRY_MIN={_val} -> {_exp}", _got == _exp, str(_got))
+
+# El valor EFECTIVO de hoy se INFORMA, no se afirma: cambia con el .env a
+# proposito. <=15 = perilla apagada (news se comporta como en v3.50.4).
+print(f"  info  valor efectivo hoy: NEWS_MIN_EXPIRY_MIN={Config.NEWS_MIN_EXPIRY_MIN} "
+      f"({'APAGADA' if Config.NEWS_MIN_EXPIRY_MIN <= 15 else 'ACTIVA'}), "
+      f"NEWS_PM_BASE_EXPIRY_MIN={Config.NEWS_PM_BASE_EXPIRY_MIN}")
 
 print("\n" + ("TODO OK" if not fails else f"{len(fails)} FALLARON: {fails}"))
 sys.exit(1 if fails else 0)

@@ -362,3 +362,85 @@ Estaban marcados `[ ]` en CLAUDE.md con fechas de jun/jul ya pasadas. Se revisó
 5. Backtest infla metricas vs producción real con fricción
 
 ---
+
+---
+
+## ✅ CERRADO 28 Ago 2026 — VEREDICTO news v3.51.0: **NO PASO** ⇒ perilla girada a 15
+
+Criterio pre-declarado el 7-ago (leer el ~28-ago, n>=15). Se leyo el 28-ago con **n=21**
+(news creados desde el 7-ago, broker-truth):
+
+| Condicion | Gate | Medido | |
+|---|---|---|---|
+| (a) los ganadores recorren mas del TP | **>=59%** (venian de 40%) | **43,2%** (mediana 34,9%) | ❌ |
+| (b) los perdedores no se estiran | ~53% del SL | **53,1%** | = sin cambio |
+| (c) PnL/trade | mejor que −$0,91 | **−$1,37** (WR 28,6%, −$28,70) | ❌ peor |
+
+⇒ Se aplico lo pre-declarado: **`NEWS_MIN_EXPIRY_MIN=15`** en el `.env` + restart del exe
+(sin rebuild; `Config` se lee al importar). El guard del codigo es `if _news_floor > 15`
+(`AIdan_TodoEnUno.py:1884`) ⇒ 15 no aplica ningun override y news queda **exacto como en
+v3.50.4**. Revertir = borrar la linea del `.env` (vuelve al default 45) y reiniciar.
+Se hizo con 0 posiciones abiertas, asi que no quedo nada sin gestionar.
+
+**Lo que la lectura dejo claro y no hay que volver a proponer:** el problema de news no es el
+recorrido del ganador. Con **SL de ~4 pips** y comision ~1,3p el track necesita **53,9% de WR
+para empatar** (ganador medio $2,53, perdedor −$2,96) y saca 28,6%. Alargar el expiry no mueve
+esa cuenta — la mueve el TP capado (`tp_cap = max(ATR,2)*2`, hallazgo #1 del 15-jun, sigue abierto).
+
+**Contexto de latencia (medido el mismo dia, no mezclar universos):** los 132 trades de news
+de la muestra historica entraron TODOS >=29 min despues del dato. Con Forexlive (v3.61.0) la
+cadena real medida sobre #942 fue **release → +18s publica la fuente → +3,7 min lo baja AIdan
+→ +12s el LLM → +2s la orden = ~4 min** (antes 29,7). El titular de "+15 segundos" de v3.61.0
+era **solo la culpa de la FUENTE**: en produccion el poll agrega **5,7 min de mediana**
+(investinglive) y 7,8 min (Bloomberg). Descartados como causa: el collector si corre cada 60s
+(gap minimo medido 62s), `MAX_PER_SOURCE=5` **nunca** se activo (0 lotes con 5+ items nuevos) y
+el slippage es cero (TCA mediana +0,00p, n=28). **El retraso que queda es del RSS mismo** (el
+item aparece en el XML minutos despues de su propio `published_at`) ⇒ con RSS no se arregla.
+
+**Refutado el mismo dia (hipotesis propia, no del user):** "entra al revés porque vende contra
+la tendencia". Es **al revés** — contra-HTF n=171 WR 41,5% −$0,52/trade vs a-favor n=358 WR
+32,7% −$0,93/trade. Coincide con "todo alineado = PEOR" del 19-jun. Y la asimetria PUT/CALL
+(PUT −0,79 pips vs CALL +1,40) esta **confundida**: EUR/USD subio 204,5 pips en la ventana.
+
+---
+
+## ✅ BAJADO 28 Ago 2026 — tres secciones vencidas de CLAUDE.md
+
+Se bajaron por la regla de tamaño (CLAUDE.md habia pasado los 100 KB). Las tres estaban
+superadas por hechos posteriores, se dejan por trazabilidad:
+
+- **Opciones A-D para corregir confidence (11 May)**: A y B nunca se hicieron; C se **refuto**
+  (ML a n=276, 4 modelos, AUC real 0,44-0,48); D quedo obsoleta. Lo que si paso es la
+  **calibracion de Platt de v3.59.0** (m15, Brier 0,2214, fase registro).
+- **Restriccion de frecuencia (11 May)**: el horizonte que planteaba (fin de mayo / mediados de
+  junio para 200-300 trades) ya paso; hoy hay 309 limpios y el cuello es otro.
+- **Checkpoint del 12 Jun**: ejecutado en su momento (cooldown activado, experimento del PM
+  medido, calendar shadow revisado). El item 2b (edad desde el FILL) se resolvio en **v3.61.1**
+  con `SIGNAL_MAX_AGE_MIN`.
+
+### Opciones para corregir confidence (post-Fase 1)
+
+1. **Opción A — Bucket-based blocking (rápido, riesgo bajo)**. Block conf 70-74 y 85-94 explícitamente en `blocked_setups`. Allow conf 40-49. Tiempo: 1-2h. Riesgo: overfitting muestra chica.
+
+2. **Opción B — Empirical confidence (medio plazo)**. Reemplazar fórmula por WR real histórico del setup_type. Ya existe `setup_win_rates` cached parcialmente. Tiempo: 2-3 días.
+
+3. **Opción C — Logistic regression / ML proper (largo plazo)**. Entrenar modelo con features del trade_archive → P(win) calibrada. Requiere muestra 500+. Tiempo: 2-3 días + data.
+
+4. **Opción D — A/B test paralelo (validación)**. M5 actual + M5-bucket-filter en paralelo 30 días. Decisión empírica.
+
+### Restricción real: frecuencia de trades vs target
+
+**Target original (CLAUDE.md viejo)**: 200-300 trades para validación robusta.
+
+**Realidad observada (11 May)**: ~8 trades/día. Para 200-300 trades necesitamos **25-37 días más** (final de mayo / mediados de junio). NO vamos a tener muestra robusta antes de eso. Decisiones intermedias serán siempre **provisorias**.
+
+**Implicancia**: cualquier cambio estructural (Opciones A-D arriba) debe esperar a ese horizonte. Fixes surgical (block bucket específico con muestra >20) son aceptables con caveats documentados.
+
+### Próximo checkpoint
+
+**Viernes 12 Jun 2026** — agenda:
+1. **⏰ DECISIÓN PRINCIPAL: activar cooldown 5min post-pérdida.** Único hallazgo que pasó el gate adversarial (n=74, WR 24% vs 38%, p=0.010, sostenido 4/5 quincenas, frontera nítida a ~5min; #611 del día CPI = el patrón exacto). Re-correr `tools/measure_entry_suspects.py` (segundos) para confirmar sobre la data más nueva → si sostiene, activarlo como EL próximo cambio (1 a la vez). Detalle completo en NOTAS.
+2. Primeros días del experimento PM re-baselineado (v3.40.11): ¿los trades extendidos más allá del expiry (comportamiento NUEVO) ayudan o duelen? Ver `position_manager_log` (CLOSE_MAXHOLD/EXTEND) + avg_win. **Primera evidencia viva (11 Jun, positiva): #621 extendido 118min → profit-lock aseguró +$4.52 a 84% del TP; 6 PROTECTs cortaron sangrías; #627 TP completo.** Ver bloque "Obs 11 Jun" en NOTAS.
+2b. De "Obs 11 Jun": decidir si la edad/expiry debería correr desde el FILL (no la señal — #625 perdió 27min pendiente como limit) → requeriría columna `mt5_filled_at`; y tener presente el slippage de SL en spikes (11p en #625) para sizing/cuenta real.
+3. Calendar shadow: ¿FF se destrabó (429)? Revisar `calendar_shadow_log` si hay filas.
+4. En cola de siempre: ATR ceiling + params overfit; data limpia acumulada (contador desde 5 Jun, sin contaminación m15/h1 desde v3.40.11).

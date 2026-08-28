@@ -41,7 +41,7 @@ Bot de trading automático EUR/USD scalping M5, integrado con MetaTrader 5 (cuen
 
 **⏰ LÍNEA DE TIEMPO — EJECUTAR SIN QUE EL USER LO PIDA (acordado 12 Jun: "cuando llegue el momento lo hacés directamente").** Al abrir sesión en/después de cada fecha pendiente, arrancar el item solo. Mediciones/shadows: hacer y reportar. Activaciones en vivo: llevar números + recomendación en el mismo turno (el OK sigue siendo del user).
 Los items con fecha están abajo marcados con 🟢🔵🔴 — **hoy pendientes: ~22 Ago** (BE de h1, v3.52.0) ·
-**~28 Ago** (veredicto news, v3.51.0) · **~1 Sep** (re-medir el castigo por nivel flojo — el del
+**~1 Sep** (re-medir el castigo por nivel flojo — el del
 ~19 Ago se corrió el 16-ago: veredicto = no tocar la perilla, n=9) ·
 **~15 Sep** (1ra lectura del track D1, v3.54.0 — baseline ya corregido el 16-ago, v3.54.1). Al cumplir uno: bajarlo a `docs/historial_notas.md`
 con la razón del cierre.
@@ -54,7 +54,8 @@ con la razón del cierre.
 - [ ] **🔧 PENDIENTE APARTE (no urgente, no se metió en v3.54.0 para no romper "un cambio a la vez"): las claves de intervalo de `price_feed` no coinciden entre fuentes.** MT5 mapea `'1d'`/`'4h'`; Yahoo y FXCM mapean `'1day'`. Y `_map_interval_to_yahoo` tiene **default silencioso `('5m','1d')`** (`price_feed.py:263`) ⇒ pedir `'1d'` con MT5 caído devuelve **velas de 5 minutos etiquetadas como diarias**, y el log encima miente (`from yahoo (1d)`). Verificado ejecutándolo. Efectos hoy: (a) el track D1 es **inmune** (exige MT5 y valida el espaciado real de las velas); (b) `mtf_analyzer` pide `'1day'` para su D1 ⇒ **nunca usa MT5**, siempre sale por Yahoo (funciona, pero es red innecesaria y otro instrumento); (c) `'4h'` en Yahoo devuelve velas H1 a propósito (comentado en el código) — aproximación silenciosa. Fix propuesto: aceptar ambos alias en las 3 fuentes y cambiar el default de Yahoo a `None` + warning (fail-loud). Verificado que es seguro: todos los callers vivos usan intervalos que **sí** están mapeados. **Ojo también** `mt5_executor.py:512`, que tiene el tf_map duplicado con default `TIMEFRAME_M5` — misma bomba.
 - [ ] **🟢 ~1 SEP — RE-MEDIR el castigo por nivel flojo en m15 (v3.50.0). Corrido el 16-ago (3 días antes): NO se sube a 25, y la razón importa.** El gatillo pre-declarado era "si los flojos siguen pasando → `PENALTY=25`". **Pasan** (12 de 15 señales castigadas sobrevivieron = 80%, y son las de conf alta: 86→71, 88→73, 91→76 — exactamente la fuga que se había previsto). **Pero la premisa detrás del gatillo se cayó**: en el forward los flojos ya no son la mitad mala. Flojos n=5 → −$7,10 (1 win); validados (>10 toques) n=4 → −$10,63 (0 wins). Antes del castigo era al revés (flojos avg −$2,97 vs validados +$0,85, n=83). Subir a 25 hoy bloquearía la mitad **menos** mala ⇒ es el "fix que no arregla nada" del principio rector. **n=9 en total, muy por debajo de cualquier gate ⇒ no se toca la perilla, se re-mide.** Lo demás medido: **(a) frecuencia** m15 3,11 → 1,29 trades/día activo (−59%), pero **el castigo NO es la causa**: solo logueó **3 DROP** en 11 días, mientras `ATR too low` pasó de 0 a **2.115 skips** — es el mercado muerto de agosto (el resto de los tracks también bajó, 3,33 → 3,00). El costo atribuible al castigo es ~3 señales de ~12 (−25%), más que el ~12% estimado pero del mismo orden. **(b) WR del resto: no mejoró** — m15 32,1% (n=28) → 11,1% (n=9), PnL −$17,26 → −$17,73. *Contexto original de por qué 15 y no 25: contra los 10 niveles flojos reales, −15 bloquea 4/10 y evita ~$11,3 de los −$29,7, pero se le escapan los dos peores (#683 y #834, conf 90 y 83); −25 bloquearía 8/10 (~$25,2) pero a n=10 ya es casi un block de la familia.*
 - [ ] **🔵 ~22 AGO — 1ra lectura del BE de h1 (v3.52.0, criterio pre-declarado).** Medir sobre los h1 creados desde el 8-ago: **(a) ¿cuántos armaron el BE?** (esperado ~32% de los trades, los que tocan ≥5p — buscar en el log `SL movido a BE` / `mt5_trailing_step`); **(b) de los que armaron, ¿cuántos cerraron en ~+1p en vez de negativo?** (el rescate esperado); **(c) ¿algún ganador se cortó en +1p que antes hubiera corrido?** — este es el contra a vigilar, la evidencia decía que no pasa (los 8 ganadores históricos nunca bajaron de +3,9p) pero es exactamente lo que un contrafáctico puede errar. Query: `position_manager_log` ⋈ `trade_archive` por `strategy_id`, comparar `MAX(hwm_pips)` contra `pips` de cierre. **Si (c) aparece seguido → `BE_TRIGGER_MAX_PIPS=8`** (arma más tarde, solo 26% de los trades); **si no rescata nada → `=0`** y queda como estaba. Ambas por env, sin rebuild. *Ojo con el volumen: h1 hace ~1-2 trades/día ⇒ puede que a las 2 semanas haya n~10 y no alcance para concluir; en ese caso extender, no forzar.*
-- [ ] **🔴 ~28 AGO — VEREDICTO news v3.51.0 (criterio pre-declarado, NO mover).** Medir sobre los news creados desde el 7-ago (n≥15, ~4/semana): **(a) ¿los ganadores pasaron de recorrer 40% del TP a ≥59%?** **(b) ¿los perdedores siguen en ~53% del SL o se estiraron?** (si se estiran, la perilla 2 no está haciendo su trabajo). (c) PnL y WR del track. Query: comparar `|pips|` contra su propio `stop_loss`/`take_profit` por fila (los flags `sl_hit`/`tp_hit` son **tautológicos**, se derivan de `result`+`pips` — no usarlos). **Si no se cumple → `NEWS_MIN_EXPIRY_MIN=15`** (env, sin rebuild) y news vuelve a como estaba. *Decisión del user 7-ago: news NO se apaga, se arregla.*
+- [x] ✅ **28 AGO — VEREDICTO news v3.51.0: NO PASO ⇒ `NEWS_MIN_EXPIRY_MIN=15` girada (28-ago).** n=21: ganadores 43,2% del TP (gate >=59%) · perdedores 53,1% del SL (sin cambio) · −$1,37/trade vs baseline −$0,91. Aplicado en `.env` + restart, sin rebuild, con 0 posiciones abiertas. Detalle y lo que NO hay que re-proponer en [`docs/historial_notas.md`](docs/historial_notas.md). **Lo que queda en pie:** news necesita **53,9% de WR para empatar** con SL de ~4p y saca 28,6% ⇒ el lever es el TP capado (hallazgo #1 del 15-jun), no el expiry.
+- [ ] **🔴 NUEVO (28 Ago) — m15 esta APAGADO hace 7 dias y nadie lo iba a notar.** Ultimo trade de m15: **20-ago**. El log dice `ATR 1,3p / 3,9p < piso 8,0p -> sin scan (chop)`: el piso de 8 (v3.55.0) + el ATR muerto de agosto (avg_range 3,41p esta semana, contra 5,0-7,5p en julio) dejaron dark al track que el propio CLAUDE.md llama *el motor del sistema*. **Dos lecturas agendadas quedan inservibles y hay que decidir que hacer ANTES de la fecha:** (1) la del **~1 Sep** del `M15_ATR_FLOOR` va a tener **n~1** ⇒ ilegible, no forzarla; (2) el forward de `calibrated_p` (v3.59.0) tiene **0 filas** — verificado que **NO es un hook muerto**: `deployed_at='2026-08-21'` y no hubo ni una señal m15 desde el 20-ago (el warning `calibrated_p no registrada` nunca se logueo). **Ojo con la tentacion:** bajar el piso ahora seria afinar el umbral sobre la muestra que lo esta midiendo — exactamente el overfit que la regla del 16-ago prohibe. La idea con fundamento ya esta escrita: **piso por PERCENTIL** (ATR contra las ultimas ~100 barras) del research del 19-ago, que protege la frecuencia en vez de recortarla. No superponerla a la lectura del ~1 sep.
 - [ ] **🟢 ~1 SEP — FORWARD del piso de ATR de m15 (v3.55.0, `M15_ATR_FLOOR=8`, activo desde el 16-ago).** El hint de "m15 × expansión" creció hasta pasar el gate y se activó: **ATR ≤8p = n=90, WR 27,8%, −$75,59 · ATR >8p = n=31, WR 51,6%, +$18,80** (p=0,0042, CI95 [33,1-69,8%] sin cruzar el 27,8% del comparador, mismo período los dos buckets, ATR clasificado al entrar). El diagnóstico completo: **m15 necesita ~40,5% de WR para empatar** (ganador medio +7,8p, perdedor −5,3p) y en chop saca 28%. **Lo que la revisión adversarial del propio hallazgo encontró y hay que tener presente al leer el forward: el lado BUENO es frágil** — de los +$18,80 unos +$19,49 salen de 2 días, sin ellos queda en −$0,69; sacando los 3 mejores ganadores, −$10,88. **El lado malo sí aguanta** (pierde en las dos mitades: 28,9% y 26,7%). ⇒ **La expectativa correcta es "m15 deja de sangrar", NO "m15 pasa a rentable".** Medir: **(a)** ¿la frecuencia de m15 cayó ~74% como se estimó (3,27 → 0,84 trades/día)? **(b)** ¿el PnL de m15 se acercó a cero, o el bucket >8p también empezó a perder (= el hallazgo era el artefacto de 2 días)? **(c)** ¿cuántos skips loguea (`ATR ... < piso ... -> sin scan (chop)`, 1 por hora)? **Si el bucket que queda pierde igual → `M15_ATR_FLOOR=5.0`** (env, sin rebuild) y m15 vuelve a como estaba. *No afinar el umbral sobre esta muestra: el 8 venía pre-declarado desde el 17-jul; buscar el mejor número sería overfit.*
 
 **⏱️ BARRIDO DE LATENCIA INTERNA (26 Ago, v3.61.1) — la practica del feed aplicada a TODO el pipeline.**
@@ -227,7 +228,9 @@ la función habría estado en verde los 5 meses en que el mecanismo estuvo muert
 **🎚️ PERILLA (19 Ago, v3.57.0) — `ENABLE_NEWS_TRACK`, default ON.** Se entrega el mecanismo para
 apagar la EJECUCIÓN de news sin borrar el track (el alert se sigue guardando y midiendo con
 `measure_news_llm_error.py`). **NO se giró**: la decisión del user del 7-ago es "news no se apaga,
-se arregla" y hay veredicto pre-declarado ~28 ago. Girarla es decisión del user, no mía.
+se arregla". El veredicto del ~28 ago se ejecuto el 28-ago y **no paso** ⇒ se giro
+`NEWS_MIN_EXPIRY_MIN=15` (news vuelve a v3.50.4), **no** `ENABLE_NEWS_TRACK`: apagar el track
+sigue siendo decisión del user, no mía.
 
 **🧪 FASE 2 EN CURSO (18 Ago, corriendo) — ¿el detector tiene edge en el TIMEFRAME DONDE OPERA?**
 Fase 1 (`579cc22`) midió `detect_structure_signals` en velas **D1** sobre 21 pares y concluyó que
@@ -543,32 +546,14 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 > Bajado a [`docs/historial_notas.md`](docs/historial_notas.md) el 26-ago. Titular: la confianza **no es monotónica** con el win rate (conf 90-94 daba 0% WR y 40-49 daba 43%), subir el piso empeora, y **todas las sesiones pierden** ⇒ el problema es estructural, no de sesión. **Superado por v3.59.0**: con 309 trades limpios la calibración de Platt pasó su gate por 1ra vez para m15 (Brier 0,2214) y está en fase registro. La conf CRUDA sigue siendo inutilizable como probabilidad.
 
-### Opciones para corregir confidence (post-Fase 1)
+### Opciones viejas de confidence · restricción de frecuencia · checkpoint del 12 Jun
 
-1. **Opción A — Bucket-based blocking (rápido, riesgo bajo)**. Block conf 70-74 y 85-94 explícitamente en `blocked_setups`. Allow conf 40-49. Tiempo: 1-2h. Riesgo: overfitting muestra chica.
-
-2. **Opción B — Empirical confidence (medio plazo)**. Reemplazar fórmula por WR real histórico del setup_type. Ya existe `setup_win_rates` cached parcialmente. Tiempo: 2-3 días.
-
-3. **Opción C — Logistic regression / ML proper (largo plazo)**. Entrenar modelo con features del trade_archive → P(win) calibrada. Requiere muestra 500+. Tiempo: 2-3 días + data.
-
-4. **Opción D — A/B test paralelo (validación)**. M5 actual + M5-bucket-filter en paralelo 30 días. Decisión empírica.
-
-### Restricción real: frecuencia de trades vs target
-
-**Target original (CLAUDE.md viejo)**: 200-300 trades para validación robusta.
-
-**Realidad observada (11 May)**: ~8 trades/día. Para 200-300 trades necesitamos **25-37 días más** (final de mayo / mediados de junio). NO vamos a tener muestra robusta antes de eso. Decisiones intermedias serán siempre **provisorias**.
-
-**Implicancia**: cualquier cambio estructural (Opciones A-D arriba) debe esperar a ese horizonte. Fixes surgical (block bucket específico con muestra >20) son aceptables con caveats documentados.
-
-### Próximo checkpoint
-
-**Viernes 12 Jun 2026** — agenda:
-1. **⏰ DECISIÓN PRINCIPAL: activar cooldown 5min post-pérdida.** Único hallazgo que pasó el gate adversarial (n=74, WR 24% vs 38%, p=0.010, sostenido 4/5 quincenas, frontera nítida a ~5min; #611 del día CPI = el patrón exacto). Re-correr `tools/measure_entry_suspects.py` (segundos) para confirmar sobre la data más nueva → si sostiene, activarlo como EL próximo cambio (1 a la vez). Detalle completo en NOTAS.
-2. Primeros días del experimento PM re-baselineado (v3.40.11): ¿los trades extendidos más allá del expiry (comportamiento NUEVO) ayudan o duelen? Ver `position_manager_log` (CLOSE_MAXHOLD/EXTEND) + avg_win. **Primera evidencia viva (11 Jun, positiva): #621 extendido 118min → profit-lock aseguró +$4.52 a 84% del TP; 6 PROTECTs cortaron sangrías; #627 TP completo.** Ver bloque "Obs 11 Jun" en NOTAS.
-2b. De "Obs 11 Jun": decidir si la edad/expiry debería correr desde el FILL (no la señal — #625 perdió 27min pendiente como limit) → requeriría columna `mt5_filled_at`; y tener presente el slippage de SL en spikes (11p en #625) para sizing/cuenta real.
-3. Calendar shadow: ¿FF se destrabó (429)? Revisar `calendar_shadow_log` si hay filas.
-4. En cola de siempre: ATR ceiling + params overfit; data limpia acumulada (contador desde 5 Jun, sin contaminación m15/h1 desde v3.40.11).
+> Bajado a [`docs/historial_notas.md`](docs/historial_notas.md) el 28-ago por la regla de
+> tamaño. Las tres estaban vencidas: las **opciones A-D** del 11-may quedaron superadas
+> (C = ML, **refutada** a n=276; lo que sí funcionó fue la calibración de Platt de v3.59.0),
+> el horizonte de muestra que planteaba la **restricción de frecuencia** ya pasó (hay 309
+> limpios), y el **checkpoint del 12-jun** se ejecutó en su momento — su único item que
+> seguía vivo (edad del trade desde el FILL, no desde la señal) se resolvió en v3.61.1.
 
 ---
 
@@ -949,7 +934,18 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 ---
 ---
 
-**Última actualización**: 26 Ago 2026 (2da sesion) — **v3.61.1: barrido de latencia interna + guard
+**Última actualización**: 28 Ago 2026 — **auditoría + veredicto de news ejecutado. SIN cambio de
+codigo de produccion ⇒ APP_VERSION sigue en v3.61.1 y NO se rebuildeo** (solo `.env` + un test).
+El veredicto pre-declarado de v3.51.0 **no paso** (ganadores 43,2% del TP contra un gate de >=59%;
+−$1,37/trade vs baseline −$0,91, n=21) ⇒ se giro **`NEWS_MIN_EXPIRY_MIN=15`** en el `.env` + restart
+(con 0 posiciones abiertas). Lo demas que aparecio: la queja del user de que news **entra tarde** es
+real pero ya mejoro 7x (≈4 min contra 29,7), y el retraso que queda es del **RSS**, no del poll ni
+del LLM; la hipotesis de que **entra al revés por vender contra la tendencia** quedo **refutada**
+(contra-HTF rinde mejor); y **m15 esta dark desde el 20-ago** por el piso de ATR, lo que deja sin
+muestra dos lecturas agendadas. Auditoría de código: **exit 0, nada nuevo**. Suite 173 en verde.
+Detalle en [`docs/historial_notas.md`](docs/historial_notas.md).
+
+**Anterior**: 26 Ago 2026 (2da sesion) — **v3.61.1: barrido de latencia interna + guard
 de edad en la ejecucion.** La practica del feed aplicada al resto del pipeline. El pipeline interno esta
 sano (fills instantaneos en el 98%, LLM 11s, loop sin overruns graves); lo roto era que el retry podia
 ejecutar a mercado una señal de hasta 180 min sin chequeo de edad (clase #625: 1W/10L en los fills
