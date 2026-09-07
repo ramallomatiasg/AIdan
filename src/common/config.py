@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.61.1"
+APP_VERSION = "3.62.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -250,6 +250,15 @@ class Config:
     # SIN bloquear) | active (bloquea senales ciegas/viejas dentro de la ventana del evento
     # — NO activar sin data del shadow). Ventanas: HIGH 15min antes/30 despues; MED 5/15.
     EVENT_WINDOW_MODE = (os.getenv("EVENT_WINDOW_MODE", "shadow") or "shadow").lower()
+
+    # v3.62.0 — Guard PRE-EVENTO para news (clase #969: CALL sobre una nota PREVIA al NFP,
+    # 12,8 min antes del dato, SL 4p, spike de 34p => -$29,40 = 5,5% de la cuenta). news esta
+    # exento del event-window porque se asume jugada POST-dato; esto cubre el caso PRE-dato:
+    # una senal de news NO se ejecuta si hay un evento HIGH dentro de los proximos N minutos.
+    # Post-dato sigue exento. Es vinculante SIEMPRE (independiente de EVENT_WINDOW_MODE, que
+    # sigue en shadow). El 15 NO es un numero nuevo: es WIN_BEFORE['High'] del event-window
+    # desde v3.40.14. 0 = apagado. Fail-open si el calendario no responde.
+    NEWS_PRE_EVENT_GUARD_MIN = float(os.getenv("NEWS_PRE_EVENT_GUARD_MIN", "15"))
 
     # v3.40.20 — Pullback-QUALITY entry (experimento). El "pullback puro" ya existe
     # (trend_continuation) y PIERDE (n=103, 28% WR, -$153) por disparar sobre niveles de

@@ -6,6 +6,70 @@ En CLAUDE.md queda la tabla corta de las últimas versiones y un puntero acá.
 
 ---
 
+## v3.62.0 — Guard PRE-EVENTO para news + fin del spam del trailing (7 Sep 2026)
+
+Salio de la sesion de estado del domingo 7-sep (auditoria semanal exit 0 + "¿como vienen los
+shadows?"). Dos fixes de plomeria aprobados juntos, un solo rebuild con mercado cerrado.
+
+**(1) Guard PRE-EVENTO para news (`NEWS_PRE_EVENT_GUARD_MIN=15`, env).** El trade #969
+(4-sep 09:17 AR) fue un CALL de news sobre una nota PREVIA al NFP ("Locked and loaded for the
+August edition of non-farm payrolls", Forexlive, impact 82, conf 47) **12,8 min ANTES del
+dato**, con SL de 4p. El NFP salio, el precio salto 34p en contra (MAE −34,0p) y el SL quedo de
+adorno: **−29,1p = −$29,40 = 5,5% de la cuenta en un trade, el 70% de la perdida de la
+quincena.** El event-window lo vio (`event_window_log`: `in_window=1`, `mins_to_next=12.8`,
+`next_impact=High`) pero `would_block=0` porque news esta exento por diseno — la exencion
+asume que news = jugada POST-dato. Este era PRE-dato.
+- Argumento de construccion, no estadistico (la celda "news antes de evento HIGH" tiene n=3
+  lifetime: 1W/2L, −$29,8): con SL de 4p delante de un evento HIGH el riesgo real no es el 1%
+  del sizing, es lo que mida el spike. Es exactamente la clase de riesgo que el `max_positions`
+  no cubre y que en cuenta real importa.
+- Implementacion: `news_pre_event_block(prox, trigger_type, max_min)` en
+  `src/common/event_window.py` (funcion pura) + hook en `_try_mt5_execute` **despues** del log
+  del event-window (la fila del shadow se escribe igual, la medicion no cambia) y antes del
+  spread guardian. Solo `news`; solo `High` ADELANTE (`0 <= mins_to_next <= 15`); post-dato
+  sigue exento; pre_planned/calendar no se tocan. Marca `status='skipped_pre_event'` (cubierto
+  por el guard v3.53.6: no aparece como trade perdido). **Vinculante siempre**, independiente
+  de `EVENT_WINDOW_MODE` (que sigue en shadow). **Fail-open**: calendario caido => no bloquea
+  (un feed muerto no puede apagar news entero en silencio, leccion M15/SMC). El 15 no es un
+  numero nuevo: es `WIN_BEFORE['High']` desde v3.40.14.
+- 17 tests (`tools/test_pre_event_guard_v3620.py`): caso real del #969, bordes, post-dato
+  exento, otros triggers, fail-open, perilla, y **call-site** (que se llame, que corte con
+  `return None`, orden respecto del log del event-window y del spread guardian).
+
+**(2) El trailing reenviaba el MISMO SL una vez por segundo.** En `run_trailing_monitor` el SL
+"actual" es `auto_strategies.stop_loss` (row[4]) = el ORIGINAL, que nunca se actualiza tras el
+modify (y no debe: el archive lo usa como `sl_pips` del plan). Con el BE armado,
+`candidate > sl + MIN_SL_MOVE` era verdadero en CADA ciclo de 1s => `modify_position_sl` +
+`update_mt5_trailing_data` (UPDATE) + una linea INFO por segundo por posicion. El no-op guard
+de v3.50.1 frenaba el `order_send` al broker pero devolvia `True`, asi que se logueaba como
+exito y se escribia la DB igual. **Medido en los logs 17-ago→7-sep: #944 = 9.039 lineas
+identicas en 2,5 h, #909 = 4.337, #963 = 2.724; 5% de todo el log.** Consecuencia real: el
+log rotaba cada 2-3 dias y la lectura del BE de h1 (~22-ago) ya no tenia evidencia en el log
+para los trades de agosto. Cero plata en juego.
+- Fix: `src/broker/sl_cache.py` (3 funciones puras: `sl_already_sent`, `remember_sl`,
+  `prune_sl_cache`) + dict en memoria en el thread. Si el SL ya fue aceptado para ese ticket:
+  no reenvia, no reescribe, no loguea; **solo persiste el HWM si cambio** (no reabrir la amnesia
+  de v3.52.1). Un candidato DISTINTO (TRAIL subiendo) pasa. `remember_sl` solo bajo
+  `if success` (rechazo del broker => reintenta al ciclo siguiente). Prune por ciclo.
+- 11 tests (`tools/test_trailing_sl_cache_v3620.py`), incluido uno que documenta la premisa:
+  el fix es el cache, NO tocar `stop_loss` en la DB.
+
+**Lecturas ejecutadas en la misma sesion (sin cambio de codigo):** BE de h1 (~22-ago): n=11,
+armo en 3 (27%), rescato 3/3, corto 0 ganadores; los 3 llegaron a +13/+19/+20p y devolvieron
+todo (trailing a 43p, ya refutado capearlo) => extender. Piso de ATR de m15 (~1-sep): 6 trades
+desde el 16-ago, 3W, +$8,98, frecuencia −90% (agosto muerto) => no tocar el 8. **Gate de news
+Forexlive (26-ago): n=28, NO paso** — volumen 0,9→3,5 news/dia (3,7x, gate >2x), −$2,21/trade
+(−$1,21 sin el #969) vs baseline −$0,91; ~7 de 28 titulos son datos con numero y tampoco ganan
+(−$1,43). Segun el gate corresponde `ENABLE_NEWS_TRACK=false` "y se decide con el user" =>
+**el user decidio NO apagarlo todavia** (7-sep). Shadow trader: opens direccionales n=38, media
++0,36p / mediana +0,60p => pasa el gate en el papel, pero todo el edge es PUT (n=31, +0,93p) y
+CALL pierde (n=7, −2,14p) en un periodo bajista => sesgo de deriva, no accionar; revisar a n>=40
+contra el drift. Bug de tool encontrado y NO arreglado (fuera del OK): `score_calibrated_p_forward.py`
+lee `entry_context` de `auto_strategies` (tabla que el cap-delete poda) => falsa alarma de
+"hook muerto"; los 4 m15 SI tienen `calibrated_p` en `trade_archive`.
+
+Suite: 173 (pytest) + 28 nuevos en verde. Balance $531,22 al rebuild, 0 posiciones.
+
 ## v3.60.0 — Shadow trader LLM por Groq: decide en PAPEL, jamas opera (20 Ago 2026)
 
 Pedido del user: un LLM "constantemente controlando, viendo de salir antes, cerrar operacion,

@@ -1189,6 +1189,56 @@ class AIdan:
                         except Exception as _ewe:
                             logger.debug(f"event-window check #{sid}: {_ewe}")
 
+                    # v3.62.0 — GUARD PRE-EVENTO para news (clase #969). El event-window de
+                    # arriba exime a news porque asume jugada POST-dato; el #969 fue un CALL
+                    # sobre una nota PREVIA al NFP, 12,8 min ANTES del dato, con SL de 4p: el
+                    # spike lo paso por arriba 34p (-$29,40 = 5,5% de la cuenta en un trade).
+                    # Argumento de construccion, no estadistico: con SL de 4p delante de un
+                    # evento HIGH el riesgo real no es el 1% del sizing, es el spike.
+                    # Va DESPUES del log del event-window a proposito: la fila de
+                    # event_window_log se escribe igual (la medicion del shadow no cambia).
+                    # Vinculante siempre, independiente de EVENT_WINDOW_MODE. Fail-open si el
+                    # calendario no responde. `skipped_*` ya lo cubre el guard v3.53.6 (no se
+                    # muestra como trade perdido). Perilla: NEWS_PRE_EVENT_GUARD_MIN (0 = off).
+                    try:
+                        _pe_max = float(getattr(Config, 'NEWS_PRE_EVENT_GUARD_MIN', 15) or 0)
+                    except Exception:
+                        _pe_max = 15.0
+                    if _pe_max > 0:
+                        try:
+                            from src.common.event_window import get_event_proximity as _pe_prox_fn
+                            from src.common.event_window import news_pre_event_block
+                            _pe_trig = trigger_type
+                            try:
+                                import sqlite3 as _sq_pe
+                                _cn = _sq_pe.connect(DB_PATH)
+                                _r = _cn.execute("SELECT trigger_type FROM auto_strategies WHERE id=?", (sid,)).fetchone()
+                                _cn.close()
+                                if _r and _r[0]:
+                                    _pe_trig = _r[0]
+                            except Exception:
+                                pass
+                            _pe_block, _pe_ev, _pe_mins = news_pre_event_block(_pe_prox_fn(), _pe_trig, _pe_max)
+                            if _pe_block:
+                                logger.info(
+                                    f"PRE-EVENT guard: skip #{sid} news — '{_pe_ev}' (HIGH) en "
+                                    f"{_pe_mins:.1f} min (<= {_pe_max:.0f}). El SL no acota el spike "
+                                    f"(clase #969).")
+                                try:
+                                    import sqlite3 as _sq_pe2
+                                    _cn = _sq_pe2.connect(DB_PATH)
+                                    _cn.execute(
+                                        "UPDATE auto_strategies SET status='skipped_pre_event' "
+                                        "WHERE id=? AND status='active'", (sid,))
+                                    _cn.commit(); _cn.close()
+                                except Exception:
+                                    pass
+                                return None
+                        except Exception as _pee:
+                            # fail-open A PROPOSITO: un calendario caido no puede apagar news
+                            # entero en silencio (leccion M15/SMC).
+                            logger.debug(f"pre-event guard #{sid}: {_pee}")
+
                     # v3.28.0 Spread guardian
                     try:
                         from src.common.slippage_tracker import is_spread_acceptable
@@ -4113,6 +4163,13 @@ class AIdan:
         if _be_cap_dist and _be_cap_tracks:
             _logger.info(f"BE cap activo: {_be_cap_pips}p para {sorted(_be_cap_tracks)}")
 
+        # v3.62.0 — ultimo SL aceptado por ticket. El SL de la DB (row[4]) es el ORIGINAL
+        # y no se actualiza tras el modify, asi que sin esto el thread reenviaba el MISMO
+        # SL (y lo logueaba como exito, y escribia la DB) una vez por segundo mientras el
+        # BE estuviera armado. Ver src/broker/sl_cache.py (medicion incluida).
+        from src.broker.sl_cache import sl_already_sent, remember_sl, prune_sl_cache
+        _sl_sent = {}
+
         while True:
             try:
                 with self._mt5_lock:
@@ -4130,6 +4187,7 @@ class AIdan:
                 from src.common.db import (get_strategies_with_open_mt5, update_mt5_trailing_data,
                                            update_mt5_high_water, update_mt5_low_water)
                 open_mt5 = get_strategies_with_open_mt5()
+                prune_sl_cache(_sl_sent, [r[1] for r in (open_mt5 or [])])
                 if not open_mt5:
                     _time.sleep(1)
                     continue
@@ -4214,9 +4272,17 @@ class AIdan:
                                 new_sl = round(candidate, 5)
 
                     # Execute SL modification (only if trailing enabled)
-                    if new_sl is not None:
+                    # v3.62.0 — si este SL ya fue aceptado por el broker para este ticket, NO
+                    # reenviar, NO reescribir la DB, NO loguear: era 1 modify + 1 UPDATE + 1
+                    # INFO por segundo por posicion (#944: 9.039 lineas identicas). Solo se
+                    # persiste el pico si cambio. Un candidato DISTINTO (TRAIL subiendo) pasa.
+                    if new_sl is not None and sl_already_sent(_sl_sent, ticket, new_sl):
+                        if high_water != (stored_hwm or 0) and high_water > 0:
+                            update_mt5_high_water(sid, high_water)
+                    elif new_sl is not None:
                         success = mt5.modify_position_sl(ticket, new_sl)
                         if success:
+                            remember_sl(_sl_sent, ticket, new_sl)
                             locked_pips = (new_sl - fill_price) / 0.0001 if direction == 'CALL' else (fill_price - new_sl) / 0.0001
                             update_mt5_trailing_data(sid, new_step, high_water)
                             stage_label = "TRAIL" if new_step == 2 else "BE"

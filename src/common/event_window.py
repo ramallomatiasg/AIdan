@@ -85,3 +85,44 @@ def get_event_proximity():
             in_window = True
     out['in_window'] = in_window
     return out
+
+
+def news_pre_event_block(prox, trigger_type, max_min):
+    """v3.62.0 — Guard PRE-EVENTO para news (clase #969). Devuelve
+    (bloquear, nombre_evento, mins_to_next).
+
+    El escudo del event-window exime a news porque asume que news = jugada POST-dato.
+    El #969 (4-sep) fue un CALL de news sobre una nota PREVIA ("Locked and loaded for
+    non-farm payrolls") 12,8 min ANTES del NFP, con SL de 4p: el spike lo paso por arriba
+    34p y cerro en -29,1p = -$29,40, 5,5% de la cuenta en un trade. El argumento no es
+    estadistico (n=3 en la celda), es de construccion: con SL de 4p delante de un evento
+    HIGH el riesgo real no es el 1% del sizing, es lo que mida el spike, y el SL no lo
+    puede acotar.
+
+    Reglas, a proposito estrechas:
+    - Solo trigger 'news'. structure/m15/h1/smc los cubre el event-window; pre_planned y
+      calendar juegan el evento por diseno (esperan su event_time).
+    - Solo impacto 'High' ADELANTE: 0 <= mins_to_next <= max_min. Post-dato (mins_since_prev)
+      sigue exento: esa ES la jugada de news.
+    - Fail-OPEN: sin calendario ({}), sin next_event o max_min <= 0 => no bloquea. Un feed
+      caido no puede apagar news entero en silencio (leccion M15/SMC), y el calendario ya
+      se cachea 10 min.
+    """
+    try:
+        max_min = float(max_min or 0)
+    except (TypeError, ValueError):
+        return False, None, None
+    if max_min <= 0 or not prox or (trigger_type or '') != 'news':
+        return False, None, None
+    if prox.get('next_impact') != 'High':
+        return False, None, None
+    mins = prox.get('mins_to_next')
+    if mins is None:
+        return False, None, None
+    try:
+        mins = float(mins)
+    except (TypeError, ValueError):
+        return False, None, None
+    if 0 <= mins <= max_min:
+        return True, prox.get('next_event'), mins
+    return False, None, None
