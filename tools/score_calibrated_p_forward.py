@@ -52,20 +52,29 @@ def main():
         print('=' * 74)
 
         # Cerrados con prediccion registrada al nacer (broker-truth).
+        # FIX 7-sep-2026: la fuente primaria es trade_archive.entry_context (archive_trade
+        # copia el contexto al cerrar). La version anterior hacia JOIN a auto_strategies y
+        # leia SU entry_context, pero el cap-delete PODA esa tabla (quedan ~6 filas vivas)
+        # => los cerrados desaparecian y el scorer gritaba "hook MUERTO" con 4 trades m15
+        # que SI tenian calibrated_p registrada. auto_strategies queda solo como fallback
+        # (LEFT JOIN) para filas del archive sin entry_context.
         rows = conn.execute(
-            """SELECT a.entry_context, t.result, t.mt5_pnl, t.created_at
+            """SELECT COALESCE(t.entry_context, a.entry_context) AS ctx,
+                      t.result, t.mt5_pnl, t.created_at
                FROM trade_archive t
-               JOIN auto_strategies a ON a.id = t.strategy_id
+               LEFT JOIN auto_strategies a ON a.id = t.strategy_id
                WHERE t.trigger_type = ? AND t.result IN ('win','loss')
                  AND t.mt5_pnl IS NOT NULL
-                 AND a.entry_context LIKE '%calibrated_p%'
+                 AND COALESCE(t.entry_context, a.entry_context) LIKE '%calibrated_p%'
                ORDER BY t.created_at""", (track,)).fetchall()
 
-        # Pendientes (registradas, todavia sin cierre) — para ver que el hook vive.
-        pending = conn.execute(
+        # Registradas = cerradas con registro (archive) + vivas con registro (auto_strategies,
+        # todavia sin archivar). Es lo que dice si el hook de add_auto_strategy vive.
+        live = conn.execute(
             """SELECT COUNT(*) FROM auto_strategies
                WHERE trigger_type = ? AND entry_context LIKE '%calibrated_p%'""",
             (track,)).fetchone()[0]
+        pending = len(rows) + live
 
         deployed = params.get('deployed_at', params['fitted_at'])
         closed_since = conn.execute(
@@ -73,7 +82,7 @@ def main():
                WHERE trigger_type = ? AND result IN ('win','loss')
                  AND created_at >= ?""", (track, deployed)).fetchone()[0]
 
-        print('  registradas (total, abiertas o no): %d' % pending)
+        print('  registradas (cerradas %d + vivas %d): %d' % (len(rows), live, pending))
         if pending == 0 and closed_since > 0:
             print('  *** ALERTA: hay %d trades %s creados desde el deploy (%s) y CERO'
                   % (closed_since, track, deployed))
