@@ -863,6 +863,18 @@ class AIdan:
             _d1_mode = getattr(Config, 'D1_TRACK_MODE', 'shadow') or 'shadow'
             D1_SCAN_INTERVAL = getattr(Config, 'D1_SCAN_INTERVAL_SEC', 900)
             logger.info(f"Track D1 (swing diario): modo={_d1_mode} scan cada {D1_SCAN_INTERVAL}s")
+            # v3.63.0 — CALENDAR PLAY (shadow): thread propio (necesita muestreo por
+            # SEGUNDO alrededor del release; el loop del analyzer es de 10s). Registra
+            # la ruta del precio en calendar_play_log y NADA mas: no crea estrategia ni
+            # manda orden (test sobre el fuente). El getter del executor sigue a las
+            # reconexiones (self._mt5_exec se reasigna mas abajo y en cada reconnect).
+            try:
+                from src.analyzer import calendar_play as _cp_mod
+                from src.common import db as _cp_db
+                _cp_mod.start(lambda: getattr(self, '_mt5_exec', None), _cp_db,
+                              getattr(Config, 'CALENDAR_PLAY_MODE', 'shadow'))
+            except Exception as _cp_e:
+                logger.error(f"calendar_play start error: {_cp_e}")
             # v3.60.0 — SHADOW TRADER LLM (Groq): decide en PAPEL, jamas opera.
             # Sin warmup gate a proposito (no opera; una decision sobre vela
             # semi-stale al arrancar es una fila mas, no un riesgo).

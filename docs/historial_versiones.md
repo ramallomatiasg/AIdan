@@ -6,6 +6,55 @@ En CLAUDE.md queda la tabla corta de las últimas versiones y un puntero acá.
 
 ---
 
+## v3.63.0 — Calendar play en SHADOW + news APAGADO (11 Sep 2026)
+
+**Origen.** La rutina de los sábados pasó a tener dos partes (código + `tools/weekly_research_scan.py`,
+batería fija de ~150 hipótesis con el gate de la casa + salud del loop de aprendizaje). La primera corrida
+completa dio: 0 celdas pasan el gate, hooks todos vivos, y **news = −$76 de los −$122 de los últimos 30
+días** (29% WR contra un 53% necesario para empatar). Sobre eso el user planteó que un trader común
+planifica la semana con el **calendario** — sabe a qué hora sale el dato y opera alrededor — y que eso no
+es lo que AIdan hace.
+
+**Diagnóstico.** Correcto: el track `news` reacciona a ARTÍCULOS del RSS. De 76 trades medidos el 26-ago,
+74 no correspondían a ningún evento del calendario. Lifetime −$178. Las piezas de "operar el calendario"
+existían pero ninguna opera: `calendar` trigger 0 trades en la historia (straddle moría en `sr_zero`),
+`pre_planned` 10 trades / −$11,63, `event_window_log` etiqueta pero no decide.
+
+**Decisiones (del user, "hagamos como decís").**
+1. **`ENABLE_NEWS_TRACK=false`** en `.env`. El alert se sigue guardando y midiendo
+   (`measure_news_llm_error.py`). Revertir = borrar la línea + restart.
+2. **Medir la jugada de calendario ANTES de construirla**: `src/analyzer/calendar_play.py`, thread
+   daemon propio (el loop del analyzer es de 10 s; acá hace falta el segundo). En cada release HIGH
+   USD/EUR del calendario FF: bid/ask a T−60s, tick ~1 s hasta T+3 min, ~10 s hasta T+15 min. Guarda en
+   `calendar_play_log` la ruta, excursión máxima arriba/abajo (3 y 15 min), spread máximo del primer
+   minuto (lo único que la TCA en calma NO puede ver), closes a +1/+3/+5/+15 y, a T+20 min, `actual`
+   (FF si refrescó; si no, el título Forexlive "X vs Y expected"). Eventos a la misma hora comparten ruta.
+   **No opera, no existe modo `active`**, y hay test sobre el fuente (sin `order_send`, `open_position`,
+   `add_auto_strategy`, `_try_mt5_execute`).
+
+**Por qué este shadow sí puede llegar a n.** ~10 releases HIGH USD/EUR por mes, por CALENDARIO, no por
+trades ⇒ n=25 en ~2,5 meses. Es la primera prueba del proyecto cuya muestra no depende de que AIdan opere.
+
+**Gate pre-declarado** (`tools/score_calendar_play.py`, NO mover): n≥25 releases con sorpresa≠0 · neto
+a +5 min (a favor de la sorpresa, menos spread real del release + 1,3p de comisión) con media Y mediana
+> 0 · CI95 bootstrap de la media sin cruzar cero. **A n≥40 sin pasar ⇒ `CALENDAR_PLAY_MODE=off`.**
+
+**Evidencia previa que tiene que refutar.** Posicionarse ANTES del dato = #969 (CALL 12,8 min antes del
+NFP, spike 34p contra SL 4p, −$29,40 = 5,5% de la cuenta). El research del 19-ago: ~80% del movimiento
+post-release en 3 minutos. Único dato propio de entrada post-dato: #604, +$5,30 a los 7 min del CPI, n=1.
+Y el límite estructural: con lote mínimo 0,01 sobre $517 no se puede modular ni el tamaño ni el SL como
+lo hace un trader discrecional — el "gran monto" del user es exactamente el lever que AIdan no tiene.
+
+**Límites declarados.** `forecast`/`actual` vienen como strings (%/K/M): parser best-effort, lo que no
+parsea queda con ruta pero sin sorpresa y se reporta. El signo "bueno para el USD" depende del indicador:
+lista chica de INVERSOS (desempleo, claims, inventarios); el resto se asume directo. Match título↔evento
+por keywords = cota inferior.
+
+**Tests:** 18 nuevos (`test_calendar_play_v3630.py`). Regresión D1 (32), pre-event guard (17) y
+prod-write guards en verde. Sin cambio en ninguna decisión del vivo salvo el toggle de news.
+
+---
+
 ## v3.62.0 — Guard PRE-EVENTO para news + fin del spam del trailing (7 Sep 2026)
 
 Salio de la sesion de estado del domingo 7-sep (auditoria semanal exit 0 + "¿como vienen los

@@ -713,6 +713,42 @@ def init_db():
         )
     """)
 
+    # v3.63.0 — CALENDAR PLAY (shadow): la ruta del precio alrededor de cada release HIGH
+    # USD/EUR del calendario, muestreada EN EL MOMENTO (tick cada ~1s los primeros 3 min).
+    # Una fila por evento; eventos a la misma hora comparten la ruta (agrupar por release_ts
+    # al puntuar). `actual` se completa a T+20min (FF o titulo Forexlive "X vs Y expected").
+    # NO tiene relacion con auto_strategies: es medicion, no un track que opere.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS calendar_play_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_key TEXT UNIQUE,
+            event_title TEXT,
+            currency TEXT,
+            impact TEXT,
+            release_ts INTEGER,
+            forecast TEXT,
+            previous TEXT,
+            actual TEXT DEFAULT NULL,
+            actual_source TEXT DEFAULT NULL,
+            expected_from_title TEXT DEFAULT NULL,
+            pre_bid REAL,
+            pre_ask REAL,
+            pre_spread REAL,
+            spread_max_60s REAL,
+            max_up_3m REAL,
+            max_down_3m REAL,
+            max_up_15m REAL,
+            max_down_15m REAL,
+            close_1m REAL,
+            close_3m REAL,
+            close_5m REAL,
+            close_15m REAL,
+            samples_json TEXT,
+            scored_at TIMESTAMP DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # v3.40.20 — Level-quality log: tagea CADA señal de structure que se ejecuta con la
     # cantidad de toques de su nivel (calidad), EN EL MOMENTO. Join por strategy_id a
     # trade_archive -> medir WR de nivel-validado (>=2 toques) vs ruido. Plan B (mejora
@@ -2824,6 +2860,74 @@ def log_level_quality(strategy_id, setup_type, direction, key_level, level_touch
         conn.close()
     except Exception:
         pass
+
+
+def calendar_play_already_logged(event_key):
+    """v3.63.0 — idempotencia del shadow de calendario. True ante error (igual que D1:
+    perder una fila del shadow no cuesta, duplicarla ensucia el n)."""
+    try:
+        conn = _connect()
+        row = conn.execute("SELECT 1 FROM calendar_play_log WHERE event_key = ? LIMIT 1",
+                           (event_key,)).fetchone()
+        conn.close()
+        return row is not None
+    except Exception:
+        return True
+
+
+def log_calendar_play(event_key, event_title, currency, impact, release_ts, forecast, previous,
+                      actual, pre_bid, pre_ask, samples_json, pre_spread, spread_max_60s,
+                      max_up_3m, max_down_3m, max_up_15m, max_down_15m,
+                      close_1m, close_3m, close_5m, close_15m):
+    """v3.63.0 — una fila por evento del calendario con la ruta del precio. created_at en AR
+    explicito (el DEFAULT de SQLite es UTC). except: pass deliberado: un fallo del shadow no
+    puede tocar al vivo."""
+    try:
+        conn = _connect()
+        conn.execute("""
+            INSERT OR IGNORE INTO calendar_play_log
+                (event_key, event_title, currency, impact, release_ts, forecast, previous, actual,
+                 pre_bid, pre_ask, pre_spread, spread_max_60s, max_up_3m, max_down_3m,
+                 max_up_15m, max_down_15m, close_1m, close_3m, close_5m, close_15m,
+                 samples_json, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (event_key, event_title, currency, impact, int(release_ts), str(forecast or ''),
+              str(previous or ''), actual, pre_bid, pre_ask, pre_spread, spread_max_60s,
+              max_up_3m, max_down_3m, max_up_15m, max_down_15m, close_1m, close_3m, close_5m,
+              close_15m, samples_json, now_ar()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def update_calendar_play_actual(event_key, actual, source, expected_from_title=None):
+    """v3.63.0 — completa `actual` a T+20min (source: 'ff' | 'forexlive')."""
+    try:
+        conn = _connect()
+        conn.execute("""UPDATE calendar_play_log SET actual = ?, actual_source = ?,
+                        expected_from_title = COALESCE(?, expected_from_title)
+                        WHERE event_key = ?""", (actual, source, expected_from_title, event_key))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def news_titles_between(ts_from, ts_to):
+    """v3.63.0 — titulos de `news` publicados entre dos epochs UTC (para parsear 'X vs Y
+    expected' de Forexlive). published_at se guarda en UTC ISO."""
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        a = _dt.fromtimestamp(ts_from, tz=_tz.utc).strftime('%Y-%m-%d %H:%M:%S')
+        b = _dt.fromtimestamp(ts_to, tz=_tz.utc).strftime('%Y-%m-%d %H:%M:%S')
+        conn = _connect()
+        rows = conn.execute("SELECT title FROM news WHERE published_at BETWEEN ? AND ? ORDER BY published_at",
+                            (a, b)).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
 
 
 def log_calendar_shadow(event_name, event_impact, direction, entry_price,

@@ -121,6 +121,26 @@ exe solo copia `config/` **si la carpeta no existe** ⇒ editar el del repo NO a
 era del 25-feb). Al tocar cualquier cosa de `config/`, copiar a mano. Eso mismo lo hace reversible sin
 rebuild.
 
+**🧪 SHADOW NUEVO (11 Sep, v3.63.0) — CALENDAR PLAY: operar el DATO, no el artículo. Regla de shadow aplica. + news APAGADO.**
+Nace de una observación del user: un trader planifica la semana con el CALENDARIO (sabe a qué hora
+sale el dato y se posiciona alrededor). AIdan nunca tuvo eso — su track `news` reacciona a ARTÍCULOS
+(74 de 76 trades medidos no correspondían a ningún evento) y perdió **−$178 lifetime, −$76 en 30d**.
+**Decisión del user (11-sep, "hagamos como decís"): `ENABLE_NEWS_TRACK=false`** en `.env` (el alert se
+sigue guardando y midiendo; revertir = borrar la línea + restart). **Lo que lo reemplaza se mide antes
+de construirlo:** `src/analyzer/calendar_play.py` es un thread que, en cada release HIGH USD/EUR del
+calendario FF, toma bid/ask a T−60s y muestrea el tick ~1s hasta T+3min y ~10s hasta T+15min →
+`calendar_play_log` (ruta, excursión máx arriba/abajo, spread máx del 1er minuto, closes a
++1/+3/+5/+15, y `actual` a T+20min desde FF o del título Forexlive "X vs Y expected"). **No opera y no
+existe modo `active`** (test sobre el fuente). **Por qué esto sí acumula muestra: ~10 releases HIGH/mes
+por CALENDARIO, no por trades** ⇒ n=25 en ~2,5 meses. **Gate pre-declarado** (`tools/score_calendar_play.py`,
+NO mover): n≥25 releases con sorpresa≠0 · neto a +5 min (a favor de la sorpresa, menos spread REAL del
+release + 1,3p) con media Y mediana > 0 · CI95 bootstrap sin cruzar cero. **Si a n≥40 no pasa ⇒
+`CALENDAR_PLAY_MODE=off`** y la puerta se cierra con data propia. *Evidencia previa a tener presente:*
+posicionarse ANTES del dato es el #969 (−$29, 5,5% de la cuenta); el research dice que ~80% del
+movimiento post-release ocurre en 3 min; el único dato propio de entrada post-dato es #604 (+$5,30, n=1).
+*Ojo al leer:* si `adv3 ≥ fav3` el setup te pasa por arriba antes de darte la razón (lo que refutó
+fade-chop). Los eventos a la misma hora comparten ruta: el scorer agrupa por `release_ts`.
+
 **🧪 SHADOW NUEVO (20 Ago, v3.60.0) — SHADOW TRADER LLM (Groq). Regla de shadow aplica.**
 Pedido del user ("un LLM que controle todo, cierre antes, abra, autorecursivo"), implementado en la
 forma medible: un "operador" **gpt-oss-120b decide en PAPEL** y todo va a `shadow_trader_log` —
@@ -502,7 +522,8 @@ URL: `http://localhost:11434`. Sin Ollama → AIdan usa solo Groq con degradaci�
 
 | Version | Cambio | Estado |
 |---|---|---|
-| v3.62.0 | **Guard PRE-EVENTO para news** (clase #969: CALL sobre una nota PREVIA al NFP, 12,8 min antes del dato, SL 4p, spike 34p ⇒ −$29,40 = 5,5% de la cuenta): una senal de news NO se ejecuta si hay un evento HIGH en los proximos 15 min; post-dato sigue exento. `NEWS_PRE_EVENT_GUARD_MIN` (env, 0=off), fail-open sin calendario. **+ el trailing reenviaba el MISMO SL 1 vez/segundo** (#944: 9.039 lineas identicas, 5% del log, el log rotaba cada 2-3 dias): cache en memoria del ultimo SL aceptado (`src/broker/sl_cache.py`). 28 tests | **actual** |
+| v3.63.0 | **CALENDAR PLAY en SHADOW + news APAGADO** (decisión del user 11-sep). Thread que muestrea bid/ask ~1s alrededor de cada release HIGH USD/EUR del calendario → `calendar_play_log` (ruta, excursiones, spread máx, `actual` a T+20min). No opera, sin modo `active`. Gate en `score_calendar_play.py` (n≥25; a n≥40 sin pasar ⇒ off). `ENABLE_NEWS_TRACK=false` en `.env` (−$178 lifetime). 18 tests | **actual** |
+| v3.62.0 | **Guard PRE-EVENTO para news** (clase #969: CALL sobre una nota PREVIA al NFP, 12,8 min antes del dato, SL 4p, spike 34p ⇒ −$29,40 = 5,5% de la cuenta): una senal de news NO se ejecuta si hay un evento HIGH en los proximos 15 min; post-dato sigue exento. `NEWS_PRE_EVENT_GUARD_MIN` (env, 0=off), fail-open sin calendario. **+ el trailing reenviaba el MISMO SL 1 vez/segundo** (#944: 9.039 lineas identicas, 5% del log, el log rotaba cada 2-3 dias): cache en memoria del ultimo SL aceptado (`src/broker/sl_cache.py`). 28 tests | vigente |
 | v3.61.1 | **Guard de edad en la ejecucion** (clase #625): una senal sin fill >10 min ya NO se ejecuta a mercado (SL/TP calculados para un precio viejo). Broker-truth: fills tardios 1W/10L, y el 98% de los fills es instantaneo ⇒ costo ~0. `SIGNAL_MAX_AGE_MIN` (env), pre_planned/calendar exentos | vigente |
 | v3.61.0 | **El feed de noticias llegaba 25 min tarde y 4 de 5 fuentes estaban MUERTAS en silencio**: Forexlive publica el dato a **+15 segundos** del release (Bloomberg a +25,3 min) y ahora es la fuente primaria. Fail-loud por fuente, timeout real, orden por fecha antes de cortar. Perilla `NEWS_EXTRA_SOURCES` (default off) + `tools/measure_feed_race.py` | vigente |
 | v3.60.0 | **Shadow trader LLM (Groq)**: un "operador" gpt-oss-120b decide en PAPEL (open CALL/PUT/NONE cada 15 min · manage CLOSE/HOLD por posición cada 5 min) → `shadow_trader_log`. Sin path de ejecución por construcción (test). Gate en `score_shadow_trader.py`; a n≥40 sin separar ⇒ off | vigente |
@@ -625,6 +646,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `score_shadow_trader.py` | Scorer del SHADOW TRADER LLM (v3.60.0): completa outcomes de `shadow_trader_log` (SU tabla, lo único que escribe) — open por drift direccional neto de 1,3p a +45 min (velas M5, sin re-sim SL/TP), manage por broker-truth (`trade_archive` ⋈ `mt5_ticket`). Gate pre-declarado: open n≥25 media y mediana > 0 (n≥40 sin pasar ⇒ off); CLOSE n≥15 ahorro > 0. **Regla de shadow: traerlo sin que el user lo pida.** Requiere MT5 para los open. `--dry-run`. |
 | `score_calibrated_p_forward.py` | Scorer READ-ONLY de la fase registro v3.59.0: Brier forward de `calibrated_p` (fit congelado 20-ago) vs constante train, con gate pre-declarado (n>=40; a n>=60 sin pasar ⇒ borrar el módulo). Trae tripwire de hook muerto (señal m15 post-deploy sin registro = buscar `calibrated_p no registrada` en el log). No requiere MT5. **Fix 7-sep:** leía `entry_context` de `auto_strategies` (podada por el cap-delete) y daba falsa alarma; ahora lee `trade_archive` con fallback. Tests en `test_calibrated_p_scorer_fix.py` (escenario exacto: archive con registro + `auto_strategies` vacía). |
 | `audit_code_patterns.py` | Auditoría READ-ONLY de los 7 patrones de bug que ya hicieron daño acá (undefined names, `except` que tragan, ramas mudas de `order_send`, código inalcanzable, umbrales atados al % del TP, DELETE sin guard, estado incoherente). **Lo que lo hace usable es el BASELINE**: solo reporta lo NUEVO. Exit 0 = nada nuevo. Corre sábados vía `aidan-auditoria-semanal`. |
+| `score_calendar_play.py` · `test_calendar_play_v3630.py` | Scorer READ-ONLY del shadow **calendar play** (v3.63.0): agrupa `calendar_play_log` por `release_ts`, calcula la sorpresa (actual−forecast, parseando %/K/M, con lista chica de indicadores INVERSOS: desempleo/claims/inventarios), el signo esperado para EURUSD por moneda, y el neto a +1/+3/+5/+15 min descontando el **spread máximo real del release** + 1,3p. Gate pre-declarado n≥25 · media y mediana >0 a +5 min · CI95 bootstrap sin cruzar cero; a n≥40 sin pasar ⇒ `CALENDAR_PLAY_MODE=off`. Filas sin `actual` legible se reportan y NO puntúan. Los 18 tests cubren la frontera (el módulo y el bloque del monolito no pueden ejecutar), el parser de títulos Forexlive con títulos reales, el resumen de la ruta en pips, `record_release` con reloj inyectado y que `start('off')` no lanza thread. No tocan DB ni MT5. |
 | `weekly_research_scan.py` | **BÚSQUEDA SEMANAL DE MEJORA** (11-sep, read-only `mode=ro`, sin MT5). Parte 2 de la rutina de los sábados. **[A]** salud del loop de aprendizaje (tripwires de hook muerto: TCA, MFE/MAE, retrospectiva, lecciones, `calibrated_p`, shadow book, shadow trader, D1 — filas en 7 días vs trades) · **[B]** termómetro por track 30/60d con `WR_BE` (el WR que necesita para empatar) · **[C]** batería de ~150 celdas (hora, sesión, conf, volatilidad, alineación HTF/tendencia, RSI, ATR, eficiencia, edad de señal, setup, calibrated_p, latencia news × track) por `verify_finding` — solo imprime las que PASAN, marca NUEVA vs `tools/.weekly_research_baseline.json` y anota las ya refutadas · **[D]** MFE/MAE reales de los perdedores (entra mal vs gestiona mal). Exit 0 = nada nuevo. **Una celda que pasa = hipótesis para shadow, no cambio** (con α=0,05 ~8 pasan por azar). 1ra corrida 11-sep: 158 celdas con n≥25, **0 pasan**; hooks todos vivos. |
 | `score_retrospective_shadow.py` | Scorer READ-ONLY de la retrospectiva pre-decision (v3.57.0). Compara `contrarian` vs el resto con Wilson, y evalua el **gate pre-declarado de 4 condiciones** (n>=25 · WR peor · CI que no cruza · PnL/trade peor). Tambien reporta si el loop de `directional_lessons` se esta CONSULTANDO — 0 consultas = mecanismo escrito y desconectado, el sintoma clasico de este proyecto. |
 | `measure_tca.py` | TCA READ-ONLY (v3.58.0): mediana/p90 de slippage y spread desde `slippage_log` + breakdown por hora AR. Umbral pre-declarado: mediana > 0,7p = la ejecucion es un problema material. 0 filas + trades nuevos = el hook de `log_fill` murio (buscar WARNING en aidan.log). |
@@ -946,7 +968,14 @@ Cada una NO probada todavía. Listadas para no perderlas y atacar en orden:
 ---
 ---
 
-**Última actualización**: 7 Sep 2026 — **v3.62.0: guard pre-evento para news + fin del spam del
+**Última actualización**: 11 Sep 2026 — **v3.63.0: calendar play en SHADOW + news APAGADO.** Salió
+de la rutina semanal (ahora en 2 partes: código + `weekly_research_scan.py`; hoy 0 celdas pasan, hooks
+vivos, news −$76 de −$122 en 30d) y de la observación del user de que un trader opera el CALENDARIO,
+no los artículos. Decisión del user: `ENABLE_NEWS_TRACK=false`. Lo que lo reemplaza se mide primero:
+thread que registra la ruta del precio (tick ~1s) alrededor de cada release HIGH USD/EUR, gate
+pre-declarado en `score_calendar_play.py`. Detalle en [`docs/historial_versiones.md`](docs/historial_versiones.md).
+
+**Anterior**: 7 Sep 2026 — **v3.62.0: guard pre-evento para news + fin del spam del
 trailing.** Salió de la auditoría semanal (exit 0) + "¿cómo vienen los shadows?". El #969 (CALL de news
 12,8 min ANTES del NFP sobre una nota previa, SL 4p, spike 34p ⇒ −$29,40 = 5,5% de la cuenta) mostró
 que la exención de news en el event-window asume jugada POST-dato: ahora una news no se ejecuta con un

@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.62.0"
+APP_VERSION = "3.63.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -320,6 +320,14 @@ class Config:
     # Quota Groq: ~96 open-scans/dia + manage solo con posicion abierta.
     SHADOW_TRADER_CYCLE_SEC = int(os.getenv("SHADOW_TRADER_CYCLE_SEC", "300"))
     SHADOW_TRADER_SCAN_SEC = int(os.getenv("SHADOW_TRADER_SCAN_SEC", "900"))
+
+    # v3.63.0 — CALENDAR PLAY (shadow): mide la ruta del precio alrededor de cada release
+    # HIGH USD/EUR del calendario (tick ~1s los primeros 3 min, hasta +15 min) para responder
+    # con data propia si "operar el DATO" paga neto de spread real + comision. NO opera y no
+    # existe modo 'active' a proposito. Gate en tools/score_calendar_play.py (n>=25 con
+    # sorpresa; a n>=40 sin pasar => off).
+    #   off | shadow
+    CALENDAR_PLAY_MODE = (os.getenv("CALENDAR_PLAY_MODE", "shadow") or "shadow").lower()
 
     # v3.50.3 — get_setup_win_rates() tambien mira trade_archive (el cable que faltaba).
     # Auditado en runtime el 5-ago: la funcion devolvia SOLO 'news' porque lee de
