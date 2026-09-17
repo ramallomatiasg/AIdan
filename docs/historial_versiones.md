@@ -6,6 +6,100 @@ En CLAUDE.md queda la tabla corta de las últimas versiones y un puntero acá.
 
 ---
 
+## v3.64.0 — Motivo REAL de cierre en `trade_archive` (17 Sep 2026)
+
+**Origen.** El user preguntó si typesafe.ai o un Qwen-1.5B fine-tuneado servían para AIdan (no: el
+LLM pone 10 segundos de los 29,7 min de la cadena de news, y la confianza calibrada ya existe desde
+v3.59.0). De ahí salió *"la entrada es lo que más me preocupa"*, y con los **MFE/MAE reales** de
+v3.58.1 —n=86 desde el 20-ago, clasificados en el momento con el trailing de 1s, no reconstruidos—
+por primera vez se podía separar **entrar mal** de **gestionar mal**.
+
+**Lo que confirmó el diagnóstico del 19-jun.** Los perdedores **nunca se ponen a favor**:
+
+| | MAE mediana | MFE mediana |
+|---|---|---|
+| Ganadores | −0,4 a −1,1p | 5,5 a 16,4p |
+| Perdedores | −2,9 a −9,4p | **1,6 a 2,3p** |
+
+70-78% de los perdedores no llegan ni a +3p, y el patrón es igual en los 4 tracks. El trade avisa en
+los primeros 1-3 pips. *Ojo metodológico: que los ganadores tengan MFE alto es semi-tautológico (un
+ganador cierra positivo ⇒ su MFE ≥ su cierre). **Lo que NO es tautológico es el MAE**, y es lo que
+separa: un ganador podría haber ido hondo en contra y recuperado, y mayormente no pasa.*
+
+**Los 3 fixes de entrada posibles, medidos y caídos.**
+1. **Cortar temprano por MAE**: contrafactual −$3,24 / **+$1,74** / −$2,90 / −$5,67 para cortes de
+   1,5 / 2,0 / 2,5 / 3,0p. La única celda positiva tiene negativas a los dos lados ⇒ **aguja, no
+   meseta** = ruido de muestra. El ratio save:miss (2,6:1 a −2p) engaña: el "save" es parcial
+   (cambiás −4p por −2p) y el "miss" es total (perdés el ganador entero).
+2. **`dist_to_level`**: la celda estrella del 17-jul (≤0,5 ATR → 65% WR, p=0,006) hoy da **44% WR /
+   −$1,20** (n=16). Y en pips crudos la degradación no es monótona (≤2p 71% · 2-4p 50% · 4-7p 28% ·
+   **>7p 58%**) — un agujero en el medio no es un mecanismo.
+3. **Pullback-entry**: ya estaba refutado por dos vías (interna y el research del 19-ago, 80,7% de
+   stop-out).
+
+**EL HALLAZGO.** `structure` va **13W/13L = 48% de acierto y pierde $22,20**. Planea TP 8p / SL 4p
+(R:R 1:2) y **realiza 1:0,93**: ganador medio **+2,6p** contra un objetivo de 8p, perdedor −2,8p de
+un SL de 4p ⇒ **necesita 76% de WR para empatar**. h1 realiza 1:1,67 (necesita 47,2%, saca 38,9%).
+Eso es la **salida**, no la entrada: 29 de 33 ganadores cerraron antes del TP.
+*El `tp_cap` que causaba esto al planear se arregló en v3.40.18 (escala por timeframe, R:R clampeado
+a [1,2-2,5]) ⇒ el recorte de hoy pasa DESPUÉS de entrar.*
+
+**POR QUÉ NUNCA SE VIO.** `tp_hit = 1 if result == 'win' and pips > 0` (`db.py:3542`). No observa
+nada: se **deriva** de win/loss. Verificado sobre las 88 filas con MFE/MAE:
+
+- `tp_hit` coincide con `result=='win'` en **88/88**.
+- De 33 marcadas "TP hit", solo **4** llegaron al TP (≥95% del nominal).
+- De 52 "SL hit", solo **16** llegaron al SL.
+
+Detalle que lo subraya: la tabla de trades **simulados** (`shadow_trades`, `db.py:4841`) ya tenía
+`exit_reason` y `expiry_hit`. Los trades **reales** tenían menos instrumentación que los inventados.
+
+**El fix.** `exit_reason` (clasificación, lista cerrada) + `exit_reason_raw` (código crudo del deal)
+en `trade_archive`. Decisiones de diseño:
+
+- **La palabra del broker manda.** MT5 marca cada deal de cierre con `reason` (SL / TP / EXPERT /
+  CLIENT / stopout). Ya venía en los deals que `sync_closed_positions` baja igual ⇒ **0 llamadas
+  extra al broker**.
+- **Se guarda el crudo aparte.** El error de `tp_hit` fue guardar un derivado sin el dato que lo
+  respalda: si la clasificación resulta estar mal, con el crudo se re-deriva.
+- **La única ambigüedad real se resuelve con dato propio.** El broker reporta `DEAL_REASON_SL` tanto
+  para el SL original como para un stop MOVIDO por el trailing/BE — y distinguirlos *es* el objetivo.
+  Se usa `mt5_trailing_step > 0` (AIdan registra si movió el stop) y, como fallback, comparar el
+  cierre contra el SL original. **Esto funciona porque `auto_strategies.stop_loss` NUNCA se pisa**:
+  el trailing mueve el stop en el broker y solo persiste `mt5_trailing_step` (verificado: no hay un
+  solo `UPDATE ... SET stop_loss` en `db.py`).
+- **Fail-safe total**: cualquier input raro ⇒ `'unknown'`. El módulo corre dentro del path de
+  archivado y el archivo es la verdad histórica del proyecto — perder un trade por un `TypeError`
+  sería mucho peor que no saber por qué cerró. Un valor fuera de la lista cerrada se neutraliza en
+  `archive_trade`, no llega a la DB.
+
+**Alcance honesto: 0 cambios de decisión.** No toca una orden, un filtro, un umbral ni un lote. Solo
+registra. Su valor es la muestra y la pregunta que desbloquea.
+
+**Cómo se leerá** (`tools/score_exit_reason.py`, read-only, sin MT5 ⇒ corre con AIdan vivo). Gate
+pre-declarado **n≥25 por track**; abajo de eso imprime `[DESCRIPTIVO]` y no concluye. **La pregunta:
+de los ganadores cortados, ¿cuántos pips dejaron sobre la mesa después del corte?** (`MFE − cierre`).
+*Lo que NO hay que concluir: `trail_be` alto no condena al trailing — el BE también rescata (+$2,41
+por trade, medido el 10-ago con `measure_be_cost`). Este scorer aporta la otra mitad de la balanza,
+que era la que no se podía ver.* Trae tripwire de hook muerto (≥50% `unknown` ⇒ buscar
+`MT5 instant eval: ... exit=` en `aidan.log`).
+
+**Tests: 37, escritos ANTES del fix.** Cubren, en orden de importancia: el caso real (ganador cortado
+por stop movido ≠ SL pegado, en CALL y en PUT), el **gap adverso que NO es `trail_be`** (sin ese test
+un gap inflaría justo el bucket que se quiere medir), que `sl_moved` le gane a la inferencia por
+precio, la lista cerrada, que el refinamiento del caller **no pueda pisar** la palabra del broker, el
+fail-safe con 5 formas de input basura, y **call-site sobre el fuente** en los 3 paths de archivado +
+conteo de columnas vs placeholders del INSERT (que ya creció varias veces). Un test que solo
+ejercitara la función pura habría estado en verde los meses en que `adjust_setup_confidence` estuvo
+muerto. Verificado además **end-to-end contra una copia** de la DB de producción: migración aplicada,
+700 filas intactas, valor inválido neutralizado, producción sin tocar.
+
+**Lo que queda pendiente y es honesto decir:** el hallazgo (d) —realizar 1:0,93 contra 1:2 planeado—
+**no tiene fix propuesto todavía**, a propósito. Cualquier cambio de gestión hoy sería sobre la
+muestra que lo está midiendo. Primero el dato, después la propuesta.
+
+---
+
 ## v3.63.0 — Calendar play en SHADOW + news APAGADO (11 Sep 2026)
 
 **Origen.** La rutina de los sábados pasó a tener dos partes (código + `tools/weekly_research_scan.py`,

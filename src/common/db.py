@@ -946,6 +946,23 @@ def init_db():
     except:
         pass
 
+    # v3.64.0 — MOTIVO REAL DE CIERRE. `tp_hit`/`sl_hit` se derivan de result==win/loss
+    # (ver mas abajo) => coinciden con win/loss en 88/88 filas y solo 4 de 33 "TP hit"
+    # habian tocado el TP. O sea el campo que deberia decir POR QUE cerro no dice nada, y
+    # sin eso no se puede separar "entro mal" de "lo corte yo temprano" (29 de 33
+    # ganadores cerraron antes del TP). `exit_reason` = clasificacion (lista cerrada en
+    # src/common/exit_reason.py); `exit_reason_raw` = el codigo CRUDO del deal de MT5.
+    # Se guardan los dos a proposito: el error de tp_hit fue guardar un derivado sin el
+    # dato que lo respalda. NULL = trade anterior a v3.64.0 o motivo indeterminable.
+    try:
+        cursor.execute("ALTER TABLE trade_archive ADD COLUMN exit_reason TEXT")
+    except:
+        pass
+    try:
+        cursor.execute("ALTER TABLE trade_archive ADD COLUMN exit_reason_raw INTEGER")
+    except:
+        pass
+
     # v3.58.3 — edad de la señal al fill (min). NULL = nunca lleno o pre-v3.58.3.
     try:
         cursor.execute("ALTER TABLE auto_strategies ADD COLUMN signal_age_at_fill_min REAL")
@@ -3538,8 +3555,26 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             tp_pips = round((ref_price - tp) / pip, 1) if tp else 0
 
         # Determine if SL/TP was hit
+        # OJO (v3.64.0): estas dos columnas NO observan nada — se derivan de win/loss.
+        # Medido el 17-sep: `tp_hit` coincide con result=='win' en 88/88 filas y solo 4 de
+        # 33 marcadas "TP hit" habian llegado al TP. Se dejan por compatibilidad historica
+        # (hay lecturas viejas que las usan), pero el dato BUENO es `exit_reason`.
         sl_hit = 1 if result == 'loss' and pips < 0 else 0
         tp_hit = 1 if result == 'win' and pips > 0 else 0
+
+        # v3.64.0 — motivo REAL de cierre. Lo calcula quien cierra (tiene el deal del
+        # broker o los flags de la evaluacion por precio) y lo pasa en el context.
+        # Fail-safe: si el caller no lo mando, queda 'unknown' — se CUENTA, no se adivina
+        # (adivinarlo es exactamente lo que hace tp_hit y por eso no sirve).
+        try:
+            from src.common.exit_reason import EXIT_REASONS as _ERS
+            _exit_reason = ctx.get('exit_reason') or 'unknown'
+            if _exit_reason not in _ERS:
+                _exit_reason = 'unknown'
+            _exit_raw = ctx.get('exit_reason_raw')
+            _exit_raw = int(_exit_raw) if isinstance(_exit_raw, int) else None
+        except Exception:
+            _exit_reason, _exit_raw = 'unknown', None
 
         # Determine trading session from creation time
         try:
@@ -3569,8 +3604,8 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
                  market_trend, trend_strength, rsi_at_entry, htf_bias,
                  volatility, avg_range_pips, session, hour_utc, day_of_week,
                  profile_name, mt5_pnl, news_title, created_at, entry_context,
-                 mfe_pips, mae_pips, signal_age_at_fill_min)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 mfe_pips, mae_pips, signal_age_at_fill_min, exit_reason, exit_reason_raw)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strategy_id, direction, result, ref_price, exit_price, pips,
             sl, tp, sl_pips, tp_pips, sl_hit, tp_hit,
@@ -3580,7 +3615,7 @@ def archive_trade(strategy_id, result, exit_price, pips, context=None):
             ctx.get('volatility', ''), ctx.get('avg_range_pips', 0),
             session, hour_utc, day_of_week,
             profile, mt5_pnl, title, created, entry_ctx_json,
-            _mfe_pips, _mae_pips, _sig_age_min
+            _mfe_pips, _mae_pips, _sig_age_min, _exit_reason, _exit_raw
         ))
         conn.commit()
 

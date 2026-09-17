@@ -785,18 +785,23 @@ class MT5Executor:
             # que todo el proyecto trata como verdad.
             def _sumar(lote_de_deals, solo_ticket=None):
                 """Suma neta + precio de cierre de un conjunto de deals. Pura: no toca
-                nada de afuera, asi que no puede acumular sobre un total previo."""
-                _p, _cp = 0.0, 0.0
+                nada de afuera, asi que no puede acumular sobre un total previo.
+
+                v3.64.0 — devuelve tambien el `reason` del deal de CIERRE: es la unica
+                fuente de verdad del motivo (SL / TP / EXPERT / CLIENT). Ya venia en los
+                deals que se bajan igual, no agrega ni una llamada al broker."""
+                _p, _cp, _rs = 0.0, 0.0, None
                 for _d in lote_de_deals or []:
                     if solo_ticket is not None and _d.position_id != solo_ticket:
                         continue
                     _p += _d.profit + _d.swap + _d.commission
                     if _d.entry == 1:      # close deal -> exit price
                         _cp = _d.price
-                return _p, _cp
+                        _rs = getattr(_d, 'reason', None)
+                return _p, _cp, _rs
 
             deals = self._mt5.history_deals_get(position=ticket)
-            pnl, close_price = _sumar(deals)
+            pnl, close_price, close_reason = _sumar(deals)
 
             if not deals or close_price == 0:
                 # Fallback: time-based search
@@ -804,13 +809,13 @@ class MT5Executor:
                 time_from = datetime.now(timezone.utc) - timedelta(days=3)
                 time_to = datetime.now(timezone.utc) + timedelta(hours=1)
                 deals_fb = self._mt5.history_deals_get(time_from, time_to)
-                pnl_fb, close_fb = _sumar(deals_fb, solo_ticket=ticket)
+                pnl_fb, close_fb, reason_fb = _sumar(deals_fb, solo_ticket=ticket)
                 # Reemplaza solo si el fallback aporta algo que la 1ra consulta no tenia:
                 # el deal de cierre, o cualquier deal cuando la 1ra vino vacia. Si el
                 # fallback tampoco ve el cierre, se conserva lo ya calculado (mismo valor,
                 # sin duplicar).
                 if close_fb or not deals:
-                    pnl, close_price = pnl_fb, close_fb
+                    pnl, close_price, close_reason = pnl_fb, close_fb, reason_fb
 
             if close_price == 0:
                 # Last resort: estimate from current price
@@ -883,6 +888,22 @@ class MT5Executor:
                         _mt5_htf = self._smc_ref.get_status().get('htf_bias', '') or ''
                 except Exception:
                     pass
+                # v3.64.0 — motivo REAL del cierre, con la palabra del broker.
+                # `sl` viene de auto_strategies.stop_loss, que NUNCA se pisa (el trailing
+                # mueve el stop en el BROKER y solo persiste mt5_trailing_step) => es el SL
+                # ORIGINAL, que es justo lo que hace falta para distinguir "pego el SL" de
+                # "lo corto el trailing/BE". row[9] = mt5_trailing_step (>0 = stop movido).
+                _exit_reason, _exit_raw = 'unknown', None
+                try:
+                    from src.common.exit_reason import classify_from_broker_deal
+                    _step = row[9] if len(row) > 9 else None
+                    _sl_moved = (_step is not None and _step > 0) if _step is not None else None
+                    _exit_reason, _exit_raw = classify_from_broker_deal(
+                        close_reason, close_price=close_price, orig_sl=sl, orig_tp=tp,
+                        direction=direction, sl_moved=_sl_moved)
+                except Exception as _ere:
+                    self.logger.debug(f"exit_reason #{sid}: {_ere}")
+
                 ctx = {
                     'entry_price': entry_price,
                     'direction': direction,
@@ -891,9 +912,13 @@ class MT5Executor:
                     'market_trend': _mt5_trend,
                     'trend_strength': _mt5_trend_str,
                     'htf_bias': _mt5_htf,
+                    'exit_reason': _exit_reason,
+                    'exit_reason_raw': _exit_raw,
                 }
                 auto_evaluate_strategy(sid, result, close_price, pips_result, ctx)
-                self.logger.info(f"MT5 instant eval: #{sid} {result.upper()} {pips_result:+.1f}p (P&L ${pnl:.2f})")
+                self.logger.info(
+                    f"MT5 instant eval: #{sid} {result.upper()} {pips_result:+.1f}p "
+                    f"(P&L ${pnl:.2f}) exit={_exit_reason} (broker reason={_exit_raw})")
 
                 # Fix #4: archive to trade_archive with full context (was only going to strategy_results before)
                 try:

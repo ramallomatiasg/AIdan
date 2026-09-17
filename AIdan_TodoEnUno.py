@@ -1518,10 +1518,22 @@ class AIdan:
                                 if _st in _title_lower:
                                     _setup_type = _st
                                     break
+                        # v3.64.0 — motivo REAL de cierre. Este path no tiene deal del
+                        # broker (evalua por PRECIO) pero si sabe que barrera creyo tocar.
+                        # Sin flags = expiry, que es la hipotesis a medir: el expiry mata
+                        # trades direccionalmente correctos (problema #2 del diagnostico).
+                        try:
+                            from src.common.exit_reason import classify_from_eval_flags
+                            _exit_reason = classify_from_eval_flags(
+                                hit_tp=hit_tp, hit_be=hit_be, hit_sl=hit_sl,
+                                be_triggered=be_triggered)
+                        except Exception:
+                            _exit_reason = 'unknown'
                         ctx = {'entry_price': entry_price, 'direction': direction, 'confidence': conf,
                                'setup_type': _setup_type, 'trigger_type': trigger_type or '',
                                'market_trend': tech.get_market_state().get('trend', ''),
-                               'rsi_at_entry': tech.get_market_state().get('rsi', 0)}
+                               'rsi_at_entry': tech.get_market_state().get('rsi', 0),
+                               'exit_reason': _exit_reason}
                         auto_evaluate_strategy(sid, result, exit_px, round(pips_result, 1), ctx)
                         try:
                             from src.common.db import archive_trade, get_entry_context
@@ -3192,6 +3204,14 @@ class AIdan:
                                     if _st in _title_lower:
                                         _setup_type = _st
                                         break
+                                # v3.64.0 — motivo REAL de cierre (ver el gemelo de arriba).
+                                try:
+                                    from src.common.exit_reason import classify_from_eval_flags
+                                    _exit_reason = classify_from_eval_flags(
+                                        hit_tp=hit_tp, hit_be=hit_be, hit_sl=hit_sl,
+                                        be_triggered=be_triggered)
+                                except Exception:
+                                    _exit_reason = 'unknown'
                                 ctx = {
                                     'entry_price': entry_price,
                                     'direction': direction,
@@ -3200,6 +3220,7 @@ class AIdan:
                                     'trigger_type': trigger_type or '',
                                     'market_trend': tech.get_market_state().get('trend', ''),
                                     'rsi_at_entry': tech.get_market_state().get('rsi', 0),
+                                    'exit_reason': _exit_reason,
                                 }
                                 # v3.9.0 EXPIRY FIX (CRITICAL):
                                 # Old behavior: force-close ALL filled positions on expiry, even if not at TP/SL.
