@@ -43,6 +43,10 @@ Si hay trades archivados DESPUES del deploy de v3.64.0 con `exit_reason` NULL o
 'unknown' en su mayoria, el hook murio en silencio: buscar en aidan.log la linea
 `MT5 instant eval: ... exit=`. Es la clase de bug que ya mato a M15, SMC y al reversal.
 
+CONTROL DE SANIDAD: si aparecen filas archivadas ANTES del deploy, el filtro de huso
+se rompio (ver la nota de DEPLOY_AT_UTC) y el scorer aborta en vez de reportar un
+numero plausible sobre un mapeo de timestamps roto.
+
 Uso:  python tools/score_exit_reason.py [--days N]
 READ-ONLY (mode=ro, solo SELECT). No necesita MT5 => se puede correr con AIdan vivo.
 """
@@ -57,8 +61,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 DB_PATH = os.path.join(os.environ.get('APPDATA', ''), 'AIdan', 'state', 'financial_news.db')
 
-#: Fecha del deploy de v3.64.0 — antes de esto la columna no existia y NULL es lo esperado.
-DEPLOY_DATE = '2026-09-17'
+#: Momento EXACTO del deploy de v3.64.0, en **UTC**. Antes de esto la columna no
+#: existia y NULL es lo esperado, no un hook muerto.
+#:
+#: OJO CON EL HUSO — trampa ya pisada en este proyecto (measure_news_latency sumaba
+#: published_at en UTC con fetched_at en hora AR y reportaba 398 min): en
+#: `trade_archive`, **`created_at` esta en hora AR y `archived_at` en UTC**. Se filtra
+#: por `archived_at` porque lo que importa es cuando se ESCRIBIO la fila (es el momento
+#: en que la clasificacion habria aplicado), no cuando nacio la señal. Un trade puede
+#: haberse creado con la version vieja y archivado con la nueva.
+DEPLOY_AT_UTC = '2026-09-17 16:41:00'
 
 #: Gate pre-declarado.
 MIN_N = 25
@@ -95,21 +107,21 @@ def main():
         print('=> AIdan no se rebuildeo con v3.64.0, o nunca arranco desde entonces.')
         return 1
 
-    where = "WHERE created_at >= ? AND mt5_pnl IS NOT NULL"
-    params = [DEPLOY_DATE]
+    where = "WHERE archived_at >= ? AND mt5_pnl IS NOT NULL"
+    params = [DEPLOY_AT_UTC]
     if args.days:
-        where += " AND created_at >= date('now', ?)"
+        where += " AND archived_at >= datetime('now', ?)"   # datetime('now') es UTC
         params.append(f'-{args.days} days')
 
     rows = conn.execute(f"""
         SELECT trigger_type, exit_reason, exit_reason_raw, pips, mt5_pnl,
-               mfe_pips, mae_pips, tp_pips, sl_pips, created_at
-        FROM trade_archive {where} ORDER BY created_at
+               mfe_pips, mae_pips, tp_pips, sl_pips, created_at, archived_at
+        FROM trade_archive {where} ORDER BY archived_at
     """, params).fetchall()
     total_post = len(rows)
 
     print('=' * 72)
-    print(f'MOTIVO DE CIERRE — trades archivados desde {DEPLOY_DATE}'
+    print(f'MOTIVO DE CIERRE — trades archivados desde {DEPLOY_AT_UTC} UTC'
           + (f' (ultimos {args.days}d)' if args.days else ''))
     print('=' * 72)
 
@@ -119,6 +131,16 @@ def main():
         print('son varias semanas.')
         conn.close()
         return 0
+
+    # ---------------- control de sanidad del huso ----------------
+    # Fail-loud: mejor abortar que reportar sobre timestamps mal mapeados.
+    _viejas = [r for r in rows if (r['archived_at'] or '') < DEPLOY_AT_UTC]
+    if _viejas:
+        _ej = _viejas[0]['archived_at']
+        print(f'\nABORTA: {len(_viejas)} filas archivadas ANTES del deploy pasaron el')
+        print(f'filtro (ej: {_ej}). El mapeo de husos se rompio.')
+        conn.close()
+        return 2
 
     # ---------------- tripwire de hook muerto ----------------
     sin_motivo = sum(1 for r in rows if not r['exit_reason'] or r['exit_reason'] == 'unknown')
