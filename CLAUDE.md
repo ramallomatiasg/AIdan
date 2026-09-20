@@ -41,8 +41,8 @@ Bot de trading automático EUR/USD scalping M5, integrado con MetaTrader 5 (cuen
 
 **⏰ LÍNEA DE TIEMPO — EJECUTAR SIN QUE EL USER LO PIDA (acordado 12 Jun: "cuando llegue el momento lo hacés directamente").** Al abrir sesión en/después de cada fecha pendiente, arrancar el item solo. Mediciones/shadows: hacer y reportar. Activaciones en vivo: llevar números + recomendación en el mismo turno (el OK sigue siendo del user).
 Los items con fecha están abajo marcados con 🟢🔵🔴 — **hoy pendientes: ~15 Oct** (1ra lectura de `exit_reason`, v3.64.0 — `score_exit_reason.py`, ver el item 🔑 del 17-sep) ·
-**~10 Sep** (forward de `calibrated_p`, v3.59.0 — **arreglar antes el scorer**, ver item 🔴 del 7-sep) ·
-**~15 Sep** (1ra lectura del track D1, v3.54.0 — vivo, 0 señales al 7-sep) ·
+~~**~10 Sep**~~ ✅ 20-sep: `calibrated_p` hook vivo, n=6 cerrados, Brier 0,2522 vs 0,2515 ⇒ sin veredicto, n=40 queda para octubre ·
+~~**~15 Sep**~~ ✅ 20-sep: D1 dio su **1ra señal el 18-sep** (PUT, conf 85) en 5 semanas contra ~2,3/mes esperadas ⇒ frecuencia muy por debajo del backtest; sin madurar, releer ~15 oct junto con `exit_reason` ·
 **~1 Oct** (2da lectura del BE de h1 y del piso de ATR de m15: las del 7-sep dieron n=11 y n=6, ilegibles). Al cumplir uno: bajarlo a `docs/historial_notas.md`
 con la razón del cierre.
 
@@ -144,6 +144,18 @@ movimiento post-release ocurre en 3 min; el único dato propio de entrada post-d
 fade-chop). Los eventos a la misma hora comparten ruta: el scorer agrupa por `release_ts`.
 
 **🧪 SHADOW NUEVO (20 Ago, v3.60.0) — SHADOW TRADER LLM (Groq). Regla de shadow aplica.**
+**⚠️ 20 Sep — LOS SCORERS CON MT5 PUNTUABAN VENTANAS DE OTRO DÍA CUANDO EL MERCADO ESTÁ CERRADO.** Derivaban el
+offset server-UTC de `tick.time − now`; el finde el último tick es el del viernes ⇒ offset **−44,5 h** (redondeado
+y aceptado) ⇒ las corridas del 13-sep y 20-sep (sáb/dom) escribieron outcomes de ventanas 2 días antes: 258 filas
+`open` del shadow trader (media −11,5 / −33,9p vs −4p de las corridas en semana) y 267 del shadow book. Nadie falló,
+el número era plausible. **Fix en tools (sin rebuild):** `tools/mt5_server_offset.py` (tick fresco ⇒ deriva y
+cachea; tick viejo ⇒ cache o `--server-offset-hours` o ABORTA), enchufado en los 8 tools que tenían la fórmula,
+test de fuente que impide volver a ella. Offset real verificado **+3h** (spike NFP 4-sep = 15:30 server).
+**Pendiente OK del user:** `python tools/reset_stale_offset_outcomes.py --apply` (NULLea esas filas, backup previo,
+solo tablas de los scorers) y re-puntuar con `--server-offset-hours 3`. **Lectura LIMPIA (solo corridas en semana,
+n=50): open media −4,05p / mediana −2,05p, 24/50 >0 ⇒ NO PASA con n≥40** — el gate pre-declarado dice
+`SHADOW_TRADER_MODE=off` (decisión del user). Manage CLOSE n=29, ahorro +58,8p total / +1,4 mediana ⇒ PASA su gate
+(no depende de MT5, no está contaminado), pero es la mitad chica del mecanismo.
 Pedido del user ("un LLM que controle todo, cierre antes, abra, autorecursivo"), implementado en la
 forma medible: un "operador" **gpt-oss-120b decide en PAPEL** y todo va a `shadow_trader_log` —
 **open** (CALL/PUT/NONE cada ~15 min, evaluado a +45 min neto de 1,3p de friccion) y **manage**
@@ -646,6 +658,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `measure_post_trade_value.py` | READ-ONLY: ¿el post-trade del LLM sirve? **Resultado 11-ago: no juzga, etiqueta** — `entry_quality='good'` en el 93% de los PERDEDORES, `timing_assessment` constante en el 100%, y el único que separa es tautológico. No necesita MT5. |
 | `measure_be_cost.py` | READ-ONLY: cuánto cuesta el break-even del trailing (`position_manager_log` ⋈ `trade_archive`, 4 roles). **Resultado 10-ago: los cortados por el BE terminan en +$2,41 ⇒ no cuesta plata; el 74% nunca arma el BE y ahí vive el 100% de la pérdida ⇒ el lever es la ENTRADA.** Mide la mitad visible de la balanza, nunca un neto. |
 | `calibrate_confidence.py` | READ-ONLY: ¿la calibración de Platt vuelve usable la confianza? Split cronológico, Brier held-out, gate pre-declarado <0,230. **5-ago: NO PASA. 20-ago (309 limpios): m15_structure PASA por 1ra vez (0,2214)** ⇒ fase registro v3.59.0. `conf/100` crudo sigue siendo mucho peor que la constante ⇒ **nunca usar la confianza cruda como probabilidad** (p.ej. sizing). |
+| `mt5_server_offset.py` · `test_mt5_server_offset.py` · `reset_stale_offset_outcomes.py` | **Offset server-UTC robusto a mercado cerrado** (20-sep). Tick fresco ⇒ deriva y cachea en `tools/.mt5_server_offset.json`; tick viejo ⇒ cache, `--server-offset-hours N`, o aborta (nunca un número plausible). Lo usan los 8 tools con MT5. El test de fuente falla si alguien vuelve a `tick.time − time.time()`. `reset_stale_offset_outcomes.py` (dry-run default) NULLea los outcomes de las corridas contaminadas del 13 y 20-sep para re-puntuar. |
 | `score_shadow_trader.py` | Scorer del SHADOW TRADER LLM (v3.60.0): completa outcomes de `shadow_trader_log` (SU tabla, lo único que escribe) — open por drift direccional neto de 1,3p a +45 min (velas M5, sin re-sim SL/TP), manage por broker-truth (`trade_archive` ⋈ `mt5_ticket`). Gate pre-declarado: open n≥25 media y mediana > 0 (n≥40 sin pasar ⇒ off); CLOSE n≥15 ahorro > 0. **Regla de shadow: traerlo sin que el user lo pida.** Requiere MT5 para los open. `--dry-run`. |
 | `score_calibrated_p_forward.py` | Scorer READ-ONLY de la fase registro v3.59.0: Brier forward de `calibrated_p` (fit congelado 20-ago) vs constante train, con gate pre-declarado (n>=40; a n>=60 sin pasar ⇒ borrar el módulo). Trae tripwire de hook muerto (señal m15 post-deploy sin registro = buscar `calibrated_p no registrada` en el log). No requiere MT5. **Fix 7-sep:** leía `entry_context` de `auto_strategies` (podada por el cap-delete) y daba falsa alarma; ahora lee `trade_archive` con fallback. Tests en `test_calibrated_p_scorer_fix.py` (escenario exacto: archive con registro + `auto_strategies` vacía). |
 | `audit_code_patterns.py` | Auditoría READ-ONLY de los 7 patrones de bug que ya hicieron daño acá (undefined names, `except` que tragan, ramas mudas de `order_send`, código inalcanzable, umbrales atados al % del TP, DELETE sin guard, estado incoherente). **Lo que lo hace usable es el BASELINE**: solo reporta lo NUEVO. Exit 0 = nada nuevo. Corre sábados vía `aidan-auditoria-semanal`. |

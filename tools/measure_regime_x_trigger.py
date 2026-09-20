@@ -27,6 +27,9 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # tools/ para mt5_server_offset
+from mt5_server_offset import mt5_offset_s  # noqa: E402  (20-sep: con mercado cerrado la resta cruda daba ~-44h)
+
 MAGIC_NUMBER = 20260402
 DB_PATH = os.path.join(os.environ['APPDATA'], 'AIdan', 'state', 'financial_news.db')
 SYMBOL = 'EURUSD'
@@ -127,7 +130,7 @@ def main():
     out = []
     try:
         tick = mt5.symbol_info_tick(SYMBOL)
-        offset_s = round((tick.time - time.time()) / 1800.0) * 1800
+        offset_s = mt5_offset_s(mt5)  # lanza StaleTickError con mercado cerrado sin cache
         out.append(f'offset server-vs-local: {offset_s}s ({offset_s/3600.0:.1f}h)')
 
         positions = pair_positions(mt5)

@@ -39,6 +39,9 @@ from bisect import bisect_right
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # tools/ para mt5_server_offset
+from mt5_server_offset import mt5_offset_s  # noqa: E402  (20-sep: con mercado cerrado la resta cruda daba ~-44h)
+
 from src.optimizer.significance import verify_finding  # noqa: E402
 
 DB_PATH = os.path.join(os.environ['APPDATA'], 'AIdan', 'state', 'financial_news.db')
@@ -113,8 +116,7 @@ def main():
         print(f'No pude attachear a MT5: {mt5.last_error()}'); return
     try:
         tick = mt5.symbol_info_tick(SYMBOL)
-        srv_now = round((tick.time - time.time()) / 1800.0) * 1800 if tick else 0
-
+        srv_now = mt5_offset_s(mt5)  # lanza StaleTickError con mercado cerrado sin cache
         conn = sqlite3.connect(DB_PATH, timeout=15.0)
         conn.row_factory = sqlite3.Row
         q = ("SELECT a.id, a.direction, a.confidence, a.impact_score, a.should_operate, "

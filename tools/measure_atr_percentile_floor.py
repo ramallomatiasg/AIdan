@@ -92,6 +92,8 @@ import time as _time
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # tools/ para mt5_server_offset
+
 DB = os.path.join(os.environ['APPDATA'], 'AIdan', 'state', 'financial_news.db')
 
 # --- celda pre-declarada por el research del 19-ago (docs/research_mercado_2026-08-19.md, seccion 5) ---
@@ -173,12 +175,14 @@ def fetch_m15(months):
         print(f"MT5 init failed: {mt5.last_error()}")
         print("Si AIdan.exe esta corriendo, cerralo: tiene el terminal tomado.")
         return None, None
-    tick = mt5.symbol_info_tick("EURUSD")
-    if not tick or not getattr(tick, 'time', 0):
-        print("Sin tick - no se puede derivar el offset del server. Abortando.")
+    # (20-sep) con mercado cerrado el tick es del viernes y la resta cruda daba ~-44h.
+    from mt5_server_offset import mt5_offset_s, StaleTickError
+    try:
+        offset_s = mt5_offset_s(mt5)
+    except StaleTickError as e:
+        print(f"[offset] {e} Abortando.")
         mt5.shutdown()
         return None, None
-    offset_s = round((tick.time - _time.time()) / 1800.0) * 1800  # server - UTC
 
     srv_now = datetime.utcnow() + timedelta(seconds=offset_s)
     srv_from = srv_now - timedelta(days=int(months * 31))

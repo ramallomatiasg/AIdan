@@ -36,6 +36,9 @@ import sys
 import time as _time
 from datetime import datetime, timedelta
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mt5_server_offset import mt5_offset_s, StaleTickError  # noqa: E402
+
 DB = os.path.join(os.environ['APPDATA'], 'AIdan', 'state', 'financial_news.db')
 PIP = 0.0001
 WINNER_PIPS = 7.8   # ganador medio de m15 (pre-declarado, no ajustar sobre la muestra)
@@ -51,18 +54,18 @@ def _parse_ar(ts):
     return None
 
 
-def score_pending(dry_run=False):
+def score_pending(dry_run=False, server_offset_hours=None):
     import MetaTrader5 as mt5
     if not mt5.initialize():
         print(f"MT5 init failed: {mt5.last_error()}")
         return 0
 
-    tick = mt5.symbol_info_tick("EURUSD")
-    if not tick or not getattr(tick, 'time', 0):
-        print("Sin tick — no se puede derivar el offset del server. Abortando scoring.")
+    try:
+        offset_s = mt5_offset_s(mt5, override_hours=server_offset_hours)
+    except StaleTickError as e:
+        print(f"[offset] {e}\n  -> abortando scoring (no se escribe nada).")
         mt5.shutdown()
         return 0
-    offset_s = round((tick.time - _time.time()) / 1800.0) * 1800  # server - UTC
 
     conn = sqlite3.connect(DB, timeout=15.0)
     rows = conn.execute("""
@@ -177,8 +180,10 @@ def report():
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--dry-run', action='store_true', help='no escribe outcomes')
+    ap.add_argument('--server-offset-hours', type=float, default=None,
+                    help='offset server-UTC a mano (mercado cerrado sin cache). ICMarkets: 3 verano / 2 invierno')
     args = ap.parse_args()
-    n = score_pending(dry_run=args.dry_run)
+    n = score_pending(dry_run=args.dry_run, server_offset_hours=args.server_offset_hours)
     suffix = ' (dry-run, sin escribir)' if args.dry_run else ''
     print(f"Outcomes calculados en esta corrida: {n}{suffix}")
     report()

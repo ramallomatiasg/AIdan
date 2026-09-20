@@ -81,7 +81,12 @@ def fetch_d1_candles(count=400):
     # Offset servidor-vs-UTC derivado en vivo (redondeado a 30min, robusto a
     # DST). Hardcodear la zona del broker es el error que dejo 457 filas
     # tz_unreconciled en measure_news_llm_error.
-    srv_off = round((tick.time - _t.time()) / 1800.0) * 1800 if tick else 0
+    # (20-sep) con mercado cerrado el tick es del viernes y la resta cruda daba
+    # ~-44h => helper con cache; si no hay cache, aborta en vez de inventar.
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from mt5_server_offset import mt5_offset_s
+    srv_off = mt5_offset_s(mt5)
     mt5.shutdown()
     if rates is None or len(rates) == 0:
         raise RuntimeError("MT5 no devolvio velas D1")
