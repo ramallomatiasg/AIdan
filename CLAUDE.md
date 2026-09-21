@@ -151,10 +151,10 @@ y aceptado) ⇒ las corridas del 13-sep y 20-sep (sáb/dom) escribieron outcomes
 el número era plausible. **Fix en tools (sin rebuild):** `tools/mt5_server_offset.py` (tick fresco ⇒ deriva y
 cachea; tick viejo ⇒ cache o `--server-offset-hours` o ABORTA), enchufado en los 8 tools que tenían la fórmula,
 test de fuente que impide volver a ella. Offset real verificado **+3h** (spike NFP 4-sep = 15:30 server).
-**Pendiente OK del user:** `python tools/reset_stale_offset_outcomes.py --apply` (NULLea esas filas, backup previo,
-solo tablas de los scorers) y re-puntuar con `--server-offset-hours 3`. **Lectura LIMPIA (solo corridas en semana,
-n=50): open media −4,05p / mediana −2,05p, 24/50 >0 ⇒ NO PASA con n≥40** — el gate pre-declarado dice
-`SHADOW_TRADER_MODE=off` (decisión del user). Manage CLOSE n=29, ahorro +58,8p total / +1,4 mediana ⇒ PASA su gate
+**✅ HECHO 21-sep con OK del user:** reset (backup `financial_news.db.bak_reset_offset_20260921_014807`) + re-puntuado
+con `--server-offset-hours 3`. **Lectura LIMPIA n=120: open media −5,35p / mediana −4,45p, 43/120 >0 ⇒ NO PASA** ⇒
+**`SHADOW_TRADER_MODE=off` en `.env`** (toma efecto al próximo arranque; revertir = borrar la línea). Shadow book
+re-puntuado: atr_floor n=536, mediana 4,5p < 7,8p ⇒ el piso sigue sin costar nada. Manage CLOSE n=29, ahorro +58,8p total / +1,4 mediana ⇒ PASA su gate
 (no depende de MT5, no está contaminado), pero es la mitad chica del mecanismo.
 Pedido del user ("un LLM que controle todo, cierre antes, abra, autorecursivo"), implementado en la
 forma medible: un "operador" **gpt-oss-120b decide en PAPEL** y todo va a `shadow_trader_log` —
