@@ -142,6 +142,17 @@ posicionarse ANTES del dato es el #969 (−$29, 5,5% de la cuenta); el research 
 movimiento post-release ocurre en 3 min; el único dato propio de entrada post-dato es #604 (+$5,30, n=1).
 *Ojo al leer:* si `adv3 ≥ fav3` el setup te pasa por arriba antes de darte la razón (lo que refutó
 fade-chop). Los eventos a la misma hora comparten ruta: el scorer agrupa por `release_ts`.
+- [ ] **⏰ ABIERTO (22 Sep) — calendar play: 0 filas en 11 días, y NO es un hook muerto: es el HORARIO.**
+Verificado con el log: AIdan estuvo apagado el 15 y 16-sep (semana de la Fed) y arranca ~10:00 AR,
+mientras los datos USA de 8:30 ET salen a las **09:30 AR** y los de EUR de madrugada; en los días
+prendidos el calendario solo tuvo eventos Medium (`event_window_log`: 0 `High` desde el 11-sep). Con
+ese horario el "n=25 en ~2,5 meses" no se cumple. **Decisión del user (22-sep): prenderlo antes de
+las 9:30 los días de dato.** ⚠️ **Ojo con el arranque:** el 1er `/calendar` del thread falla siempre
+(el dashboard todavía no levantó, ver `/calendar no responde` a los +5s) y el cache de 10 min
+(`CAL_TTL_S`) recién reintenta a los +10 min ⇒ para agarrar un release de las 09:30 hay que
+arrancar **antes de ~09:15**. Si se quiere arreglar en código: reintento corto mientras la cache
+esté vacía (no tocado, sin OK). Re-chequear con `score_calendar_play.py` en ~2 semanas: si sigue
+en 0 con AIdan prendido temprano, ahí sí buscar el bug.
 
 **🧪 SHADOW NUEVO (20 Ago, v3.60.0) — SHADOW TRADER LLM (Groq). Regla de shadow aplica.**
 **⚠️ 20 Sep — LOS SCORERS CON MT5 PUNTUABAN VENTANAS DE OTRO DÍA CUANDO EL MERCADO ESTÁ CERRADO.** Derivaban el
