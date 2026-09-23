@@ -329,6 +329,22 @@ screen era sobre señales solapadas y sin spread. H12/H48 también negativos. Re
 intradía (M5/M15) paga: las de ruptura son peores que el azar y la mejor de reversión le gana al azar pero no al
 costo. **El supuesto fundacional (scalping intradía) es lo que falla, no un cálculo.** La única línea donde el costo
 es chico frente al movimiento es el **D1** (shadow, lento, choca con el lote mínimo).
+**⚠️ Corrección (23-sep): el D1 TAMPOCO tiene edge general** — Fase 1 (17-ago, `docs/fase1_resultado.md`): el
+mismo detector en D1 sobre 21 pares dio 8/21 positivos (menos que el azar); el +16p de EURUSD fue el primer par mirado.
+**Fase 4 (23-sep) — 8 planes PLANIFICADOS: NINGUNO PASA.** Pedido del user tras describir el método de su amigo Leo
+(planificar el día, orden esperando en el nivel, TP escalonado en 3). Criterio `docs/fase4_planes_criterio.md`
+(`fc3bc22`), tool `tools/backtest_fase4_planes.py`, 20 pares M5, control p99. Neto por trade: L1 fade máx/mín de
+ayer −1,62 · L2 Bollinger H1 + vela T −1,06 · L3 retroceso a favor de tendencia D1 en el mín/máx de ayer −1,86 ·
+E1 números redondos (Osler 2003) −3,40 · E2 estacionalidad horaria (Breedon-Ranaldo 2013) −1,24 · E3a USD antes del
+fixing de Londres (Krohn et al. 2024) −0,45 · E3b USD después −0,82 · E4 momentum 60d semanal −19,8. Ningún par
+positivo salvo sueltos. **E1 pierde mucho más que el azar** (coherente con la 2da mitad de Osler: los stops detrás
+del redondo aceleran la ruptura). **E3a le gana al azar** (−0,45 vs p99 −0,69) pero no al costo, y su 2da mitad es
+peor (efecto publicado ⇒ se arbitra). *Dos fallas mías de especificación, declaradas:* E4 entraba en la vela de
+apertura semanal (spread medio 16p vs 0,3p una hora después) y las órdenes de L1/L3/E1 activas desde las 00:00
+server se llenaban 17-27% en la 1ra hora con spread ancho. **Ninguna cambia el veredicto:** sin la 1ra hora siguen
+entre −1,07 y −1,71, y E4 da bruto −1,1 ± 3,9 antes de costos. Reservados NO mirados. **Pendiente: las reglas
+reales de Leo** (el user se las pide). **No re-proponer** fade de niveles diarios, redondos, BB+vela T, horario
+local, fixing ni TSMOM semanal sobre esta data.
 
 **🔬 REVISIÓN CRÍTICA DEL CEREBRO (15 Jun, workflow 5 frentes + verificador adversarial; los 3 tracks COMPARTEN la lógica) — VEREDICTO: falla de DISEÑO, no bugs sueltos.** Un patrón roto se repite: **constantes en pips de M5 + confianza que suma factores colineales**, heredado igual por M15/H1 (las subclases solo cambian `_fetch_candles`+profile). Hallazgos VERIFICADOS por mí en código:
 - [ ] **[EL #1, hecho de código no estadística] El R:R que el sistema cree tener es FALSO.** El cap `tp_cap = max(ATR,2)*2` (`technical.py:1430`) recorta el TP nominal. Tracé los 3: **M5 TP 20p→~5p (R:R real 1:1.4)**, **M15 60p→~18p (1:1.2)**, **H1 100p→~48p (1:1.2)**. Con 37% WR + comisión ~1.3p → pérdida matemática (hace falta ~46% WR para empatar a 1:1.2). **Explica mecánicamente "gana poco / avg win 4p".** Todo (sizing, BE, trailing, PM-arm) razona sobre un TP que el motor borra. Ojo: el cap está A PROPÓSITO (20p nunca pegaba en 15min M5) → el fix es **escalarlo por timeframe/expiry**, NO sacarlo (eso de paso arregla H1/M15, donde el cap es claramente erróneo: H1 SÍ puede recorrer 100p en 180min).
@@ -690,6 +706,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `backtest_h4_d1.py` | Paso 0 del track D (13-ago). Igual que el anterior pero H4/D1, en variantes `naive` y `scaled`. **Resultado: H4 refutado (−0,98p/trade, n=451) · D1 positivo. Escalar las constantes por ATR EMPEORA (1,40→1,02).** **v2 (16-ago): `--params live` usa los params reales de `optimizer_params` (el titular usaba los default) y `--session sweep` corre las 4 sesiones porque el paso 7 de `dynamic_conf` lee el reloj — con eso el baseline del D1 pasó a 186-227 señales / +10,8 a +12,7p post-swap / PF 1,25-1,30, positivo en las 4.** Trae un guard que corta si la tabla de sesiones de producción cambia. Requiere MT5. |
 | `backtest_fase2_lagfix.py` | **Fase 2b** (22-sep, read-only): corre el arnés de `backtest_fase2.py` (importado, no copiado) con el detector corregido del desfase de una vela, aplicado como transformación del fuente EN MEMORIA (4 reemplazos que tienen que matchear exactamente 1 vez o aborta). `--smoke` compara cuándo disparan original vs corregido; `--variant repro` recalcula la base para verificar reproducibilidad. Checkpoints separados (`lagfix1`/`repro1`), nunca se mezclan con los v1 del 18-ago. Usa el cache `.cache_fase2/` (no necesita MT5). |
 | `backtest_fase3b_a1.py` | **Fase 3b** (22-sep, read-only, sin MT5): A1 reversión a 2σ con una posición por par, spread de la vela (cota optimista), swap real por rollover (miércoles ×3), 4 sesiones, dos mitades y control p95. Verifica que reproduce el screen de Fase 3 antes de medir o aborta. `--reserved` se niega salvo que los 20 pares hayan dado PASA. **Resultado: NO PASA (neto −1,01p a H96, 0/20 pares).** |
+| `backtest_fase4_planes.py` | **Fase 4** (23-sep, read-only, sin MT5): 8 planes planificados congelados (estilo Leo: fade de máx/mín de ayer, BB H1 + vela T, retroceso en tendencia; y de papers: redondos, horario local, fixing, TSMOM) con orden límite, salida en 3 partes (1R/2R/3R + break-even), spread y swap reales y control p99. `sim_exits` probado con 8 casos sintéticos. `--reserved` solo corre lo que pasó. **Resultado: ninguno pasa.** |
 | `score_d1_shadow.py` | Scorer FORWARD del D1 en shadow: excursión favorable Y adversa + close al horizonte (3/5/10 velas), **sin re-simular SL/TP**. Descuenta comisión y swap. Ancla en `d1_candle_ts`, no en `created_at`. `--dry-run`. Requiere MT5. |
 | `measure_entry_suspects.py` | READ-ONLY sobre deals del broker (timestamps exactos): (A) re-entrada ≤2/5/10/15min tras pérdida, (B) htf_bias vs deriva real 2h previa. Pasa por `verify_finding`. Re-correr cada checkpoint. |
 | `measure_dist_to_level.py` | READ-ONLY: ¿la distancia precio↔nivel al fill separa ganar/perder? **La celda `≤0.5 ATR` da 65% WR p=0.006 pero n<25** (nunca pasó el gate; se degradó el 5-ago). No necesita MT5. |

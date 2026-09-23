@@ -1,0 +1,875 @@
+{
+  "criterio": "docs/fase4_planes_criterio.md (fc3bc22)",
+  "pares": [
+    "EURUSD",
+    "GBPUSD",
+    "AUDUSD",
+    "NZDUSD",
+    "USDCAD",
+    "USDCHF",
+    "USDJPY",
+    "EURGBP",
+    "EURJPY",
+    "EURCHF",
+    "EURAUD",
+    "EURCAD",
+    "EURNZD",
+    "GBPJPY",
+    "GBPCHF",
+    "GBPAUD",
+    "AUDJPY",
+    "AUDNZD",
+    "AUDCAD",
+    "CADJPY"
+  ],
+  "candidatos": {
+    "L1_prev_day_fade": {
+      "n": 27250,
+      "trades_dia_par": 0.961,
+      "neto": -1.6145,
+      "ci95": [
+        -1.9501,
+        -1.2817
+      ],
+      "mitad_1": -1.3737,
+      "mitad_2": -1.8224,
+      "control_mediana": -1.3934,
+      "control_p95": -1.1676,
+      "control_p99": -1.093,
+      "pares_positivos": "0/20",
+      "pct_long": 0.492,
+      "condiciones": {
+        "c1_neto_pos": false,
+        "c2_ci_lo_pos": false,
+        "c3_dos_mitades": false,
+        "c4_supera_p99": false,
+        "c5_60pct_pares": false
+      },
+      "veredicto": "NO PASA",
+      "por_par": [
+        {
+          "symbol": "USDCAD",
+          "n": 407,
+          "neto": -0.441
+        },
+        {
+          "symbol": "EURUSD",
+          "n": 1675,
+          "neto": -0.482
+        },
+        {
+          "symbol": "EURCAD",
+          "n": 1683,
+          "neto": -0.5
+        },
+        {
+          "symbol": "USDCHF",
+          "n": 1708,
+          "neto": -0.535
+        },
+        {
+          "symbol": "EURGBP",
+          "n": 1704,
+          "neto": -0.71
+        },
+        {
+          "symbol": "NZDUSD",
+          "n": 1715,
+          "neto": -0.853
+        },
+        {
+          "symbol": "AUDUSD",
+          "n": 1702,
+          "neto": -0.864
+        },
+        {
+          "symbol": "AUDCAD",
+          "n": 402,
+          "neto": -1.327
+        },
+        {
+          "symbol": "EURJPY",
+          "n": 1660,
+          "neto": -1.378
+        },
+        {
+          "symbol": "GBPAUD",
+          "n": 1671,
+          "neto": -1.538
+        },
+        {
+          "symbol": "GBPUSD",
+          "n": 1674,
+          "neto": -1.587
+        },
+        {
+          "symbol": "EURNZD",
+          "n": 1699,
+          "neto": -1.624
+        },
+        {
+          "symbol": "EURCHF",
+          "n": 1728,
+          "neto": -1.662
+        },
+        {
+          "symbol": "GBPCHF",
+          "n": 1703,
+          "neto": -2.02
+        },
+        {
+          "symbol": "EURAUD",
+          "n": 1694,
+          "neto": -2.316
+        },
+        {
+          "symbol": "AUDJPY",
+          "n": 390,
+          "neto": -2.567
+        },
+        {
+          "symbol": "CADJPY",
+          "n": 385,
+          "neto": -3.382
+        },
+        {
+          "symbol": "USDJPY",
+          "n": 1616,
+          "neto": -3.401
+        },
+        {
+          "symbol": "GBPJPY",
+          "n": 1630,
+          "neto": -3.588
+        },
+        {
+          "symbol": "AUDNZD",
+          "n": 404,
+          "neto": -5.981
+        }
+      ]
+    },
+    "L2_bb_h1_T": {
+      "n": 23853,
+      "trades_dia_par": 0.841,
+      "neto": -1.063,
+      "ci95": [
+        -1.346,
+        -0.7805
+      ],
+      "mitad_1": -1.1756,
+      "mitad_2": -0.9739,
+      "control_mediana": -1.3093,
+      "control_p95": -1.0844,
+      "control_p99": -0.9358,
+      "pares_positivos": "0/20",
+      "pct_long": 0.545,
+      "condiciones": {
+        "c1_neto_pos": false,
+        "c2_ci_lo_pos": false,
+        "c3_dos_mitades": false,
+        "c4_supera_p99": false,
+        "c5_60pct_pares": false
+      },
+      "veredicto": "NO PASA",
+      "por_par": [
+        {
+          "symbol": "USDJPY",
+          "n": 1343,
+          "neto": -0.017
+        },
+        {
+          "symbol": "EURJPY",
+          "n": 1405,
+          "neto": -0.174
+        },
+        {
+          "symbol": "AUDUSD",
+          "n": 1375,
+          "neto": -0.186
+        },
+        {
+          "symbol": "EURGBP",
+          "n": 1584,
+          "neto": -0.236
+        },
+        {
+          "symbol": "NZDUSD",
+          "n": 1475,
+          "neto": -0.249
+        },
+        {
+          "symbol": "AUDCAD",
+          "n": 379,
+          "neto": -0.347
+        },
+        {
+          "symbol": "EURCHF",
+          "n": 1627,
+          "neto": -0.515
+        },
+        {
+          "symbol": "USDCHF",
+          "n": 1499,
+          "neto": -0.809
+        },
+        {
+          "symbol": "GBPJPY",
+          "n": 1353,
+          "neto": -1.06
+        },
+        {
+          "symbol": "AUDJPY",
+          "n": 365,
+          "neto": -1.061
+        },
+        {
+          "symbol": "GBPCHF",
+          "n": 1501,
+          "neto": -1.122
+        },
+        {
+          "symbol": "EURCAD",
+          "n": 1474,
+          "neto": -1.161
+        },
+        {
+          "symbol": "EURUSD",
+          "n": 1398,
+          "neto": -1.256
+        },
+        {
+          "symbol": "GBPAUD",
+          "n": 1445,
+          "neto": -1.475
+        },
+        {
+          "symbol": "EURAUD",
+          "n": 1512,
+          "neto": -1.556
+        },
+        {
+          "symbol": "CADJPY",
+          "n": 360,
+          "neto": -1.841
+        },
+        {
+          "symbol": "GBPUSD",
+          "n": 1415,
+          "neto": -1.859
+        },
+        {
+          "symbol": "USDCAD",
+          "n": 349,
+          "neto": -1.874
+        },
+        {
+          "symbol": "AUDNZD",
+          "n": 483,
+          "neto": -2.088
+        },
+        {
+          "symbol": "EURNZD",
+          "n": 1511,
+          "neto": -3.639
+        }
+      ]
+    },
+    "L3_trend_pullback_pdl": {
+      "n": 9282,
+      "trades_dia_par": 0.327,
+      "neto": -1.859,
+      "ci95": [
+        -2.4201,
+        -1.2929
+      ],
+      "mitad_1": -1.7313,
+      "mitad_2": -1.9664,
+      "control_mediana": -1.2659,
+      "control_p95": -0.8644,
+      "control_p99": -0.6054,
+      "pares_positivos": "1/20",
+      "pct_long": 0.521,
+      "condiciones": {
+        "c1_neto_pos": false,
+        "c2_ci_lo_pos": false,
+        "c3_dos_mitades": false,
+        "c4_supera_p99": false,
+        "c5_60pct_pares": false
+      },
+      "veredicto": "NO PASA",
+      "por_par": [
+        {
+          "symbol": "USDCAD",
+          "n": 154,
+          "neto": 1.953
+        },
+        {
+          "symbol": "AUDUSD",
+          "n": 581,
+          "neto": -0.023
+        },
+        {
+          "symbol": "EURCAD",
+          "n": 562,
+          "neto": -0.454
+        },
+        {
+          "symbol": "EURUSD",
+          "n": 565,
+          "neto": -0.548
+        },
+        {
+          "symbol": "GBPAUD",
+          "n": 584,
+          "neto": -0.553
+        },
+        {
+          "symbol": "USDCHF",
+          "n": 569,
+          "neto": -0.84
+        },
+        {
+          "symbol": "NZDUSD",
+          "n": 607,
+          "neto": -1.014
+        },
+        {
+          "symbol": "EURCHF",
+          "n": 579,
+          "neto": -1.234
+        },
+        {
+          "symbol": "EURGBP",
+          "n": 575,
+          "neto": -1.456
+        },
+        {
+          "symbol": "EURAUD",
+          "n": 568,
+          "neto": -1.598
+        },
+        {
+          "symbol": "EURJPY",
+          "n": 567,
+          "neto": -1.918
+        },
+        {
+          "symbol": "AUDJPY",
+          "n": 140,
+          "neto": -2.617
+        },
+        {
+          "symbol": "GBPUSD",
+          "n": 600,
+          "neto": -2.764
+        },
+        {
+          "symbol": "EURNZD",
+          "n": 544,
+          "neto": -2.889
+        },
+        {
+          "symbol": "GBPCHF",
+          "n": 579,
+          "neto": -3.119
+        },
+        {
+          "symbol": "USDJPY",
+          "n": 545,
+          "neto": -3.215
+        },
+        {
+          "symbol": "AUDCAD",
+          "n": 138,
+          "neto": -3.522
+        },
+        {
+          "symbol": "GBPJPY",
+          "n": 556,
+          "neto": -4.765
+        },
+        {
+          "symbol": "CADJPY",
+          "n": 137,
+          "neto": -6.026
+        },
+        {
+          "symbol": "AUDNZD",
+          "n": 132,
+          "neto": -6.814
+        }
+      ]
+    },
+    "E1_round_numbers": {
+      "n": 34999,
+      "trades_dia_par": 1.234,
+      "neto": -3.4001,
+      "ci95": [
+        -3.7341,
+        -3.0704
+      ],
+      "mitad_1": -2.5352,
+      "mitad_2": -4.2003,
+      "control_mediana": -1.393,
+      "control_p95": -1.1914,
+      "control_p99": -1.0698,
+      "pares_positivos": "0/20",
+      "pct_long": 0.457,
+      "condiciones": {
+        "c1_neto_pos": false,
+        "c2_ci_lo_pos": false,
+        "c3_dos_mitades": false,
+        "c4_supera_p99": false,
+        "c5_60pct_pares": false
+      },
+      "veredicto": "NO PASA",
+      "por_par": [
+        {
+          "symbol": "EURGBP",
+          "n": 1507,
+          "neto": -1.162
+        },
+        {
+          "symbol": "NZDUSD",
+          "n": 1862,
+          "neto": -1.178
+        },
+        {
+          "symbol": "USDCAD",
+          "n": 434,
+          "neto": -1.293
+        },
+        {
+          "symbol": "GBPUSD",
+          "n": 2323,
+          "neto": -1.626
+        },
+        {
+          "symbol": "EURCAD",
+          "n": 2267,
+          "neto": -2.25
+        },
+        {
+          "symbol": "EURUSD",
+          "n": 1974,
+          "neto": -2.295
+        },
+        {
+          "symbol": "AUDCAD",
+          "n": 428,
+          "neto": -2.52
+        },
+        {
+          "symbol": "AUDUSD",
+          "n": 1911,
+          "neto": -2.574
+        },
+        {
+          "symbol": "USDCHF",
+          "n": 1865,
+          "neto": -2.806
+        },
+        {
+          "symbol": "AUDJPY",
+          "n": 545,
+          "neto": -3.086
+        },
+        {
+          "symbol": "EURJPY",
+          "n": 2399,
+          "neto": -3.193
+        },
+        {
+          "symbol": "EURAUD",
+          "n": 2564,
+          "neto": -3.523
+        },
+        {
+          "symbol": "USDJPY",
+          "n": 2242,
+          "neto": -3.697
+        },
+        {
+          "symbol": "GBPAUD",
+          "n": 2705,
+          "neto": -3.781
+        },
+        {
+          "symbol": "GBPCHF",
+          "n": 2148,
+          "neto": -3.816
+        },
+        {
+          "symbol": "EURCHF",
+          "n": 1596,
+          "neto": -3.922
+        },
+        {
+          "symbol": "GBPJPY",
+          "n": 2637,
+          "neto": -5.059
+        },
+        {
+          "symbol": "AUDNZD",
+          "n": 445,
+          "neto": -6.613
+        },
+        {
+          "symbol": "CADJPY",
+          "n": 501,
+          "neto": -6.75
+        },
+        {
+          "symbol": "EURNZD",
+          "n": 2646,
+          "neto": -7.12
+        }
+      ]
+    },
+    "E2_home_hours": {
+      "n": 43144,
+      "trades_dia_par": 1.976,
+      "neto": -1.2359,
+      "ci95": [
+        -1.5966,
+        -0.868
+      ],
+      "mitad_1": -0.9516,
+      "mitad_2": -1.4981,
+      "control_mediana": -1.5198,
+      "control_p95": -1.2338,
+      "control_p99": -1.1345,
+      "pares_positivos": "1/14",
+      "pct_long": 0.499,
+      "condiciones": {
+        "c1_neto_pos": false,
+        "c2_ci_lo_pos": false,
+        "c3_dos_mitades": false,
+        "c4_supera_p99": false,
+        "c5_60pct_pares": false
+      },
+      "veredicto": "NO PASA",
+      "por_par": [
+        {
+          "symbol": "GBPUSD",
+          "n": 3455,
+          "neto": 0.169
+        },
+        {
+          "symbol": "EURUSD",
+          "n": 3457,
+          "neto": -0.087
+        },
+        {
+          "symbol": "USDCHF",
+          "n": 3456,
+          "neto": -0.163
+        },
+        {
+          "symbol": "AUDUSD",
+          "n": 3453,
+          "neto": -0.519
+        },
+        {
+          "symbol": "NZDUSD",
+          "n": 3450,
+          "neto": -0.689
+        },
+        {
+          "symbol": "EURJPY",
+          "n": 3460,
+          "neto": -1.429
+        },
+        {
+          "symbol": "EURAUD",
+          "n": 3460,
+          "neto": -1.477
+        },
+        {
+          "symbol": "AUDCAD",
+          "n": 839,
+          "neto": -1.599
+        },
+        {
+          "symbol": "EURNZD",
+          "n": 3460,
+          "neto": -1.755
+        },
+        {
+          "symbol": "EURCAD",
+          "n": 3456,
+          "neto": -1.886
+        },
+        {
+          "symbol": "GBPJPY",
+          "n": 3459,
+          "neto": -2.0
+        },
+        {
+          "symbol": "USDJPY",
+          "n": 3441,
+          "neto": -2.013
+        },
+        {
+          "symbol": "GBPAUD",
+          "n": 3459,
+          "neto": -2.149
+        },
+        {
+          "symbol": "CADJPY",
+          "n": 839,
+          "neto": -4.301
+        }
+      ]
+    },
+    "E3a_usd_pre_fix": {
+      "n": 10852,
+      "trades_dia_par": 0.994,
+      "neto": -0.4472,
+      "ci95": [
+        -0.7922,
+        -0.1015
+      ],
+      "mitad_1": 0.0219,
+      "mitad_2": -0.8816,
+      "control_mediana": -0.9714,
+      "control_p95": -0.7982,
+      "control_p99": -0.6856,
+      "pares_positivos": "0/7",
+      "pct_long": 0.359,
+      "condiciones": {
+        "c1_neto_pos": false,
+        "c2_ci_lo_pos": false,
+        "c3_dos_mitades": false,
+        "c4_supera_p99": true,
+        "c5_60pct_pares": false
+      },
+      "veredicto": "NO PASA",
+      "por_par": [
+        {
+          "symbol": "EURUSD",
+          "n": 1738,
+          "neto": -0.124
+        },
+        {
+          "symbol": "USDCHF",
+          "n": 1739,
+          "neto": -0.22
+        },
+        {
+          "symbol": "USDJPY",
+          "n": 1739,
+          "neto": -0.254
+        },
+        {
+          "symbol": "GBPUSD",
+          "n": 1739,
+          "neto": -0.404
+        },
+        {
+          "symbol": "NZDUSD",
+          "n": 1739,
+          "neto": -0.523
+        },
+        {
+          "symbol": "AUDUSD",
+          "n": 1736,
+          "neto": -0.668
+        },
+        {
+          "symbol": "USDCAD",
+          "n": 422,
+          "neto": -2.473
+        }
+      ]
+    },
+    "E3b_usd_post_fix": {
+      "n": 10848,
+      "trades_dia_par": 0.994,
+      "neto": -0.8156,
+      "ci95": [
+        -1.0572,
+        -0.5659
+      ],
+      "mitad_1": -0.5358,
+      "mitad_2": -1.0745,
+      "control_mediana": -1.0093,
+      "control_p95": -0.8357,
+      "control_p99": -0.7459,
+      "pares_positivos": "1/7",
+      "pct_long": 0.641,
+      "condiciones": {
+        "c1_neto_pos": false,
+        "c2_ci_lo_pos": false,
+        "c3_dos_mitades": false,
+        "c4_supera_p99": false,
+        "c5_60pct_pares": false
+      },
+      "veredicto": "NO PASA",
+      "por_par": [
+        {
+          "symbol": "GBPUSD",
+          "n": 1738,
+          "neto": 0.011
+        },
+        {
+          "symbol": "USDCHF",
+          "n": 1738,
+          "neto": -0.535
+        },
+        {
+          "symbol": "EURUSD",
+          "n": 1737,
+          "neto": -0.672
+        },
+        {
+          "symbol": "NZDUSD",
+          "n": 1738,
+          "neto": -0.928
+        },
+        {
+          "symbol": "AUDUSD",
+          "n": 1738,
+          "neto": -0.987
+        },
+        {
+          "symbol": "USDCAD",
+          "n": 421,
+          "neto": -1.23
+        },
+        {
+          "symbol": "USDJPY",
+          "n": 1738,
+          "neto": -1.683
+        }
+      ]
+    },
+    "E4_tsmom_60d": {
+      "n": 5370,
+      "trades_dia_par": 0.189,
+      "neto": -19.823,
+      "ci95": [
+        -23.7732,
+        -15.9498
+      ],
+      "mitad_1": -17.6048,
+      "mitad_2": -21.7625,
+      "control_mediana": -1.3531,
+      "control_p95": 1.6449,
+      "control_p99": 3.4522,
+      "pares_positivos": "1/20",
+      "pct_long": 0.533,
+      "condiciones": {
+        "c1_neto_pos": false,
+        "c2_ci_lo_pos": false,
+        "c3_dos_mitades": false,
+        "c4_supera_p99": false,
+        "c5_60pct_pares": false
+      },
+      "veredicto": "NO PASA",
+      "por_par": [
+        {
+          "symbol": "USDJPY",
+          "n": 334,
+          "neto": 7.212
+        },
+        {
+          "symbol": "AUDJPY",
+          "n": 72,
+          "neto": -1.322
+        },
+        {
+          "symbol": "AUDNZD",
+          "n": 72,
+          "neto": -6.573
+        },
+        {
+          "symbol": "USDCAD",
+          "n": 72,
+          "neto": -6.744
+        },
+        {
+          "symbol": "GBPUSD",
+          "n": 334,
+          "neto": -7.379
+        },
+        {
+          "symbol": "AUDUSD",
+          "n": 334,
+          "neto": -9.928
+        },
+        {
+          "symbol": "EURUSD",
+          "n": 334,
+          "neto": -9.978
+        },
+        {
+          "symbol": "GBPJPY",
+          "n": 334,
+          "neto": -16.276
+        },
+        {
+          "symbol": "EURGBP",
+          "n": 334,
+          "neto": -18.137
+        },
+        {
+          "symbol": "EURJPY",
+          "n": 334,
+          "neto": -19.521
+        },
+        {
+          "symbol": "EURCAD",
+          "n": 334,
+          "neto": -19.611
+        },
+        {
+          "symbol": "NZDUSD",
+          "n": 334,
+          "neto": -19.916
+        },
+        {
+          "symbol": "CADJPY",
+          "n": 72,
+          "neto": -19.923
+        },
+        {
+          "symbol": "AUDCAD",
+          "n": 72,
+          "neto": -19.933
+        },
+        {
+          "symbol": "USDCHF",
+          "n": 334,
+          "neto": -20.242
+        },
+        {
+          "symbol": "EURAUD",
+          "n": 334,
+          "neto": -23.578
+        },
+        {
+          "symbol": "EURCHF",
+          "n": 334,
+          "neto": -27.313
+        },
+        {
+          "symbol": "GBPAUD",
+          "n": 334,
+          "neto": -38.665
+        },
+        {
+          "symbol": "GBPCHF",
+          "n": 334,
+          "neto": -40.716
+        },
+        {
+          "symbol": "EURNZD",
+          "n": 334,
+          "neto": -42.917
+        }
+      ]
+    }
+  }
+}
