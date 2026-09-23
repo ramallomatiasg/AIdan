@@ -316,6 +316,19 @@ el problema es la IDEA (comprar rupturas), no un cálculo.** ⇒ **NO arreglar e
 fix que empeora). No re-proponer "corregir el timing de entrada del detector" sin una hipótesis
 nueva. Lo que queda con evidencia: `A1` reversión a 2σ por el arnés completo + pares reservados, y
 decidir con el user qué hacer con structure/m15/h1 (acción comprometida del 18-ago sin aplicar).
+**Decisión del user (22-sep): structure/m15/h1 se QUEDAN como están** (juntadores de datos, demo).
+**Fase 3b — A1 por el arnés completo (22-sep): NO PASA.** Criterio declarado antes (`docs/fase3b_a1_criterio.md`,
+`8868169`), tool `tools/backtest_fase3b_a1.py` (reproduce exacto el +0,9824 del screen antes de medir). A H96,
+una posición por par: n=75.125, **neto −1,01p** = bruto +0,64 − comisión 0,85 − spread 0,63 (cota OPTIMISTA:
+MT5 guarda el spread mínimo de la barra) − swap 0,18. CI [−1,29, −0,73]; negativo en las dos mitades y en las 4
+sesiones; **0/20 pares positivos** (el mejor EURUSD −0,09). **Sí le gana al azar** (control −1,53, p95 −1,31) ⇒
+la reversión tiene información real (~+0,5p sobre el azar) pero **el costo intradía se la come**; el +0,98 del
+screen era sobre señales solapadas y sin spread. H12/H48 también negativos. Reservados NO mirados (el tool se niega).
+**Cerrado: no buscar variantes de A1 (umbral, media, horizonte, subconjunto de pares) sobre esta data.**
+**Lectura de conjunto (Fase 2 + 2b + 3 + 3b):** con los costos de esta cuenta, ninguna señal simple de precio
+intradía (M5/M15) paga: las de ruptura son peores que el azar y la mejor de reversión le gana al azar pero no al
+costo. **El supuesto fundacional (scalping intradía) es lo que falla, no un cálculo.** La única línea donde el costo
+es chico frente al movimiento es el **D1** (shadow, lento, choca con el lote mínimo).
 
 **🔬 REVISIÓN CRÍTICA DEL CEREBRO (15 Jun, workflow 5 frentes + verificador adversarial; los 3 tracks COMPARTEN la lógica) — VEREDICTO: falla de DISEÑO, no bugs sueltos.** Un patrón roto se repite: **constantes en pips de M5 + confianza que suma factores colineales**, heredado igual por M15/H1 (las subclases solo cambian `_fetch_candles`+profile). Hallazgos VERIFICADOS por mí en código:
 - [ ] **[EL #1, hecho de código no estadística] El R:R que el sistema cree tener es FALSO.** El cap `tp_cap = max(ATR,2)*2` (`technical.py:1430`) recorta el TP nominal. Tracé los 3: **M5 TP 20p→~5p (R:R real 1:1.4)**, **M15 60p→~18p (1:1.2)**, **H1 100p→~48p (1:1.2)**. Con 37% WR + comisión ~1.3p → pérdida matemática (hace falta ~46% WR para empatar a 1:1.2). **Explica mecánicamente "gana poco / avg win 4p".** Todo (sizing, BE, trailing, PM-arm) razona sobre un TP que el motor borra. Ojo: el cap está A PROPÓSITO (20p nunca pegaba en 15min M5) → el fix es **escalarlo por timeframe/expiry**, NO sacarlo (eso de paso arregla H1/M15, donde el cap es claramente erróneo: H1 SÍ puede recorrer 100p en 180min).
@@ -676,6 +689,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 | `backtest_h1_m15.py` | Backtest estructural-only sobre velas MT5 históricas (re-corre `detect_structure_signals()`, simula SL/TP/expiry). Solo `structure`. Requiere MT5. |
 | `backtest_h4_d1.py` | Paso 0 del track D (13-ago). Igual que el anterior pero H4/D1, en variantes `naive` y `scaled`. **Resultado: H4 refutado (−0,98p/trade, n=451) · D1 positivo. Escalar las constantes por ATR EMPEORA (1,40→1,02).** **v2 (16-ago): `--params live` usa los params reales de `optimizer_params` (el titular usaba los default) y `--session sweep` corre las 4 sesiones porque el paso 7 de `dynamic_conf` lee el reloj — con eso el baseline del D1 pasó a 186-227 señales / +10,8 a +12,7p post-swap / PF 1,25-1,30, positivo en las 4.** Trae un guard que corta si la tabla de sesiones de producción cambia. Requiere MT5. |
 | `backtest_fase2_lagfix.py` | **Fase 2b** (22-sep, read-only): corre el arnés de `backtest_fase2.py` (importado, no copiado) con el detector corregido del desfase de una vela, aplicado como transformación del fuente EN MEMORIA (4 reemplazos que tienen que matchear exactamente 1 vez o aborta). `--smoke` compara cuándo disparan original vs corregido; `--variant repro` recalcula la base para verificar reproducibilidad. Checkpoints separados (`lagfix1`/`repro1`), nunca se mezclan con los v1 del 18-ago. Usa el cache `.cache_fase2/` (no necesita MT5). |
+| `backtest_fase3b_a1.py` | **Fase 3b** (22-sep, read-only, sin MT5): A1 reversión a 2σ con una posición por par, spread de la vela (cota optimista), swap real por rollover (miércoles ×3), 4 sesiones, dos mitades y control p95. Verifica que reproduce el screen de Fase 3 antes de medir o aborta. `--reserved` se niega salvo que los 20 pares hayan dado PASA. **Resultado: NO PASA (neto −1,01p a H96, 0/20 pares).** |
 | `score_d1_shadow.py` | Scorer FORWARD del D1 en shadow: excursión favorable Y adversa + close al horizonte (3/5/10 velas), **sin re-simular SL/TP**. Descuenta comisión y swap. Ancla en `d1_candle_ts`, no en `created_at`. `--dry-run`. Requiere MT5. |
 | `measure_entry_suspects.py` | READ-ONLY sobre deals del broker (timestamps exactos): (A) re-entrada ≤2/5/10/15min tras pérdida, (B) htf_bias vs deriva real 2h previa. Pasa por `verify_finding`. Re-correr cada checkpoint. |
 | `measure_dist_to_level.py` | READ-ONLY: ¿la distancia precio↔nivel al fill separa ganar/perder? **La celda `≤0.5 ATR` da 65% WR p=0.006 pero n<25** (nunca pasó el gate; se degradó el 5-ago). No necesita MT5. |
