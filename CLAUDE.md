@@ -284,25 +284,38 @@ se arregla". El veredicto del ~28 ago se ejecuto el 28-ago y **no paso** ⇒ se 
 `NEWS_MIN_EXPIRY_MIN=15` (news vuelve a v3.50.4), **no** `ENABLE_NEWS_TRACK`: apagar el track
 sigue siendo decisión del user, no mía.
 
-**🧪 FASE 2 EN CURSO (18 Ago, corriendo) — ¿el detector tiene edge en el TIMEFRAME DONDE OPERA?**
-Fase 1 (`579cc22`) midió `detect_structure_signals` en velas **D1** sobre 21 pares y concluyó que
-el problema es el **generador de señal** — que también alimenta structure/m15/h1 en vivo. **Esa
-última parte es una EXTRAPOLACIÓN, no una medición**: los tracks vivos corren sobre M5/M15/H1.
-Fase 2 mide eso: **M15, 500k velas/par (~20 años), los MISMOS 21 pares** (los 5 que quedaron fuera
-por historia corta son exactamente los mismos 5 que Fase 1 descartó ⇒ comparación directa).
-Criterio + 3 enmiendas commiteados ANTES de correr: `docs/fase2_criterio_declarado.md`
-(`56bbba4`, `d631703`, `2846de6`). **Las 4 condiciones, en las 4 sesiones**: pooled > 0 · CI95
-inferior > 0 · positivo en las dos mitades · **por encima del percentil 95 de un control de
-entradas ALEATORIAS** (el que le faltó a Fase 1b). *Ojo al leer*: con n ~4,7M por sesión el CI es
-minúsculo ⇒ las condiciones 1 y 2 son casi automáticas; **el poder discriminante está en el
-control aleatorio**. Pasa 1 y 2 pero no 4 = ruido con muestra gigante, no edge.
-**Acción comprometida si NO pasa: se apagan structure/m15/h1 y se pasa a SMC.** Si pasa, el
-problema vuelve a ser costo/gestión (reparable) — y un "pasa" es permiso para investigar, NO para
-operar. **4 bugs encontrados en el arnés antes de tener números** (todos de la familia
-"falla en silencio y devuelve algo plausible"): `load_live_params` devolvía tupla y el `except` se
-lo tragaba · MT5 baja la historia async ⇒ iba a excluir 25 de 26 pares como "sin datos" · el
-detector consultaba la DB de PRODUCCIÓN una vez por vela (66% del tiempo en I/O, y el valor
-cambiaba mientras AIdan escribía ⇒ irreproducible) · `except` sin fail-loud.
+**🔑 ABIERTO (22 Sep) — ¿los CÁLCULOS de la decisión son correctos? Estudio de primeros principios + Fase 2b.**
+Pedido del user: *"no comparar decisiones malas contra muchos años, ver si la lógica/cálculo que hace
+AIdan es la correcta y si no encaramos mal la solución desde el inicio"*. **Contexto que se había
+perdido (nunca llegó acá):** Fase 2 (18-ago, 26 M ops, M5+M15, 26 pares) dio que el detector
+`structure` es **PEOR QUE EL AZAR** (M15 −1,04p vs control −0,94p; 0/21 pares positivos, igual en
+las dos mitades). La acción comprometida (apagar structure/m15/h1) **nunca se aplicó** (esperaba OK).
+Fase 3 (19-ago): de 9 generadores declarados antes, **solo pasó `A1` reversión a 2σ** (+0,98p a H96
+vs 0,90 de costo, al borde; todos los de ruptura negativos) — falta arnés completo con swap + los 6
+pares reservados (`docs/fase3_candidatos_declarados.md`, `24affcb`).
+**Lo que encontró el estudio (leyendo `technical.py`, sin backtestear decisiones):**
+**(1) BUG — el detector entra UNA VELA TARDE desde v3.6.0 (17-abr).** Se escribió asumiendo que
+`candles[-1]` es la vela en formación (`prev1=candles[-2]`); `price_feed` la descarta siempre
+(verificado contra MT5) ⇒ exige 2 cierres y dispara 5/15/60 min tarde; el filtro de distancia al
+nivel se mide contra un cierre viejo. **El arnés de Fase 2 reproduce el desfase ⇒ el "peor que el
+azar" juzgó la implementación.** Smoke EURUSD M15: 55-58% de las rupturas del original las
+dispara el corregido 1 vela antes, mismo nivel; cruces de MA idénticos (sanidad).
+**(2)** `trend` casi nunca es neutral (precio > MA21 = alcista). **(3)** S/R = fractal de 2 vecinos
+sobre 50 velas; el detector dispara en ~24% de las velas (no selecciona). **(4)** `dynamic_conf`
+suma fuerza de tendencia y momentum 3-4 veces. **(5)** M5: costo ~1,3p contra SL ~4p (un tercio
+del riesgo); ganador medio real 2-3p.
+**Fase 2b:** mismo arnés, M15, 4 índices corregidos en memoria
+(`tools/backtest_fase2_lagfix.py`, producción intacta). Criterio declarado antes:
+`docs/fase2b_lagfix_criterio.md` (`c668b8c`). Base del 18-ago reproducida exacta con el código de
+hoy (EURUSD/london, mismo n y media). **RESULTADO (22-sep): caso 3 del criterio — el desfase NO
+era la causa. Corregido es PEOR en 4/4 sesiones:** london −1,04 → **−1,19p** · overlap −1,06 → −1,23 ·
+ny −1,08 → −1,26 · off −1,11 → −1,29 (control ≈ −0,96; 0/21 pares positivos en los dos). Entrar al
+PRIMER cierre de la ruptura pierde más que al segundo ⇒ el desfase actuaba como filtro. Consistente
+con Fase 3 (toda ruptura negativa, solo la reversión positiva): **en M15 intradía la ruptura revierte;
+el problema es la IDEA (comprar rupturas), no un cálculo.** ⇒ **NO arreglar el desfase en vivo** (un
+fix que empeora). No re-proponer "corregir el timing de entrada del detector" sin una hipótesis
+nueva. Lo que queda con evidencia: `A1` reversión a 2σ por el arnés completo + pares reservados, y
+decidir con el user qué hacer con structure/m15/h1 (acción comprometida del 18-ago sin aplicar).
 
 **🔬 REVISIÓN CRÍTICA DEL CEREBRO (15 Jun, workflow 5 frentes + verificador adversarial; los 3 tracks COMPARTEN la lógica) — VEREDICTO: falla de DISEÑO, no bugs sueltos.** Un patrón roto se repite: **constantes en pips de M5 + confianza que suma factores colineales**, heredado igual por M15/H1 (las subclases solo cambian `_fetch_candles`+profile). Hallazgos VERIFICADOS por mí en código:
 - [ ] **[EL #1, hecho de código no estadística] El R:R que el sistema cree tener es FALSO.** El cap `tp_cap = max(ATR,2)*2` (`technical.py:1430`) recorta el TP nominal. Tracé los 3: **M5 TP 20p→~5p (R:R real 1:1.4)**, **M15 60p→~18p (1:1.2)**, **H1 100p→~48p (1:1.2)**. Con 37% WR + comisión ~1.3p → pérdida matemática (hace falta ~46% WR para empatar a 1:1.2). **Explica mecánicamente "gana poco / avg win 4p".** Todo (sizing, BE, trailing, PM-arm) razona sobre un TP que el motor borra. Ojo: el cap está A PROPÓSITO (20p nunca pegaba en 15min M5) → el fix es **escalarlo por timeframe/expiry**, NO sacarlo (eso de paso arregla H1/M15, donde el cap es claramente erróneo: H1 SÍ puede recorrer 100p en 180min).
@@ -662,6 +675,7 @@ Plan completo en `~/.claude/plans/sorted-meandering-pizza.md`. Resumen:
 |---|---|
 | `backtest_h1_m15.py` | Backtest estructural-only sobre velas MT5 históricas (re-corre `detect_structure_signals()`, simula SL/TP/expiry). Solo `structure`. Requiere MT5. |
 | `backtest_h4_d1.py` | Paso 0 del track D (13-ago). Igual que el anterior pero H4/D1, en variantes `naive` y `scaled`. **Resultado: H4 refutado (−0,98p/trade, n=451) · D1 positivo. Escalar las constantes por ATR EMPEORA (1,40→1,02).** **v2 (16-ago): `--params live` usa los params reales de `optimizer_params` (el titular usaba los default) y `--session sweep` corre las 4 sesiones porque el paso 7 de `dynamic_conf` lee el reloj — con eso el baseline del D1 pasó a 186-227 señales / +10,8 a +12,7p post-swap / PF 1,25-1,30, positivo en las 4.** Trae un guard que corta si la tabla de sesiones de producción cambia. Requiere MT5. |
+| `backtest_fase2_lagfix.py` | **Fase 2b** (22-sep, read-only): corre el arnés de `backtest_fase2.py` (importado, no copiado) con el detector corregido del desfase de una vela, aplicado como transformación del fuente EN MEMORIA (4 reemplazos que tienen que matchear exactamente 1 vez o aborta). `--smoke` compara cuándo disparan original vs corregido; `--variant repro` recalcula la base para verificar reproducibilidad. Checkpoints separados (`lagfix1`/`repro1`), nunca se mezclan con los v1 del 18-ago. Usa el cache `.cache_fase2/` (no necesita MT5). |
 | `score_d1_shadow.py` | Scorer FORWARD del D1 en shadow: excursión favorable Y adversa + close al horizonte (3/5/10 velas), **sin re-simular SL/TP**. Descuenta comisión y swap. Ancla en `d1_candle_ts`, no en `created_at`. `--dry-run`. Requiere MT5. |
 | `measure_entry_suspects.py` | READ-ONLY sobre deals del broker (timestamps exactos): (A) re-entrada ≤2/5/10/15min tras pérdida, (B) htf_bias vs deriva real 2h previa. Pasa por `verify_finding`. Re-correr cada checkpoint. |
 | `measure_dist_to_level.py` | READ-ONLY: ¿la distancia precio↔nivel al fill separa ganar/perder? **La celda `≤0.5 ATR` da 65% WR p=0.006 pero n<25** (nunca pasó el gate; se degradó el 5-ago). No necesita MT5. |
