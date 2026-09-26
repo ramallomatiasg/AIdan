@@ -62,7 +62,7 @@ SWAP_LONG_PIPS = -0.8174   # por noche, comprado  (symbol_info.swap_long / 10)
 SWAP_SHORT_PIPS = 0.1445   # por noche, vendido
 
 
-def fetch_d1_candles(count=400):
+def fetch_d1_candles(count=400, server_offset_hours=None):
     """Velas D1 CERRADAS. copy_rates_from_pos(..., 0, count) devuelve la vela
     ACTUAL en formacion como ultimo elemento — price_feed la descarta
     explicitamente (price_feed.py:142-144) y aca hay que hacer lo mismo.
@@ -86,7 +86,7 @@ def fetch_d1_candles(count=400):
     import sys as _sys
     _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from mt5_server_offset import mt5_offset_s
-    srv_off = mt5_offset_s(mt5)
+    srv_off = mt5_offset_s(mt5, override_hours=server_offset_hours)
     mt5.shutdown()
     if rates is None or len(rates) == 0:
         raise RuntimeError("MT5 no devolvio velas D1")
@@ -146,6 +146,8 @@ def resumen(nombre, filas, h):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--dry-run', action='store_true', help='no escribe outcomes')
+    ap.add_argument('--server-offset-hours', type=float, default=None,
+                    help='offset server-UTC a mano (mercado cerrado sin cache). ICMarkets: 3 verano / 2 invierno')
     args = ap.parse_args()
 
     if not os.path.exists(DB):
@@ -183,7 +185,7 @@ def main():
     print(f"\nseñales logueadas: {len(rows)}")
     print(f"  ya scoreadas    : {sum(1 for r in rows if r[8] is not None)}")
 
-    candles = fetch_d1_candles()
+    candles = fetch_d1_candles(server_offset_hours=args.server_offset_hours)
     print(f"  velas D1 de MT5 : {len(candles)}")
 
     por_h = {h: [] for h in HORIZONS}
