@@ -44,6 +44,15 @@ Velas M15, H1 y H4 armadas desde el M5 del cache `.cache_fase2/M5_500000`.
 10. **Salida por tiempo:** lo que siga abierto se cierra al fin del día del server.
 11. Vela con stop y TP a la vez ⇒ cuenta el stop (conservador).
 
+## Enmienda 1 (29-sep, ANTES de correr ningún número)
+La regla 4 decía "el máximo de swing de M15 más alto **desde que M15 pasó a bajista**". Eso excluye el
+techo del movimiento previo y termina marcando el último máximo antes de la ruptura, que es la zona
+**decisional** de Leo, no su extremo ("el origen del movimiento general"; en su captura el extremo está
+junto al máximo de H1). Se detectó con un test sintético de la función de estructura, no mirando
+resultados. **Regla corregida:** extremo = el swing high **más alto confirmado desde el último BOS alcista**
+de M15 (el techo del movimiento previo), reemplazado por uno más alto si aparece mientras siga bajista.
+La decisional queda como estaba: el swing high vigente en cada BOS bajista. Espejo para alcista.
+
 ## Costos
 Comisión round-turn + spread de la vela de entrada (mínimo de la barra ⇒ cota optimista). Sin swap
 (sale en el día). **Sin filtro de noticias:** el cache no tiene el calendario histórico. Es un límite
