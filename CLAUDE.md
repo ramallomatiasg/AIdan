@@ -353,6 +353,11 @@ control p95 +1,35; EURUSD −2,02 · GBPUSD +0,31 · USDJPY −5,90 · AUDUSD �
 ene-2025). **corr(señal, moneda) = −0,03** ⇒ el efecto del paper (2004-2012) ya no se ve. OOS (CAD/CHF) no mirado.
 **Queda solo: las reglas reales de Leo. Si fallan ⇒ propuesta acordada con el user (26-sep): AIdan pasa de trader
 autónomo a COPILOTO** (plan del día + alertas en niveles + registro de por qué se entró y qué falló).
+**29-sep: Leo mandó su Setup 1** (SMC: dirección por BOS con cuerpo en H4/H1, zona de oferta/demanda en M15
+prefiriendo el "extremo" sobre la "decisional", entrada por CHoCH en M5, TP en los mínimos de M15/H1/H4) →
+`docs/leo_setup1_notas.md`. **Se le mandaron las reglas mecánicas para que las CONFIRME antes de medir** (8
+preguntas: zona, antigüedad, CHoCH, SL, reparto de TP, BE, anulación, noticias). Con su respuesta: criterio
+declarado + backtest como Fases 4-5.
 
 **🔬 REVISIÓN CRÍTICA DEL CEREBRO (15 Jun, workflow 5 frentes + verificador adversarial; los 3 tracks COMPARTEN la lógica) — VEREDICTO: falla de DISEÑO, no bugs sueltos.** Un patrón roto se repite: **constantes en pips de M5 + confianza que suma factores colineales**, heredado igual por M15/H1 (las subclases solo cambian `_fetch_candles`+profile). Hallazgos VERIFICADOS por mí en código:
 - [ ] **[EL #1, hecho de código no estadística] El R:R que el sistema cree tener es FALSO.** El cap `tp_cap = max(ATR,2)*2` (`technical.py:1430`) recorta el TP nominal. Tracé los 3: **M5 TP 20p→~5p (R:R real 1:1.4)**, **M15 60p→~18p (1:1.2)**, **H1 100p→~48p (1:1.2)**. Con 37% WR + comisión ~1.3p → pérdida matemática (hace falta ~46% WR para empatar a 1:1.2). **Explica mecánicamente "gana poco / avg win 4p".** Todo (sizing, BE, trailing, PM-arm) razona sobre un TP que el motor borra. Ojo: el cap está A PROPÓSITO (20p nunca pegaba en 15min M5) → el fix es **escalarlo por timeframe/expiry**, NO sacarlo (eso de paso arregla H1/M15, donde el cap es claramente erróneo: H1 SÍ puede recorrer 100p en 180min).
