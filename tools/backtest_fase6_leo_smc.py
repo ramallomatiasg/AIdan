@@ -182,7 +182,8 @@ def load(sym):
 
 
 def run_pair(job):
-    sym, low = job
+    sym, low = job[0], job[1]
+    detail = len(job) > 2 and bool(job[2])      # solo para exportar la auditoría visual; no cambia la lógica
     if low:
         set_low_priority()
     r, spec = load(sym)
@@ -208,6 +209,8 @@ def run_pair(job):
     swl[m[is_l] + 2] = l[m[is_l]]; swh[m[is_h] + 2] = h[m[is_h]]
     comm = spec['commission_pips']
     res = {v: [] for v in VARIANTS}
+    if detail:
+        res['_detail'] = []
 
     for var in VARIANTS:
         klo, khi, kid = ('dlo', 'dhi', 'did') if var == 'sec_decisional' else ('lo', 'hi', 'zid')
@@ -277,11 +280,19 @@ def run_pair(job):
             b = day_end[i]
             g = sim_trade(h, l, c, i, b, E, D, S, T, False) / pip
             res[var].append((int(t[i]), int(D), g - comm - spr[i], sl_p, tp_p))
+            if detail and var == 'principal':
+                res['_detail'].append({'i': int(i), 'touch_i': int(entry_i), 'end_i': int(b), 'D': int(D),
+                                       'E': float(E), 'S': float(S), 'T': float(T), 'zl': float(zl), 'zh': float(zh),
+                                       'leg': float(leg), 'choch': float(last_sw), 'j15': int(a), 'j1': int(b_),
+                                       'j4': int(d4), 'gross': float(g), 'net': float(g - comm - spr[i]),
+                                       'sl_p': float(sl_p), 'tp_p': float(tp_p)})
             busy_until = b
 
     # control: velas al azar, distancias de SL/TP sorteadas de los trades reales, mismos costos
     ctrl = {}
     for var in VARIANTS:
+        if detail:
+            ctrl[var] = np.zeros(REPS); continue
         tr = res[var]
         sums = np.zeros(REPS)
         if tr:
