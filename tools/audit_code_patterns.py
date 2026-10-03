@@ -264,10 +264,15 @@ def check_sql_sin_guard():
 
 
 # ── 7. incoherencias de estado en la DB ──────────────────────────────────────
+# Filas ya triadas (3-oct-2026). Agregar aca SOLO despues de revisar el caso a mano.
+CONOCIDOS_DB_CIERRE_FANTASMA = '1042'
+CONOCIDOS_DB_MFE_CONTAMINADO = '1007'
+
+
 def check_db_estado():
     if not os.path.exists(DB):
         return None
-    c = sqlite3.connect(DB)
+    c = sqlite3.connect(f'file:{DB}?mode=ro', uri=True)  # read-only: regla de la casa
     out = []
     pruebas = [
         ('tickets duplicados en 2 strategy_id',
@@ -287,6 +292,18 @@ def check_db_estado():
          "SELECT COUNT(*) FROM trade_archive WHERE result='loss' AND mt5_pnl > 0"),
         ('archivados SIN P&L real (P&L fantasma, guard v3.51.1)',
          "SELECT COUNT(*) FROM trade_archive WHERE mt5_pnl IS NULL"),
+        # 3-oct-2026: #1042 se archivo con exit_price=0 / pips 11338 / pnl 0 porque el sync
+        # corrio 3s despues de un cierre manual y antes de que el deal propagara (mt5_pnl
+        # NO era NULL => la prueba de arriba no lo atrapa). Baseline = los casos ya triados.
+        ('archivo con cierre fantasma (exit_price=0 o |pips|>500, caso #1042)',
+         "SELECT COUNT(*) FROM trade_archive WHERE (exit_price=0 OR ABS(pips)>500) "
+         f"AND strategy_id NOT IN ({CONOCIDOS_DB_CIERRE_FANTASMA})"),
+        # 3-oct-2026: #1007 quedo con mfe 69p y TP 55p: el thread de trailing calculo el HWM
+        # contra el tick del lunes sobre una posicion que el broker habia cerrado el viernes
+        # (ventana de ~27s entre arranque y sync_closed_positions). Contamina mfe_pips.
+        ('archivo con MFE > TP (HWM contaminado tras restart, caso #1007)',
+         "SELECT COUNT(*) FROM trade_archive WHERE mfe_pips IS NOT NULL AND mfe_pips > tp_pips+1 "
+         f"AND strategy_id NOT IN ({CONOCIDOS_DB_MFE_CONTAMINADO})"),
     ]
     for nombre, q in pruebas:
         try:
