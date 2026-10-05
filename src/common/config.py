@@ -19,7 +19,7 @@ for _env_path in _env_candidates:
 else:
     load_dotenv()  # fallback: default search
 
-APP_VERSION = "3.64.0"
+APP_VERSION = "3.65.0"
 
 class Config:
     VERSION = APP_VERSION
@@ -449,6 +449,13 @@ class Config:
     # Cual merece entrar lo decide tools/measure_feed_race.py (quien reporta los
     # datos del calendario PRIMERO, no quien publica mas).
     NEWS_EXTRA_SOURCES = os.getenv("NEWS_EXTRA_SOURCES", "false").lower() in ('true', '1', 'yes')
+
+    # v3.65.0 - Canal RAPIDO de noticias (src/collector/home_fast.py): la home de
+    # investinglive se cachea 30 s contra 300 s (+ hasta 1 h stale) del RSS. Default
+    # FALSE: apagado, el collector es identico a v3.64.0. Se gira por env sin rebuild
+    # si la carrera home-vs-RSS (measure_feed_race.py --home-race) pasa su criterio.
+    NEWS_HOME_FAST = os.getenv("NEWS_HOME_FAST", "false").lower() in ('true', '1', 'yes')
+    NEWS_HOME_FAST_SEC = int(os.getenv("NEWS_HOME_FAST_SEC", "20"))
 
     @staticmethod
     def get_sources():

@@ -64,6 +64,34 @@ ordenes. Se puede correr con AIdan prendido o apagado.
     python tools/measure_feed_race.py --list-events    # eventos de la semana
 
 Env: FEED_RACE_CYCLE_SEC (default 30)
+
+── Modo --home-race (5-oct-2026): HOME vs RSS del MISMO publisher ─────────────
+Otra pregunta, no la de arriba. Medido el 5-oct sobre `news` (desde el 27-ago):
+Forexlive (que ahora redirige a investinglive.com) llega con mediana 5,3 min y
+p90 77 min entre publicacion y deteccion, con el collector poleando cada 60 s.
+La causa NO es AIdan: el CDN cachea el RSS con `s-maxage=300,
+stale-while-revalidate=3600` (se vio una copia de 574 s) y ignora query strings
+y `Cache-Control: no-cache`. La HOME del sitio se cachea con `s-maxage=30,
+stale-while-revalidate=60` y lista los mismos titulares.
+
+    ¿la home muestra cada nota ANTES que el RSS, y por cuanto?
+
+Cada HOME_RACE_CYCLE_SEC (default 15) baja el RSS y la home, y registra cuando
+cada canal mostro cada nota por primera vez. Las notas presentes en el 1er ciclo
+son linea de base y NO puntuan (no se sabe cuando aparecieron).
+
+CRITERIO PRE-DECLARADO (5-oct, antes de correrlo — NO mover):
+  n >= 20 notas que aparecieron NUEVAS en los dos canales durante la corrida y
+  mediana de la ventaja (visto_rss - visto_home) >= 3 min  =>  la home vale la
+  pena como fuente rapida del collector. Si no, el RSS queda como esta.
+Limite: es una sola publicacion; la ventaja depende del CDN de ellos y puede
+cambiar sin aviso. Los links de la home incluyen listas laterales ("mas leidas")
+⇒ solo puntuan notas que el RSS tambien trae con fecha.
+
+    python tools/measure_feed_race.py --home-race --hours 3
+    python tools/measure_feed_race.py --home-report
+
+Env: HOME_RACE_CYCLE_SEC (default 15)
 """
 
 import argparse
@@ -355,8 +383,172 @@ def report(conn):
     print("  * Una fuente con muchos items y 0 eventos reportados es ruido, no velocidad.")
 
 
+# ── Modo --home-race: home vs RSS del mismo publisher ────────────────────────
+HOME_URL = "https://investinglive.com/"
+HOME_RSS = "https://investinglive.com/feed"
+HOME_RACE_CYCLE_SEC = int(os.getenv("HOME_RACE_CYCLE_SEC", "15"))
+HOME_MIN_N = 20
+HOME_MIN_LEAD_MIN = 3.0
+
+
+def _news_path(url):
+    """'/news/slug' normalizado (sin dominio ni barra final), o None."""
+    import re
+    m = re.search(r"(/news/[a-z0-9\-]+)", url or "")
+    return m.group(1) if m else None
+
+
+def _home_paths(html):
+    import re
+    return list(dict.fromkeys(re.findall(r"/news/[a-z0-9\-]+", html or "")))
+
+
+def _init_home_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS home_race (
+            run_id        TEXT NOT NULL,
+            path          TEXT NOT NULL,
+            channel       TEXT NOT NULL,   -- 'rss' | 'home'
+            seen_at       TEXT NOT NULL,   -- UTC naive ISO
+            baseline      INTEGER NOT NULL, -- 1 = ya estaba en el 1er ciclo
+            published_at  TEXT,            -- UTC naive ISO (solo del RSS)
+            cdn_age       INTEGER,         -- header Age del RSS al verla
+            PRIMARY KEY (run_id, path, channel)
+        )
+    """)
+    conn.commit()
+
+
+def home_poll_once(conn, run_id, baseline):
+    now = dt.datetime.utcnow().isoformat()
+    vistos = {"rss": 0, "home": 0}
+    for channel, url in (("rss", HOME_RSS), ("home", HOME_URL)):
+        try:
+            resp = requests.get(url, timeout=15, headers={"User-Agent": _UA})
+        except Exception as e:
+            print(f"  [{channel}] error: {e}")
+            continue
+        if resp.status_code != 200:
+            print(f"  [{channel}] HTTP {resp.status_code}")
+            continue
+        rows = []
+        if channel == "rss":
+            age = resp.headers.get("Age")
+            for entry in feedparser.parse(resp.content).entries:
+                p = _news_path(entry.get("link", ""))
+                pub = _entry_published_utc(entry)
+                if p:
+                    rows.append((p, pub.isoformat() if pub else None,
+                                 int(age) if age and age.isdigit() else None))
+        else:
+            rows = [(p, None, None) for p in _home_paths(resp.text)]
+        if not rows:
+            print(f"  [{channel}] 0 notas (cambio el formato del sitio?)")
+        for p, pub, age in rows:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO home_race VALUES (?,?,?,?,?,?,?)",
+                (run_id, p, channel, now, 1 if baseline else 0, pub, age))
+            if cur.rowcount and not baseline:
+                vistos[channel] += 1
+                print(f"  NEW [{channel}] {p[6:76]}")
+    conn.commit()
+    return vistos
+
+
+def home_report(conn):
+    _init_home_table(conn)
+    rows = conn.execute("""
+        SELECT h.run_id, h.path, h.seen_at, r.seen_at, r.published_at, r.cdn_age
+        FROM home_race h JOIN home_race r
+          ON r.run_id = h.run_id AND r.path = h.path AND r.channel = 'rss'
+        WHERE h.channel = 'home' AND h.baseline = 0 AND r.baseline = 0
+    """).fetchall()
+    solo = conn.execute("""
+        SELECT channel, COUNT(*) FROM home_race x WHERE baseline = 0 AND NOT EXISTS (
+            SELECT 1 FROM home_race y WHERE y.run_id = x.run_id AND y.path = x.path
+              AND y.channel <> x.channel)
+        GROUP BY channel""").fetchall()
+    runs = conn.execute("SELECT COUNT(DISTINCT run_id) FROM home_race").fetchone()[0]
+
+    print("\n" + "=" * 78)
+    print(f"HOME vs RSS (investinglive) - {runs} corrida(s)")
+    print("=" * 78)
+    leads, pub_rss, pub_home = [], [], []
+    for _run, path, h_seen, r_seen, pub, age in rows:
+        h, r = dt.datetime.fromisoformat(h_seen), dt.datetime.fromisoformat(r_seen)
+        lead = (r - h).total_seconds() / 60
+        leads.append(lead)
+        txt = f"  ventaja home {lead:+6.1f} min"
+        if pub:
+            p = dt.datetime.fromisoformat(pub)
+            pub_rss.append((r - p).total_seconds() / 60)
+            pub_home.append((h - p).total_seconds() / 60)
+            txt += f" | pub->rss {pub_rss[-1]:5.1f} | pub->home {pub_home[-1]:5.1f}"
+        print(f"{txt} | age={age if age is not None else '-':>4} | {path[6:50]}")
+    for ch, n in solo:
+        print(f"  solo en {ch} (no puntua): {n}")
+    # Home ya la tenia en la linea de base y el RSS la mostro DESPUES: la ventaja es
+    # al menos (visto_rss - inicio de la corrida). Censurada => se informa aparte y
+    # NO entra en el criterio.
+    cens = conn.execute("""
+        SELECT r.seen_at, (SELECT MIN(seen_at) FROM home_race z WHERE z.run_id = r.run_id)
+        FROM home_race r JOIN home_race h
+          ON h.run_id = r.run_id AND h.path = r.path AND h.channel = 'home'
+        WHERE r.channel = 'rss' AND r.baseline = 0 AND h.baseline = 1
+    """).fetchall()
+    if cens:
+        mins = [(dt.datetime.fromisoformat(a) - dt.datetime.fromisoformat(b)).total_seconds() / 60
+                for a, b in cens]
+        print(f"  home ya la tenia al arrancar y el RSS la mostro despues: {len(cens)} "
+              f"(ventaja >= {statistics.median(mins):.1f} min de mediana, censurada, no puntua)")
+
+    n = len(leads)
+    print("\n" + "-" * 78)
+    if not n:
+        print("Ninguna nota nueva vista en los dos canales todavia.")
+        return
+    med = statistics.median(leads)
+    print(f"n={n}  mediana ventaja home={med:+.1f} min  "
+          f"home primero en {sum(l > 0 for l in leads)}/{n}  "
+          f"rss primero en {sum(l < 0 for l in leads)}/{n}")
+    if pub_rss:
+        print(f"publicacion->deteccion  RSS mediana {statistics.median(pub_rss):.1f} min  "
+              f"| HOME mediana {statistics.median(pub_home):.1f} min")
+    print(f"\nCRITERIO PRE-DECLARADO: n>={HOME_MIN_N} y mediana >= {HOME_MIN_LEAD_MIN:.0f} min")
+    if n < HOME_MIN_N:
+        print(f"  -> SIN VEREDICTO (n={n} < {HOME_MIN_N}): seguir juntando, no concluir.")
+    elif med >= HOME_MIN_LEAD_MIN:
+        print("  -> PASA: la home vale la pena como fuente rapida del collector.")
+    else:
+        print("  -> NO PASA: el RSS queda como esta.")
+
+
+def run_home_race(conn, hours):
+    import time
+    _init_home_table(conn)
+    run_id = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+    fin = dt.datetime.utcnow() + dt.timedelta(hours=hours)
+    print(f"home-race {run_id}: cada {HOME_RACE_CYCLE_SEC}s hasta "
+          f"{(fin + dt.timedelta(hours=-3)).strftime('%H:%M')} AR")
+    v = home_poll_once(conn, run_id, baseline=True)
+    base = conn.execute("SELECT channel, COUNT(*) FROM home_race WHERE run_id=? GROUP BY channel",
+                        (run_id,)).fetchall()
+    print(f"  linea de base (no puntua): {dict(base)}")
+    try:
+        while dt.datetime.utcnow() < fin:
+            time.sleep(HOME_RACE_CYCLE_SEC)
+            home_poll_once(conn, run_id, baseline=False)
+    except KeyboardInterrupt:
+        print("\ncortado a mano")
+    home_report(conn)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Carrera de feeds contra el calendario economico")
+    ap.add_argument("--home-race", action="store_true",
+                    help="home vs RSS de investinglive (usar con --hours)")
+    ap.add_argument("--home-report", action="store_true",
+                    help="solo reportar lo juntado por --home-race")
     ap.add_argument("--hours", type=float, default=0,
                     help="cuantas horas poleear (0 = un solo ciclo)")
     ap.add_argument("--report", action="store_true", help="solo reportar lo ya juntado")
@@ -371,6 +563,14 @@ def main():
 
     if args.report:
         report(conn)
+        return
+
+    if args.home_report:
+        home_report(conn)
+        return
+
+    if args.home_race:
+        run_home_race(conn, args.hours if args.hours > 0 else 0.25)
         return
 
     events = fetch_calendar()

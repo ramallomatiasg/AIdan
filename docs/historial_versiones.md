@@ -6,6 +6,38 @@ En CLAUDE.md queda la tabla corta de las últimas versiones y un puntero acá.
 
 ---
 
+## v3.65.0 — Canal rápido de noticias: la home de investinglive (5 Oct 2026)
+
+**Origen.** El user pidió arreglar el feed RSS ("mediana 8,9 min de atraso"). Ese número era del
+19-ago, de antes del cambio a Forexlive (v3.61.0). Re-medido el 5-oct sobre `news` desde el 27-ago:
+**Forexlive (ahora redirige a investinglive.com) mediana 5,3 min, p90 77 min, 0% en ≤1 min, n=521;
+Bloomberg 7,8 min (n=1015).** El collector poleea cada 60 s ⇒ el cuello no es AIdan.
+
+**Causa.** El CDN del sitio sirve el RSS con `Cache-Control: public, s-maxage=300,
+stale-while-revalidate=3600` (se vio `Age: 574`). Cache-busting por query string y `no-cache` no
+sirven: CloudFront los ignora (verificado). La **home** se sirve con `s-maxage=30,
+stale-while-revalidate=60` y lista los mismos links; la página de cada nota es `no-store` y su
+`article:published_time` es idéntico al pubDate del RSS (al segundo).
+
+**Qué se hizo.** `src/collector/home_fast.py`: la home dice qué nota es nueva, la nota da
+título/resumen/fecha, y la URL canónica es la misma del `<link>` del RSS ⇒ `add_news` deduplica.
+Descarta notas de más de 30 min (listas laterales). Fail-loud: home sin links o nota sin fecha ⇒
+WARNING. El collector sigue bajando el RSS cada `COLLECTOR_INTERVAL` y, con la perilla prendida,
+mira la home cada `NEWS_HOME_FAST_SEC` (20). **Apagado por default ⇒ collector idéntico a v3.64.0.**
+Se rebuildeó con AIdan cerrado para que activarlo no requiera rebuild en horario de mercado.
+
+**Gate antes de prenderlo.** `tools/measure_feed_race.py --home-race` (modo nuevo, archivo propio
+`feed_race.db`). Criterio pre-declarado: n≥20 notas nuevas vistas en los dos canales y mediana de
+ventaja de la home ≥3 min. 1ra corrida: 5-oct 09:00-12:00 AR (tarea `aidan-home-race-20261005`).
+
+**Contexto que no cambia.** News está apagado desde el 11-sep (`ENABLE_NEWS_TRACK=false`). Bajar
+la latencia no le cambia nada a ningún trade mientras esté apagado; el user quiere volver a probar
+news con el canal rápido (decisión del 5-oct), con un gate nuevo a declarar al prenderlo.
+
+Tests: `tests/test_home_fast_v3650.py` (22, con la home y la nota reales del 5-oct como fixtures).
+
+---
+
 ## v3.64.0 — Motivo REAL de cierre en `trade_archive` (17 Sep 2026)
 
 **Origen.** El user preguntó si typesafe.ai o un Qwen-1.5B fine-tuneado servían para AIdan (no: el

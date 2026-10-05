@@ -784,26 +784,50 @@ class AIdan:
             
             sources = Config.get_sources() or default_sources
             logger.info(f"Collector ready with {len(sources)} sources")
-            
+
+            # v3.65.0: canal rapido (home de investinglive, cache 30s vs 300s+ del RSS).
+            # Apagado (default) => loop identico a v3.64.0: RSS cada COLLECTOR_INTERVAL.
+            home_fast = None
+            if Config.NEWS_HOME_FAST:
+                from src.collector.home_fast import HomeFastFetcher
+                home_fast = HomeFastFetcher(logger, fetcher)
+                logger.info(f"home-fast ACTIVO: home cada {Config.NEWS_HOME_FAST_SEC}s, "
+                            f"RSS cada {Config.COLLECTOR_INTERVAL}s")
+
+            def _store(items):
+                added = 0
+                for item in items:
+                    if add_news(item['url'], item['title'], item['summary'],
+                               item['language'], str(item['entities']), str(item['tags']),
+                               published_at=item.get('published_at')):
+                        added += 1
+                return added
+
             iteration = 0
+            last_rss = 0.0
             while True:
-                try:
-                    iteration += 1
-                    news_items = fetcher.fetch_feeds(sources)
-                    fetcher.save_to_file(news_items)
-                    
-                    added = 0
-                    for item in news_items:
-                        if add_news(item['url'], item['title'], item['summary'],
-                                   item['language'], str(item['entities']), str(item['tags']),
-                                   published_at=item.get('published_at')):
-                            added += 1
-                    
-                    logger.info(f"[{iteration}] Added {added}/{len(news_items)} news")
-                except Exception as e:
-                    logger.error(f"Collector error: {e}")
-                
-                time.sleep(Config.COLLECTOR_INTERVAL)
+                if time.time() - last_rss >= Config.COLLECTOR_INTERVAL:
+                    last_rss = time.time()
+                    try:
+                        iteration += 1
+                        news_items = fetcher.fetch_feeds(sources)
+                        fetcher.save_to_file(news_items)
+                        added = _store(news_items)
+                        logger.info(f"[{iteration}] Added {added}/{len(news_items)} news")
+                    except Exception as e:
+                        logger.error(f"Collector error: {e}")
+
+                if home_fast is not None:
+                    try:
+                        fast_items = home_fast.poll()
+                        if fast_items:
+                            fetcher.save_to_file(fast_items)
+                            logger.info(f"home-fast: Added {_store(fast_items)}/{len(fast_items)} news")
+                    except Exception as e:
+                        logger.error(f"home-fast error: {e}")
+
+                time.sleep(min(Config.NEWS_HOME_FAST_SEC, Config.COLLECTOR_INTERVAL)
+                           if home_fast is not None else Config.COLLECTOR_INTERVAL)
         except Exception as e:
             print(f"FATAL Collector: {e}")
     
