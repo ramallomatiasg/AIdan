@@ -104,3 +104,4 @@ COMO_COMPARTIR.txt
 
 # backups del .env (contienen keys) — nunca commitear
 .env.bak_*
+.cache_p1/

@@ -95,6 +95,20 @@ def hdr(t):
     print('=' * 72)
 
 
+def _env_value(key):
+    """Valor de una perilla en el .env del repo (el que lee el exe). None si no esta."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'),
+                  encoding='utf-8') as f:
+            for ln in f:
+                ln = ln.strip()
+                if ln.startswith(key + '='):
+                    return ln.split('=', 1)[1].strip().strip('"').strip("'").lower()
+    except OSError:
+        pass
+    return None
+
+
 # ────────────────────────── [A] salud del loop ──────────────────────────
 def check_loop_health(c, days=7):
     hdr(f'[A] SALUD DEL LOOP DE APRENDIZAJE (ultimos {days} dias)')
@@ -128,7 +142,11 @@ def check_loop_health(c, days=7):
         q("SELECT COUNT(*) FROM trade_archive WHERE trigger_type='m15_structure' AND created_at>=? AND entry_context LIKE '%calibrated_p%'", since),
         m15 > 0, 'debe = trades m15')
     row('rejected_signals (shadow book)', q("SELECT COUNT(*) FROM rejected_signals WHERE created_at>=?", since), trades > 0)
-    row('shadow_trader_log (LLM en papel)', q("SELECT COUNT(*) FROM shadow_trader_log WHERE created_at>=?", since), trades > 0)
+    # Apagado a proposito (SHADOW_TRADER_MODE=off en .env desde el 21-sep: NO PASO su gate)
+    # => 0 filas es lo esperado, no un hook muerto. Se lee el .env del repo, que es el vivo.
+    _st_off = _env_value('SHADOW_TRADER_MODE') == 'off'
+    row('shadow_trader_log (LLM en papel)', q("SELECT COUNT(*) FROM shadow_trader_log WHERE created_at>=?", since),
+        trades > 0 and not _st_off, 'APAGADO por .env (esperado 0)' if _st_off else '')
     row('d1_shadow_log (track D)', q("SELECT COUNT(*) FROM d1_shadow_log WHERE created_at>=?", since), False, '~2-3/mes esperado')
     row('learning_insights (post-trade LLM)', q("SELECT COUNT(*) FROM learning_insights WHERE created_at>=?", since), False, 'depende de Ollama')
     row('event_window_log', q("SELECT COUNT(*) FROM event_window_log WHERE created_at>=?", since), trades > 0)
