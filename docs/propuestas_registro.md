@@ -16,14 +16,15 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 |---|---|---|---|---|---|
 | P0 | **Control POSITIVO del arnés.** Inyectar un edge conocido (look-ahead de 1 vela, o señal = signo del retorno futuro) en `backtest_fase2.py` y `backtest_fase4_planes.py` y exigir que reporten PASA con CI claro. | Validación de mis pruebas | Todos los backtests (Fases 2-6) dieron NO PASA. Un arnés que solo sabe decir "no" no está verificado. Si no detecta un edge sintético, **todos los NO PASA anteriores quedan en duda** y se re-miden. | ~medio día | ✅ **HECHO 9-oct: el arnés SÍ detecta edge** (ver abajo) |
 | P1 | **Misma lógica, otro instrumento: XAUUSD, USTEC, DE40, US30 en M15/H1.** Correr el detector de `structure` (arnés Fase 2, `--symbols`) y los planes de Fase 4 sobre oro e índices. | Cambio de instrumento | Screen del 9-oct (abajo): en EURUSD el costo de un trade es **~15% del rango mediano de una vela M15**; en oro 1,5%, USTEC 2,3%, DE40 1,5%. El research dijo que lo que falla es el supuesto "scalping intradía con esta fricción" — esta es la salida más barata: 6-10x menos fricción por el mismo movimiento relativo. Nunca medido acá (0 menciones de XAU/oro en docs). | 1 día (cache de velas nuevo) | ❌ **NO PASA 10-oct** (`structure`): peor que el azar también en oro/índices (ver abajo). Cerrado para `structure`; la parte "planes de Fase 4" pasa a P9 |
-| P2 | **Trend following clásico H4/D1: canal Donchian 20/55 con stop ATR y trailing (turtle)**, 20 pares + oro + índices, con swap. | Nueva lógica | H4 solo se probó con el detector de structure (refutado); Donchian nunca. Horizonte largo = costo chico frente al movimiento (c/ATR D1 ≈ 1%). Choca con lote mínimo como D1, pero primero saber si hay edge. | 1 día | **PRÓXIMA** |
-| P3 | **Rango asiático → ruptura de Londres** (orden en los extremos del rango 00-07 UTC, SL al otro lado, TP 1-2× rango). | Nueva lógica | Rankeada en el research del 19-ago, nunca medida acá. Es confluencia + sesión, las dos cosas que sobrevivieron en el estudio de falsificación. | medio día | en cola |
+| P2 | **Trend following clásico H4/D1: canal Donchian 20/55 con stop ATR y trailing (turtle)**, 20 pares + oro + índices, con swap. | Nueva lógica | H4 solo se probó con el detector de structure (refutado); Donchian nunca. Horizonte largo = costo chico frente al movimiento (c/ATR D1 ≈ 1%). Choca con lote mínimo como D1, pero primero saber si hay edge. | 1 día | ❌ **NO PASA 16-oct**: −0,23R/trade, PEOR que el azar (ver abajo). Cerrado turtle D1/H4 en FX |
+| P3 | **Rango asiático → ruptura de Londres** (orden en los extremos del rango 00-07 UTC, SL al otro lado, TP 1-2× rango). | Nueva lógica | Rankeada en el research del 19-ago, nunca medida acá. Es confluencia + sesión, las dos cosas que sobrevivieron en el estudio de falsificación. | medio día | **PRÓXIMA** |
 | P4 | **Lead-lag de la cesta USD:** cuando GBPUSD/AUDUSD/NZDUSD ya se movieron X·ATR en M5 y EURUSD no, operar el "catch-up". | Nueva lógica | El cache `.cache_fase2/M5_500000` tiene 26 pares alineados. Nunca medido. | 1 día | en cola |
 | P5 | **Compresión → expansión en D1: inside bar / NR7 breakout** con stop en el otro extremo. | Nueva lógica | Nunca medido. Barato con las velas D1 que ya hay. | medio día | en cola |
 | P6 | **Volumen de ticks como filtro de la ruptura** (spike de `tick_volume` vs mediana 20 barras). | Cambio sobre lo implementado | Backlog #4 desde mayo, nunca medido. Se mide como celda del arnés Fase 2, no en vivo. | medio día | en cola |
 | P7 | **Leo: pedirle su diario REAL de operaciones** (fecha, par, entrada, SL, TP, resultado) + Setup 2. | Método externo | Si Leo es rentable, sus trades reales son la verdad contra la que comparar la traducción, mejor que el audit visual. Pendiente de su respuesta al artifact. | 0 (depende de él) | esperando a Leo |
 | P8 | **Combinar lo implementado: calendar play + canal rápido de news (v3.65.0)** = operar el dato con número a T+15-60 s, dirección por sorpresa, TP en la excursión mediana a +3 min medida por el shadow. | Combinación | Solo tiene sentido si el shadow de calendar play junta n≥25 (hoy 1 fila, por horario). | 0 hasta tener data | bloqueada por muestra |
 | P9 | **A1 (reversión a 2σ, Fase 3b) en oro e índices**, con el mismo arnés en pseudo-pips de P1 (`.cache_p1/M15`). | Misma lógica, otro instrumento + combinar lo medido | A1 fue la ÚNICA señal que le ganó al azar (~+0,5p bruto sobre el control) y murió por costo (0,9p+spread en FX). En oro/índices el costo medido en P1 es **0,20-0,28 pseudo-pips** ⇒ el mismo +0,5 sobre el azar podría quedar neto positivo. A diferencia de `structure`, acá hay información probada; falta saber si sobrevive a otro instrumento. | medio día (cache ya bajado) | en cola (después de P2) |
+| P10 | **Fade del canal Donchian D1 (reversión de mediano plazo), probado SOLO en los 6 pares reservados.** Corto cuando el cierre rompe el máximo de 20 días, largo al revés; misma ejecución/stop/salida que P2 invertidas. | Hipótesis nacida de un NO PASA, test fuera de muestra | P2 dio que entrar con la ruptura de 20 días es **peor que el azar** (−0,23R vs control −0,14R, 16/20 pares negativos, las 2 mitades) con costo de solo 0,016R ⇒ el bruto negativo es información, no fricción. Distinto de lo refutado: fade-chop y L1 eran intradía (M5) con costo ~15% del rango; acá el costo es ~1% del movimiento. Como la idea sale de mirar los 20 pares, **se declara antes y se mide únicamente en los 6 reservados** (nunca mirados) ⇒ out-of-sample limpio. | medio día (tool de P2 + flag) | en cola (después de P3) |
 
 ## Lo medido por esta línea
 
@@ -95,3 +96,27 @@ información en ningún instrumento**; el problema es la idea (comprar rupturas 
 Fase 2b/3. Cerrado: no probar `structure` en otros índices/variantes. Lo que sí deja: el costo en oro/índices es
 ~0,2-0,3 pp contra 0,8 en EURUSD ⇒ sirve para P9 (A1, que sí tiene información). Swap no descontado: 2,5-3,6% de los
 trades cruzan el rollover (inmaterial). Arnés con control positivo (P0) ⇒ el NO PASA vale.
+
+### 16 Oct 2026 — P2 turtle / Donchian D1 y H4: NO PASA, peor que el azar (`tools/backtest_p2_donchian.py`)
+
+Criterio `docs/p2_donchian_criterio.md` (commit `192e3c2`, antes de medir). 20 pares FX, velas M5 re-muestreadas a
+D1/H4, ejecución fuera del rollover, stop 2·ATR(20) vela fina por vela fina, salida por canal, swap real.
+Neto en R (1R = stop inicial).
+
+| Sistema | n | neto/trade | bruto | costo | swap | ganados |
+|---|---|---|---|---|---|---|
+| **D1 20/10 (principal)** | 891 | **−0,226R** | −0,162 | 0,016 | −0,049 | 28% |
+| D1 55/20 | 468 | −0,346R | −0,271 | 0,017 | −0,059 | 22% |
+| H4 20/10 | 5.271 | −0,138R | −0,090 | 0,026 | −0,022 | 29% |
+| H4 55/20 | 2.738 | −0,159R | −0,099 | 0,030 | −0,031 | 26% |
+
+Principal: CI [−0,31, −0,14], mitades −0,19 / −0,26, **4/20 pares positivos**, **control (entradas al azar con las
+mismas salidas) mediana −0,14 / p95 −0,09 ⇒ peor que el azar**. Reservados NO mirados. Lectura: el costo acá es
+chico de verdad (0,016R ≈ 1% del riesgo) — **el problema no es la fricción, es que en FX 2020-2026 la ruptura de
+20/55 días revierte**. Coherente con todo lo intradía (las rupturas pierden, la reversión tiene información) ⇒ entra
+P10. Cerrado: no barrer N/M/stop ni otro TF para turtle en FX sobre esta data.
+Oro/índices (descriptivo, sin swap): oro da +0,13 a +0,95R pero **todo sale de los largos** en la suba 2020-26
+(D1 20/10: largos +0,56R, cortos −0,45R; H4 55/20: +0,95 / −0,44) ⇒ es la deriva, no el sistema (la misma trampa
+que refutó al LLM de news). USTEC D1 +0,13/+0,26R con n=24-49 (ilegible); US30 y DE40 negativos. No se propone.
+Nota de data: USDCAD, AUDNZD, AUDCAD, AUDJPY y CADJPY tienen cache M5 solo desde ene-2025 (n chico en esos pares).
+Arnés con control positivo (P0) ⇒ el NO PASA vale.
