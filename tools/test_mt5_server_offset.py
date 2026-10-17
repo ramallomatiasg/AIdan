@@ -23,6 +23,10 @@ from mt5_server_offset import derive_offset_s, StaleTickError  # noqa: E402
 
 NOW = 1789936519.0            # dom 20-sep-2026 20:35 UTC (la corrida contaminada)
 FRIDAY_CLOSE_TICK = 1789775819  # vie 18-sep 23:56:59 hora server (+3h) => -44,6h de NOW
+THURSDAY = NOW - 3 * 86400    # jue 17-sep 20:35 UTC, mercado abierto
+# Caso real del 10-oct: corrida a las 00:08:59 UTC del sabado, ultimo tick 23:59:5x server
+SAT_AFTER_CLOSE = 1791590939.0
+OCT9_CLOSE_TICK = 1791590939 - 9 * 60 + 10800  # 23:59:59 server => raw = -9 min
 
 
 class TestOffset(unittest.TestCase):
@@ -42,6 +46,8 @@ class TestOffset(unittest.TestCase):
         self.assertFalse(os.path.exists(self.cache), 'un tick viejo no debe escribir cache')
 
     def test_2_tick_fresco_deriva_y_cachea(self):
+        # 17-oct: NOW es domingo pre-apertura (mercado cerrado) => el "fresco" va en jueves
+        NOW = THURSDAY
         off = derive_offset_s(NOW + 3 * 3600 + 17, now=NOW, cache_path=self.cache)
         self.assertEqual(off, 10800)
         with open(self.cache, encoding='utf-8') as f:
@@ -52,6 +58,27 @@ class TestOffset(unittest.TestCase):
     def test_3_tick_viejo_con_cache_usa_cache(self):
         derive_offset_s(NOW - 3 * 86400 + 10800, now=NOW - 3 * 86400, cache_path=self.cache)  # medido el jueves
         self.assertEqual(derive_offset_s(FRIDAY_CLOSE_TICK, now=NOW, cache_path=self.cache), 10800)
+
+    def test_7_cierre_reciente_no_se_cachea_como_offset_0(self):
+        # sin cache: tiene que abortar, no devolver 0 (lo que paso el 10-oct)
+        with self.assertRaises(StaleTickError):
+            derive_offset_s(OCT9_CLOSE_TICK, now=SAT_AFTER_CLOSE, cache_path=self.cache)
+        self.assertFalse(os.path.exists(self.cache))
+
+    def test_8_cierre_reciente_con_cache_bueno_usa_cache(self):
+        derive_offset_s(THURSDAY + 10800, now=THURSDAY, cache_path=self.cache)
+        self.assertEqual(derive_offset_s(OCT9_CLOSE_TICK, now=SAT_AFTER_CLOSE,
+                                         cache_path=self.cache), 10800)
+
+    def test_9_cache_con_offset_imposible_se_ignora(self):
+        with open(self.cache, 'w', encoding='utf-8') as f:
+            json.dump({'offset_s': 0, 'measured_at_utc': 1791590939}, f)
+        with self.assertRaises(StaleTickError):
+            derive_offset_s(FRIDAY_CLOSE_TICK, now=NOW, cache_path=self.cache)
+
+    def test_10_offset_fuera_de_icmarkets_no_se_acepta_en_semana(self):
+        with self.assertRaises(StaleTickError):
+            derive_offset_s(THURSDAY - 1800, now=THURSDAY, cache_path=self.cache)
 
     def test_4_override_manual(self):
         self.assertEqual(derive_offset_s(0, now=NOW, override_hours=3, cache_path=self.cache), 10800)

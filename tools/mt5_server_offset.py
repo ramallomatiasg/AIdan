@@ -18,6 +18,14 @@ Regla:
      `--server-offset-hours`, o se ABORTA con error legible. Nunca un numero
      plausible.
 Un test de fuente verifica que ningun scorer vuelva a la formula cruda.
+
+17-oct-2026 — 2do agujero, misma clase: en las ~4h DESPUES del cierre del viernes
+el ultimo tick (hora server = UTC+3) menos `ahora` cae dentro de [-1h,+5h] y pasaba
+como "fresco": a las 00:08 UTC del sabado 10-oct dio raw=-9min => offset 0, se
+CACHEO, y las corridas del 10-oct y 17-oct puntuaron 96 filas del shadow book con
+ventanas corridas 3h. Dos guardas nuevas: (a) con el mercado FX cerrado (vie
+>=20:45 UTC a dom <21:00 UTC) nunca se deriva, (b) solo se aceptan los offsets
+posibles de ICMarkets (+2h / +3h), tanto al derivar como al leer el cache.
 """
 import json
 import os
@@ -26,6 +34,20 @@ import time as _time
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.mt5_server_offset.json')
 FRESH_MIN_S = -3600        # el server nunca deberia estar mas de 1h DETRAS de UTC
 FRESH_MAX_S = 5 * 3600     # ni mas de 5h adelante (EET+DST = +3h)
+ALLOWED_OFFSETS_S = (7200, 10800)  # ICMarkets (EET): +2h invierno / +3h verano
+
+
+def market_closed_utc(now):
+    """Ventana de fin de semana del FX en UTC (con margen): vie >=20:45 a dom <21:00."""
+    t = _time.gmtime(now)
+    mins = t.tm_hour * 60 + t.tm_min
+    if t.tm_wday == 4 and mins >= 20 * 60 + 45:
+        return True
+    if t.tm_wday == 5:
+        return True
+    if t.tm_wday == 6 and mins < 21 * 60:
+        return True
+    return False
 
 
 class StaleTickError(RuntimeError):
@@ -38,8 +60,9 @@ def derive_offset_s(tick_time, now=None, override_hours=None, cache_path=CACHE_P
         return int(round(float(override_hours) * 2) * 1800)
     now = _time.time() if now is None else now
     raw = float(tick_time) - float(now)
-    if FRESH_MIN_S <= raw <= FRESH_MAX_S:
-        off = int(round(raw / 1800.0) * 1800)
+    off = int(round(raw / 1800.0) * 1800)
+    if (FRESH_MIN_S <= raw <= FRESH_MAX_S and off in ALLOWED_OFFSETS_S
+            and not market_closed_utc(now)):
         try:
             with open(cache_path, 'w', encoding='utf-8') as f:
                 json.dump({'offset_s': off, 'measured_at_utc': int(now)}, f)
@@ -52,6 +75,8 @@ def derive_offset_s(tick_time, now=None, override_hours=None, cache_path=CACHE_P
             with open(cache_path, encoding='utf-8') as f:
                 cached = json.load(f)
             off = int(cached['offset_s'])
+            if off not in ALLOWED_OFFSETS_S:
+                raise ValueError(f"offset cacheado imposible: {off}s")
             print(f"  [offset] tick viejo ({raw/3600:.1f}h): mercado cerrado, "
                   f"uso el offset cacheado {off/3600:+.1f}h (medido {cached.get('measured_at_utc')})")
             return off
