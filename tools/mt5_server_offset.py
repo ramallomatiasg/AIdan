@@ -19,13 +19,13 @@ Regla:
      plausible.
 Un test de fuente verifica que ningun scorer vuelva a la formula cruda.
 
-17-oct-2026 — 2do agujero, misma clase: en las ~4h DESPUES del cierre del viernes
-el ultimo tick (hora server = UTC+3) menos `ahora` cae dentro de [-1h,+5h] y pasaba
-como "fresco": a las 00:08 UTC del sabado 10-oct dio raw=-9min => offset 0, se
-CACHEO, y las corridas del 10-oct y 17-oct puntuaron 96 filas del shadow book con
-ventanas corridas 3h. Dos guardas nuevas: (a) con el mercado FX cerrado (vie
->=20:45 UTC a dom <21:00 UTC) nunca se deriva, (b) solo se aceptan los offsets
-posibles de ICMarkets (+2h / +3h), tanto al derivar como al leer el cache.
+17-oct-2026 — guardas: (a) con el mercado FX cerrado (vie >=20:45 a dom <21:00 UTC) nunca
+se deriva, (b) solo se aceptan offsets posibles de ICMarkets (+2h/+3h). El offset server-UTC
+REAL es +3h (verano) y eso esta bien.
+⚠️ PERO OJO, verificado el 17-oct: `mt5.copy_rates_range` toma un datetime NAIVE como hora
+LOCAL de la PC (AR, UTC-3) y le suma 3h. Los scorers que arman `srv_start = utc + offset`
+naive piden la ventana 3h TARDE con este offset. Con offset 0 (el "bug" del cache del 10-oct)
+la ventana caia justo por casualidad. Arreglo pendiente de OK: pasar datetimes tz-aware.
 """
 import json
 import os
