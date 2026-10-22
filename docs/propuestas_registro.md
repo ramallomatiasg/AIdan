@@ -18,8 +18,8 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P1 | **Misma lógica, otro instrumento: XAUUSD, USTEC, DE40, US30 en M15/H1.** Correr el detector de `structure` (arnés Fase 2, `--symbols`) y los planes de Fase 4 sobre oro e índices. | Cambio de instrumento | Screen del 9-oct (abajo): en EURUSD el costo de un trade es **~15% del rango mediano de una vela M15**; en oro 1,5%, USTEC 2,3%, DE40 1,5%. El research dijo que lo que falla es el supuesto "scalping intradía con esta fricción" — esta es la salida más barata: 6-10x menos fricción por el mismo movimiento relativo. Nunca medido acá (0 menciones de XAU/oro en docs). | 1 día (cache de velas nuevo) | ❌ **NO PASA 10-oct** (`structure`): peor que el azar también en oro/índices (ver abajo). Cerrado para `structure`; la parte "planes de Fase 4" pasa a P9 |
 | P2 | **Trend following clásico H4/D1: canal Donchian 20/55 con stop ATR y trailing (turtle)**, 20 pares + oro + índices, con swap. | Nueva lógica | H4 solo se probó con el detector de structure (refutado); Donchian nunca. Horizonte largo = costo chico frente al movimiento (c/ATR D1 ≈ 1%). Choca con lote mínimo como D1, pero primero saber si hay edge. | 1 día | ❌ **NO PASA 16-oct**: −0,23R/trade, PEOR que el azar (ver abajo). Cerrado turtle D1/H4 en FX |
 | P3 | **Rango asiático → ruptura de Londres** (orden en los extremos del rango 00-07 UTC, SL al otro lado, TP 1-2× rango). | Nueva lógica | Rankeada en el research del 19-ago, nunca medida acá. Es confluencia + sesión, las dos cosas que sobrevivieron en el estudio de falsificación. | medio día | ❌ **NO PASA 17-oct**: −0,031R/trade, 4/20 pares; le gana al azar pero no al costo (ver abajo). Cerrado |
-| P4 | **Lead-lag de la cesta USD:** cuando GBPUSD/AUDUSD/NZDUSD ya se movieron X·ATR en M5 y EURUSD no, operar el "catch-up". | Nueva lógica | El cache `.cache_fase2/M5_500000` tiene 26 pares alineados. Nunca medido. | 1 día | **PRÓXIMA** |
-| P5 | **Compresión → expansión en D1: inside bar / NR7 breakout** con stop en el otro extremo. | Nueva lógica | Nunca medido. Barato con las velas D1 que ya hay. | medio día | en cola |
+| P4 | **Lead-lag de la cesta USD:** cuando GBPUSD/AUDUSD/NZDUSD ya se movieron X·ATR en M5 y EURUSD no, operar el "catch-up". | Nueva lógica | El cache `.cache_fase2/M5_500000` tiene 26 pares alineados. Nunca medido. | 1 día | ❌ **NO PASA 22-oct**: bruto +0,13p contra 0,80p de costo, 0/4 objetivos (ver abajo). Cerrado |
+| P5 | **Compresión → expansión en D1: inside bar / NR7 breakout** con stop en el otro extremo. | Nueva lógica | Nunca medido. Barato con las velas D1 que ya hay. | medio día | **PRÓXIMA** |
 | P6 | **Volumen de ticks como filtro de la ruptura** (spike de `tick_volume` vs mediana 20 barras). | Cambio sobre lo implementado | Backlog #4 desde mayo, nunca medido. Se mide como celda del arnés Fase 2, no en vivo. | medio día | en cola |
 | P7 | **Leo: pedirle su diario REAL de operaciones** (fecha, par, entrada, SL, TP, resultado) + Setup 2. | Método externo | Si Leo es rentable, sus trades reales son la verdad contra la que comparar la traducción, mejor que el audit visual. Pendiente de su respuesta al artifact. | 0 (depende de él) | esperando a Leo |
 | P8 | **Combinar lo implementado: calendar play + canal rápido de news (v3.65.0)** = operar el dato con número a T+15-60 s, dirección por sorpresa, TP en la excursión mediana a +3 min medida por el shadow. | Combinación | Solo tiene sentido si el shadow de calendar play junta n≥25 (hoy 1 fila, por horario). | 0 hasta tener data | bloqueada por muestra |
@@ -185,3 +185,23 @@ El ancla EURUSD M15 reproduce el patrón de Fase 3b (bruto +0,63, le gana al aza
 Lectura: bajar el costo no alcanzó para que la reversión pague por sí misma. Cerrado: no barrer umbral/media/horizonte
 ni filtrar "solo cortos" sobre esta data (eso sería elegir el lado después de verlo). Arnés con control positivo (P0)
 ⇒ el NO PASA vale.
+
+### 22 Oct 2026 — P4 lead-lag de la cesta USD: NO PASA (`tools/backtest_p4_lead_lag.py`)
+
+Criterio `docs/p4_lead_lag_criterio.md` (commit `c924563`, antes de medir). EURUSD/GBPUSD/AUDUSD/NZDUSD en M5
+alineados (499.577 velas): si los otros tres se movieron ≥1 ATR en 30 min en la misma dirección y el objetivo
+quedó en ±0,25 ATR, entrar en el objetivo a favor; salida por tiempo a H6 (30 min), una posición por objetivo,
+sin cruzar el rollover.
+
+| H6 (decide) | n | neto p | bruto | costo | control mediana |
+|---|---|---|---|---|---|
+| EURUSD | 4.074 | −0,67 | +0,13 | 0,80 | −0,80 |
+| GBPUSD | 3.361 | −0,57 | +0,25 | 0,82 | −0,82 |
+| AUDUSD | 1.809 | −0,69 | +0,11 | 0,80 | −0,80 |
+| NZDUSD | 1.849 | −0,93 | −0,09 | 0,84 | −0,83 |
+
+Pool: n=11.093 (~6/día), **neto −0,69p, CI [−0,85, −0,52]**, las dos mitades negativas, 0/4 positivos, control p95
+−0,687 ⇒ empata con el azar. Falla 4 de 5. H3 −0,70 y H12 −0,72, también negativos. Lectura: el "catch-up" existe
+pero es diminuto (+0,1 a +0,25p brutos, ~+0,1p sobre el azar) contra 0,8p de costo en los XXX/USD. Es el mismo
+patrón de toda la línea intradía: algo de información, muy por debajo de la fricción. Cerrado: no barrer ventana,
+umbrales ni horizonte. Los reservados (cesta JPY) no se miran. Arnés con control positivo (P0) ⇒ el NO PASA vale.
