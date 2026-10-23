@@ -30,7 +30,7 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P13 | **A1 como OPCIÓN BINARIA** (acierto de dirección a 15 min, sin importar el tamaño). | Otro producto (pedido del user: "¿otro broker, tipo IQ Option?") | En binaria el pago no depende del tamaño del movimiento ⇒ una señal que acierta seguido por poco (A1) es la que mejor encaja. | medio día | ⚠️ **PASA el criterio 23-oct pero es ARTEFACTO**: el diagnóstico adversarial lo reduce a ~52,1-52,6% en horario líquido (empate con payout 90%). Ver abajo. **Shadow en vivo P13b armado 23-oct** (Deriv, desde el 26-oct) |
 | P14 | **Carry SOLO (sin tendencia), solo en los 6 reservados.** | Hipótesis nacida de P11, fuera de muestra | En P11 el carry solo dio +0,037%/semana y la tendencia restaba. | 1 h | ❌ **NO PASA 23-oct**: +0,001%/semana; el swap gana y el precio se lo come |
 | P15 | **Carry de funding en cripto (delta-neutral): comprar spot y vender el perpetuo** cuando el funding promedio de 7 días supera un umbral; BTC/ETH/SOL. | Otro mercado, premio estructural | Los apalancados en largo PAGAN funding a los cortos: la ganancia no depende de adivinar el precio (como el carry de FX, pero el premio cripto es mucho mayor). Data pública y gratis (historial de funding de Binance/Bybit/Hyperliquid), testnets para el shadow. Riesgos: funding negativo en mercados bajistas, riesgo de exchange, liquidación de la pata corta. | 1 día (bajar historial + tool) | ✅ **PASA 23-oct (primera de la línea), también fuera de muestra**: +4,8%/año sobre el capital (reservados +5,8%), pero 2025-26 casi cero. Ver abajo |
-| P16 | **Prima de volatilidad (vender volatilidad) con filtro de contango del VIX**: estar corto de volatilidad (proxy: ETF SVXY) solo cuando VIX < VIX3M. | Otro mercado, premio estructural | La volatilidad implícita suele estar por encima de la realizada: quien vende el "seguro" cobra un premio documentado. Data diaria gratis (VIX, VIX3M, SVXY). Riesgo de cola (feb-2018, mar-2020): el filtro de contango es lo que se mide. Paper trading en Alpaca o IBKR. | medio día | en cola |
+| P16 | **Prima de volatilidad (vender volatilidad) con filtro de contango del VIX**: estar corto de volatilidad (proxy: ETF SVXY) solo cuando VIX < VIX3M. | Otro mercado, premio estructural | La volatilidad implícita suele estar por encima de la realizada: quien vende el "seguro" cobra un premio documentado. Data diaria gratis (VIX, VIX3M, SVXY). Riesgo de cola (feb-2018, mar-2020): el filtro de contango es lo que se mide. Paper trading en Alpaca o IBKR. | medio día | ❌ **NO PASA 23-oct**: CAGR +28,6% pero caída máx 55% y Sharpe 0,80, peores que comprar SPY (34%, 0,95). Ver abajo |
 | P17 | **Deriva post-resultados (PEAD) en acciones de EE.UU.**: comprar tras una sorpresa positiva de ganancias, mantener ~20-60 días. | Otro mercado, anomalía documentada | arXiv 2512.00280 (2025): ~0,43%/mes de alfa, solo en sorpresas positivas. Comisión cero en brokers como Alpaca (con API de paper trading). Falta una fuente gratis de fechas y sorpresas de resultados. | 1-2 días | en cola |
 | P18 | **Sesgo favorito-longshot en mercados de predicción (Polymarket/Kalshi)**: comprar el resultado favorito (precio ≥ 0,90) cerca del cierre. | Otro mercado, sesgo conductual | En apuestas está documentado que los longshots se sobrepagan; en Polymarket sin verificar. Data pública de mercados resueltos. Descartado del mismo rubro: el arbitraje de latencia en los mercados cripto de 15 min (lo cerraron con fees dinámicos en 2026) y el market making (selección adversa; el market maker interno de Kalshi no es rentable). | 1 día | en cola |
 | P15b | **Rotación del carry de funding a las K=3 monedas que más pagan** (sobre P15). | Cambio sobre lo que pasó | Varias monedas pasan mucho tiempo afuera y esa plata rinde 0; concentrar en las que más pagan la usaría mejor. | medio día | ❌ **NO PASA 23-oct**: +0,21%/año sobre P15, CI cruza cero, y últimos 12 meses −0,9%. Ver abajo |
@@ -372,3 +372,24 @@ Falla 2 de 5 (diferencia con CI que cruza cero; últimos 12 meses negativos). Po
 funding es alto (2020 +12,8 vs +8,1; 2021 +21,1 vs +18,2) y pierde cuando es bajo (2023-2026), porque rota mucho
 (290 entradas en 7 años, 0,38% cada ida y vuelta) persiguiendo diferencias chicas. Las 10 monedas nuevas no se
 bajaron. Cerrado: no barrer K ni el corte de ranking.
+
+### 23 Oct 2026 — P16 vender volatilidad (SVXY con VIX < VIX3M): NO PASA (`tools/backtest_p16_vol.py`)
+
+Criterio `docs/p16_vender_volatilidad_criterio.md` (`7a3b84e`). Datos diarios públicos de Yahoo, oct-2011 →
+23-oct-2026. Señal al cierre, ejecución a la apertura siguiente, 0,05% por lado. Control del motor antes de medir:
+con la señal "siempre adentro" reproduce SVXY comprar y mantener (sino aborta).
+
+| | CAGR | caída máx | Sharpe | peor mes |
+|---|---|---|---|---|
+| **Regla (adentro 93% del tiempo, 183 cambios)** | **+28,6%** | **55,4%** | **0,80** | −27,4% (dic-2014) |
+| SVXY siempre adentro | +12,5% | 95,2% | 0,57 | |
+| SPY comprar y mantener | +15,5% | 33,7% | 0,95 | |
+
+CI de la media anual [+15,5%, +54,5%], mitades +45,5% / +13,7%. Pasa 4 de 5 y **falla el 4: más caída y peor
+Sharpe que simplemente comprar el índice**. Eventos: feb-2018 regla −15% (SVXY −91%: ahí el filtro sí salvó),
+mar-2020 −12% (SVXY −59%), **ago-2024 −29% (SVXY −17%: el filtro entró/salió a destiempo y empeoró)**. La mayor
+parte del CAGR es 2012-2017, cuando SVXY era −1x; desde mar-2018 es −0,5x y la 2da mitad rinde +13,7% contra
+~+16% de SPY. SVIX (−1x desde 2022) con la misma regla: +6,2%/año con caída de 75%.
+
+**Lectura:** el premio existe y el filtro evita la catástrofe de 2018, pero en este período **comprar y mantener el
+S&P 500 rindió casi lo mismo con menos riesgo**. Cerrado: no barrer el umbral del ratio, otros ETFs ni horarios.
