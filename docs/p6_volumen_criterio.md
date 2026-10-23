@@ -37,3 +37,7 @@ positivo, y es mejor que elegir el mismo número de señales al azar?** Prior ba
 `tick_volume` de MT5 es cantidad de cambios de precio, no volumen real (proxy). El neto de Fase 2 usa la comisión
 y el swap del spec; el spread no se cobró en Fase 2 ⇒ el neto es una cota OPTIMISTA (si no pasa así, menos con
 spread).
+
+**Enmienda 1 (23-oct, ANTES de ver un número):** Fase 2 en M15 solo tiene checkpoints para **15** de los 20 pares
+(USDCAD, AUDJPY, AUDNZD, AUDCAD y CADJPY arrancan en 2025 y no entraron). El universo pasa a esos 15 y el
+criterio 5 a **≥ 9 de 15** (el mismo 60%). Nada más cambia.
