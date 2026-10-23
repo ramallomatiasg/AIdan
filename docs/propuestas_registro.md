@@ -33,6 +33,7 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P16 | **Prima de volatilidad (vender volatilidad) con filtro de contango del VIX**: estar corto de volatilidad (proxy: ETF SVXY) solo cuando VIX < VIX3M. | Otro mercado, premio estructural | La volatilidad implícita suele estar por encima de la realizada: quien vende el "seguro" cobra un premio documentado. Data diaria gratis (VIX, VIX3M, SVXY). Riesgo de cola (feb-2018, mar-2020): el filtro de contango es lo que se mide. Paper trading en Alpaca o IBKR. | medio día | en cola |
 | P17 | **Deriva post-resultados (PEAD) en acciones de EE.UU.**: comprar tras una sorpresa positiva de ganancias, mantener ~20-60 días. | Otro mercado, anomalía documentada | arXiv 2512.00280 (2025): ~0,43%/mes de alfa, solo en sorpresas positivas. Comisión cero en brokers como Alpaca (con API de paper trading). Falta una fuente gratis de fechas y sorpresas de resultados. | 1-2 días | en cola |
 | P18 | **Sesgo favorito-longshot en mercados de predicción (Polymarket/Kalshi)**: comprar el resultado favorito (precio ≥ 0,90) cerca del cierre. | Otro mercado, sesgo conductual | En apuestas está documentado que los longshots se sobrepagan; en Polymarket sin verificar. Data pública de mercados resueltos. Descartado del mismo rubro: el arbitraje de latencia en los mercados cripto de 15 min (lo cerraron con fees dinámicos en 2026) y el market making (selección adversa; el market maker interno de Kalshi no es rentable). | 1 día | en cola |
+| P15b | **Rotación del carry de funding a las K=3 monedas que más pagan** (sobre P15). | Cambio sobre lo que pasó | Varias monedas pasan mucho tiempo afuera y esa plata rinde 0; concentrar en las que más pagan la usaría mejor. | medio día | ❌ **NO PASA 23-oct**: +0,21%/año sobre P15, CI cruza cero, y últimos 12 meses −0,9%. Ver abajo |
 
 ## Lo medido por esta línea
 
@@ -355,3 +356,19 @@ libre de riesgo, concentrada en el boom de 2021, y en 2025-26 quedó por DEBAJO 
 ~$30/año. Riesgos no modelados: quiebra del exchange (las dos patas en el mismo lado) y liquidación si no se
 rebalancea a tiempo. **Próximo paso según el criterio: shadow en vivo** (registrar en papel la misma regla con
 datos públicos en tiempo real, o en testnet) antes de cualquier plata.
+
+### 23 Oct 2026 — P15b rotación del carry de funding (K=3): NO PASA (`tools/backtest_p15b_rotacion.py`)
+
+Criterio `docs/p15b_rotacion_criterio.md` (`5f1dc1f`). Control del motor antes de medir: con K=10 y sin corte de
+ranking reproduce P15 exacto (diferencia máxima por período 6e-17).
+
+| | anual | CI95 | mitades | caída máx | últimos 12 meses |
+|---|---|---|---|---|---|
+| **Rotación K=3** | +5,30% | [+3,84, +6,96] | +9,7 / +0,9 | 1,87% | **−0,89%** |
+| P15 (una ranura por moneda), mismas 10 | +5,09% | | | | +0,11% |
+| **Diferencia** | **+0,21%** | **[−0,34, +0,82]** | | | |
+
+Falla 2 de 5 (diferencia con CI que cruza cero; últimos 12 meses negativos). Por año: la rotación gana cuando el
+funding es alto (2020 +12,8 vs +8,1; 2021 +21,1 vs +18,2) y pierde cuando es bajo (2023-2026), porque rota mucho
+(290 entradas en 7 años, 0,38% cada ida y vuelta) persiguiendo diferencias chicas. Las 10 monedas nuevas no se
+bajaron. Cerrado: no barrer K ni el corte de ranking.
