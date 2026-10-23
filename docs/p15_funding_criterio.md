@@ -54,3 +54,11 @@ con eso, **shadow en testnet** (Binance/Hyperliquid) antes de pensar en plata.
   precio del perpetuo de la vela.
 - El funding de 2020-2021 fue excepcionalmente alto (mercado alcista con mucho apalancamiento); por eso se exige
   que pase en las dos mitades.
+
+**Enmienda 1 (23-oct, DESPUÉS de una primera corrida, por un bug del tool — declarado):** la 1ra corrida dio PASA
+con +13,8%/año, pero "siempre adentro" daba +1.797% en DOGE, imposible para una posición neutral. Causa: el
+rebalanceo cobraba el costo pero no reseteaba los precios de entrada, así que el funding quedaba ponderado por
+la suba de la moneda (DOGE ×270) y el nocional crecía sin capital que lo respalde. Corregido según lo que dice
+el criterio ("rebalanceo = costo de ida y vuelta" ⇒ cerrar y reabrir al mismo nocional): en cada rebalanceo se
+realiza base + funding y se resetean los precios de entrada. **Las reglas, umbrales y criterio NO cambian.** La
+1ra corrida queda invalidada y solo vale la corregida.
