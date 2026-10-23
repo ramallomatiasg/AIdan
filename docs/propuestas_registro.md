@@ -29,6 +29,10 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P12 | **Drift pre-FOMC (Lucca & Moench 2015) en índices:** largo US500/USTEC/DE40 desde el cierre del día anterior al anuncio hasta 14:00 ET del día del FOMC (antes del dato); descriptivo en USD (EURUSD). | Paper + otro instrumento | Es el único efecto de calendario documentado que ocurre ANTES del dato (no hay que reaccionar rápido, que es donde news perdió) y vive en índices, donde el costo medido en P1 es 0,2-0,3 pp. Nunca medido acá (0 menciones de FOMC/Lucca en docs). **Ojo:** la literatura posterior (2016+) reporta que el efecto se debilitó tras publicarse ⇒ prior bajo, y con ~8 reuniones/año hay ~50 eventos en 2020-26 ⇒ el gate tiene que ser por evento, no por vela. Necesita la tabla de fechas FOMC (pública) y `.cache_p1/M15`. | medio día | ❌ **NO PASA 23-oct** (4/5: no le gana a la misma ventana en días normales), ver abajo |
 | P13 | **A1 como OPCIÓN BINARIA** (acierto de dirección a 15 min, sin importar el tamaño). | Otro producto (pedido del user: "¿otro broker, tipo IQ Option?") | En binaria el pago no depende del tamaño del movimiento ⇒ una señal que acierta seguido por poco (A1) es la que mejor encaja. | medio día | ⚠️ **PASA el criterio 23-oct pero es ARTEFACTO**: el diagnóstico adversarial lo reduce a ~52,1-52,6% en horario líquido (empate con payout 90%). Ver abajo. **Shadow en vivo P13b armado 23-oct** (Deriv, desde el 26-oct) |
 | P14 | **Carry SOLO (sin tendencia), solo en los 6 reservados.** | Hipótesis nacida de P11, fuera de muestra | En P11 el carry solo dio +0,037%/semana y la tendencia restaba. | 1 h | ❌ **NO PASA 23-oct**: +0,001%/semana; el swap gana y el precio se lo come |
+| P15 | **Carry de funding en cripto (delta-neutral): comprar spot y vender el perpetuo** cuando el funding promedio de 7 días supera un umbral; BTC/ETH/SOL. | Otro mercado, premio estructural | Los apalancados en largo PAGAN funding a los cortos: la ganancia no depende de adivinar el precio (como el carry de FX, pero el premio cripto es mucho mayor). Data pública y gratis (historial de funding de Binance/Bybit/Hyperliquid), testnets para el shadow. Riesgos: funding negativo en mercados bajistas, riesgo de exchange, liquidación de la pata corta. | 1 día (bajar historial + tool) | **PRÓXIMA** (23-oct) |
+| P16 | **Prima de volatilidad (vender volatilidad) con filtro de contango del VIX**: estar corto de volatilidad (proxy: ETF SVXY) solo cuando VIX < VIX3M. | Otro mercado, premio estructural | La volatilidad implícita suele estar por encima de la realizada: quien vende el "seguro" cobra un premio documentado. Data diaria gratis (VIX, VIX3M, SVXY). Riesgo de cola (feb-2018, mar-2020): el filtro de contango es lo que se mide. Paper trading en Alpaca o IBKR. | medio día | en cola |
+| P17 | **Deriva post-resultados (PEAD) en acciones de EE.UU.**: comprar tras una sorpresa positiva de ganancias, mantener ~20-60 días. | Otro mercado, anomalía documentada | arXiv 2512.00280 (2025): ~0,43%/mes de alfa, solo en sorpresas positivas. Comisión cero en brokers como Alpaca (con API de paper trading). Falta una fuente gratis de fechas y sorpresas de resultados. | 1-2 días | en cola |
+| P18 | **Sesgo favorito-longshot en mercados de predicción (Polymarket/Kalshi)**: comprar el resultado favorito (precio ≥ 0,90) cerca del cierre. | Otro mercado, sesgo conductual | En apuestas está documentado que los longshots se sobrepagan; en Polymarket sin verificar. Data pública de mercados resueltos. Descartado del mismo rubro: el arbitraje de latencia en los mercados cripto de 15 min (lo cerraron con fees dinámicos en 2026) y el market making (selección adversa; el market maker interno de Kalshi no es rentable). | 1 día | en cola |
 
 ## Lo medido por esta línea
 
@@ -311,3 +315,16 @@ velas y ticks de forex de Deriv se leen sin cuenta; las cotizaciones exigen un `
 responde "This trade is temporarily unavailable"). Tarea `aidan-shadow-binaria` lun-vie desde el 26-oct, 10 pares,
 07-16 UTC, base propia. Gate: n≥400, CI inferior del acierto > break-even del payout real (provisorio contra 52,6%
 mientras no haya `DERIV_APP_ID`); a n≥800 sin pasar se apaga.
+
+### 23 Oct 2026 — búsqueda de ideas fuera de FX (pedido del user: "buscá qué hicieron otros, una tiene que funcionar")
+
+Criterio de selección: que la ganancia venga de **alguien que paga un premio** (funding, seguro de volatilidad,
+información que se difunde lento, sesgo de apostadores) y no de adivinar la dirección del precio, que es lo que
+20 pruebas refutaron en FX. Y que haya data pública para medirla con el mismo método (criterio antes, control,
+reservados) y demo/testnet para el shadow. Entran P15-P18.
+
+Lo que se encontró de "agentes que ganan solos": la competencia con plata real Alpha Arena (Nof1, oct-nov 2025,
+cripto en Hyperliquid) duró ~2 semanas; Qwen3 Max terminó con $12.231 y GPT-5 con $4.126 partiendo del mismo monto
+⇒ resultados de 2 semanas con n chico, más cerca de la suerte que de una estrategia. Un estudio on-chain de 95 M
+de transacciones de Polymarket (abr-2024 → dic-2025) reporta que solo el 0,51% de las billeteras ganó más de
+$1.000. Los videos de agentes ganando muestran a los que ganaron, no a los que perdieron.
