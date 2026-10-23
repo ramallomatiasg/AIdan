@@ -20,13 +20,15 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P3 | **Rango asiático → ruptura de Londres** (orden en los extremos del rango 00-07 UTC, SL al otro lado, TP 1-2× rango). | Nueva lógica | Rankeada en el research del 19-ago, nunca medida acá. Es confluencia + sesión, las dos cosas que sobrevivieron en el estudio de falsificación. | medio día | ❌ **NO PASA 17-oct**: −0,031R/trade, 4/20 pares; le gana al azar pero no al costo (ver abajo). Cerrado |
 | P4 | **Lead-lag de la cesta USD:** cuando GBPUSD/AUDUSD/NZDUSD ya se movieron X·ATR en M5 y EURUSD no, operar el "catch-up". | Nueva lógica | El cache `.cache_fase2/M5_500000` tiene 26 pares alineados. Nunca medido. | 1 día | ❌ **NO PASA 22-oct**: bruto +0,13p contra 0,80p de costo, 0/4 objetivos (ver abajo). Cerrado |
 | P5 | **Compresión → expansión en D1: inside bar / NR7 breakout** con stop en el otro extremo. | Nueva lógica | Nunca medido. Barato con las velas D1 que ya hay. | medio día | ❌ **NO PASA 22-oct**: −0,10R, no mejor que el azar, 2/20 pares (ver abajo). Cerrado |
-| P6 | **Volumen de ticks como filtro de la ruptura** (spike de `tick_volume` vs mediana 20 barras). | Cambio sobre lo implementado | Backlog #4 desde mayo, nunca medido. Se mide como celda del arnés Fase 2, no en vivo. | medio día | en cola, **baja prioridad** (22-oct): filtra `structure`, que es peor que el azar en todo instrumento (Fase 2, P1); un filtro solo puede recortar, no crear información |
+| P6 | **Volumen de ticks como filtro de la ruptura** (spike de `tick_volume` vs mediana 20 barras). | Cambio sobre lo implementado | Backlog #4 desde mayo, nunca medido. Se mide como celda del arnés Fase 2, no en vivo. | medio día | en cola, **baja prioridad** (22-oct): filtra `structure`, que es peor que el azar en todo instrumento (Fase 2, P1); un filtro solo puede recortar, no crear información. ❌ **NO PASA 23-oct**: −0,82p; elige mejor que el azar pero sigue en pérdida |
 | P7 | **Leo: pedirle su diario REAL de operaciones** (fecha, par, entrada, SL, TP, resultado) + Setup 2. | Método externo | Si Leo es rentable, sus trades reales son la verdad contra la que comparar la traducción, mejor que el audit visual. Pendiente de su respuesta al artifact. | 0 (depende de él) | esperando a Leo |
 | P8 | **Combinar lo implementado: calendar play + canal rápido de news (v3.65.0)** = operar el dato con número a T+15-60 s, dirección por sorpresa, TP en la excursión mediana a +3 min medida por el shadow. | Combinación | Solo tiene sentido si el shadow de calendar play junta n≥25 (hoy 1 fila, por horario). | 0 hasta tener data | bloqueada por muestra |
 | P9 | **A1 (reversión a 2σ, Fase 3b) en oro e índices**, con el mismo arnés en pseudo-pips de P1 (`.cache_p1/M15`). | Misma lógica, otro instrumento + combinar lo medido | A1 fue la ÚNICA señal que le ganó al azar (~+0,5p bruto sobre el control) y murió por costo (0,9p+spread en FX). En oro/índices el costo medido en P1 es **0,20-0,28 pseudo-pips** ⇒ el mismo +0,5 sobre el azar podría quedar neto positivo. A diferencia de `structure`, acá hay información probada; falta saber si sobrevive a otro instrumento. | medio día (cache ya bajado) | ❌ **NO PASA 22-oct** (4/5: CI cruza cero; el neto es la deriva alcista de los índices), ver abajo. Cerrado A1 en oro/índices |
 | P10 | **Fade del canal Donchian D1 (reversión de mediano plazo), probado SOLO en los 6 pares reservados.** Corto cuando el cierre rompe el máximo de 20 días, largo al revés; misma ejecución/stop/salida que P2 invertidas. | Hipótesis nacida de un NO PASA, test fuera de muestra | P2 dio que entrar con la ruptura de 20 días es **peor que el azar** (−0,23R vs control −0,14R, 16/20 pares negativos, las 2 mitades) con costo de solo 0,016R ⇒ el bruto negativo es información, no fricción. Distinto de lo refutado: fade-chop y L1 eran intradía (M5) con costo ~15% del rango; acá el costo es ~1% del movimiento. Como la idea sale de mirar los 20 pares, **se declara antes y se mide únicamente en los 6 reservados** (nunca mirados) ⇒ out-of-sample limpio. | medio día (tool de P2 + flag) | ❌ **NO PASA 22-oct** (4/5: CI cruza cero), ver abajo. Cerrado Donchian D1 en FX en cualquier dirección |
-| P11 | **Carry con filtro de tendencia (D1/semanal):** mantener el lado del par que COBRA swap solo cuando la tendencia D1/60d va en la misma dirección; rebalanceo semanal, 20 pares. | Paper (Menkhoff et al. 2012; Lustig-Verdelhan) | Es la única familia de FX con premio documentado que NO es de precio intradía: el retorno viene del diferencial de tasas, no de adivinar la dirección, y el horizonte largo deja el costo en ~1% del movimiento. Nunca medido acá (0 menciones de carry en docs). **Límite de data a resolver ANTES de declarar:** el `spec.json` del cache trae el swap ACTUAL, no el histórico ⇒ usarlo para 2020-26 sería look-ahead (en 2020-21 las tasas estaban en ~0). Hace falta una tabla mensual de tasas de política (Fed/BCE/BoE/BoJ/RBA/RBNZ/BoC/SNB, pública) para reconstruir el swap mes a mes. | 1 día (tabla de tasas + tool) | en cola |
-| P12 | **Drift pre-FOMC (Lucca & Moench 2015) en índices:** largo US500/USTEC/DE40 desde el cierre del día anterior al anuncio hasta 14:00 ET del día del FOMC (antes del dato); descriptivo en USD (EURUSD). | Paper + otro instrumento | Es el único efecto de calendario documentado que ocurre ANTES del dato (no hay que reaccionar rápido, que es donde news perdió) y vive en índices, donde el costo medido en P1 es 0,2-0,3 pp. Nunca medido acá (0 menciones de FOMC/Lucca en docs). **Ojo:** la literatura posterior (2016+) reporta que el efecto se debilitó tras publicarse ⇒ prior bajo, y con ~8 reuniones/año hay ~50 eventos en 2020-26 ⇒ el gate tiene que ser por evento, no por vela. Necesita la tabla de fechas FOMC (pública) y `.cache_p1/M15`. | medio día | **PRÓXIMA** (adelantada sobre P6 el 22-oct) |
+| P11 | **Carry con filtro de tendencia (D1/semanal):** mantener el lado del par que COBRA swap solo cuando la tendencia D1/60d va en la misma dirección; rebalanceo semanal, 20 pares. | Paper (Menkhoff et al. 2012; Lustig-Verdelhan) | Es la única familia de FX con premio documentado que NO es de precio intradía: el retorno viene del diferencial de tasas, no de adivinar la dirección, y el horizonte largo deja el costo en ~1% del movimiento. Nunca medido acá (0 menciones de carry en docs). **Límite de data a resolver ANTES de declarar:** el `spec.json` del cache trae el swap ACTUAL, no el histórico ⇒ usarlo para 2020-26 sería look-ahead (en 2020-21 las tasas estaban en ~0). Hace falta una tabla mensual de tasas de política (Fed/BCE/BoE/BoJ/RBA/RBNZ/BoC/SNB, pública) para reconstruir el swap mes a mes. | 1 día (tabla de tasas + tool) | ❌ **NO PASA 23-oct**: +0,004%/semana (cero); la tendencia le resta al carry. Ver abajo |
+| P12 | **Drift pre-FOMC (Lucca & Moench 2015) en índices:** largo US500/USTEC/DE40 desde el cierre del día anterior al anuncio hasta 14:00 ET del día del FOMC (antes del dato); descriptivo en USD (EURUSD). | Paper + otro instrumento | Es el único efecto de calendario documentado que ocurre ANTES del dato (no hay que reaccionar rápido, que es donde news perdió) y vive en índices, donde el costo medido en P1 es 0,2-0,3 pp. Nunca medido acá (0 menciones de FOMC/Lucca en docs). **Ojo:** la literatura posterior (2016+) reporta que el efecto se debilitó tras publicarse ⇒ prior bajo, y con ~8 reuniones/año hay ~50 eventos en 2020-26 ⇒ el gate tiene que ser por evento, no por vela. Necesita la tabla de fechas FOMC (pública) y `.cache_p1/M15`. | medio día | ❌ **NO PASA 23-oct** (4/5: no le gana a la misma ventana en días normales), ver abajo |
+| P13 | **A1 como OPCIÓN BINARIA** (acierto de dirección a 15 min, sin importar el tamaño). | Otro producto (pedido del user: "¿otro broker, tipo IQ Option?") | En binaria el pago no depende del tamaño del movimiento ⇒ una señal que acierta seguido por poco (A1) es la que mejor encaja. | medio día | ⚠️ **PASA el criterio 23-oct pero es ARTEFACTO**: el diagnóstico adversarial lo reduce a ~52,1-52,6% en horario líquido (empate con payout 90%). Ver abajo |
+| P14 | **Carry SOLO (sin tendencia), solo en los 6 reservados.** | Hipótesis nacida de P11, fuera de muestra | En P11 el carry solo dio +0,037%/semana y la tendencia restaba. | 1 h | ❌ **NO PASA 23-oct**: +0,001%/semana; el swap gana y el precio se lo come |
 
 ## Lo medido por esta línea
 
@@ -224,3 +226,78 @@ tirar una moneda con el mismo stop y salida). Falla 4 de 5. El costo acá es chi
 el bruto. Coherente con P2 (Donchian D1) y con todo lo de ruptura: **en FX 2020-26 las rupturas no siguen, ni
 intradía ni en D1, con o sin compresión previa.** Cerrado: no barrer N (NR4, NR10), salida ni stop. Reservados no
 mirados. Arnés con control positivo (P0) ⇒ el NO PASA vale.
+
+### 23 Oct 2026 — P12 drift pre-FOMC en USTEC/US30: NO PASA (`tools/backtest_p12_pre_fomc.py`)
+
+Criterio `docs/p12_pre_fomc_criterio.md` (`c1671b6`). Largo 14:00 ET del día anterior → 13:45 ET del comunicado,
+51 reuniones programadas 2020-06 → 2026-09, spread de entrada y salida + 0,02% de financiación.
+
+| | n | media neta | mediana | ganados | misma ventana en días normales | control p95 |
+|---|---|---|---|---|---|---|
+| USTEC | 51 | +0,290% | +0,233% | 61% | +0,045% | +0,347% |
+| US30 | 51 | +0,058% | +0,113% | 65% | +0,037% | +0,253% |
+| DE40 (desc.) | 50 | +0,271% | +0,139% | 60% | +0,014% | +0,267% |
+
+Pool USTEC+US30: +0,174%, CI [+0,012, +0,342], mitades +0,28 / +0,07 ⇒ pasa 4 de 5 y **falla el control**: con 51
+eventos, un día cualquiera de índice se mueve ~1% y la media de 51 días al azar llega a +0,35% por pura varianza.
+**Ojo con el CI:** el pool cuenta como independientes USTEC y US30 del MISMO evento (correlación alta) ⇒ el CI
+real es más ancho de lo que dice. La 2da mitad es más floja (el efecto se debilitó, como dice la literatura).
+Cerrado: no barrer ventanas ni instrumentos.
+
+### 23 Oct 2026 — P6 pico de tick_volume como filtro de `structure` M15: NO PASA (`tools/backtest_p6_volumen.py`)
+
+Criterio `docs/p6_volumen_criterio.md` (`270287f` + enmienda 1 antes de medir: 15 pares con checkpoint de Fase 2).
+Sobre las 3.059.991 señales de Fase 2 (london): pico (`vol_ratio ≥ 1,5`, 23% de las señales) n=713.713, **neto
+−0,82p**, CI [−0,88, −0,79], 0/15 pares positivos; todas las señales −0,96p. Terciles de volumen: bajo −1,16 ·
+medio −0,91 · alto −0,82. **El volumen SÍ elige mejor que el azar** (+0,13p sobre subconjuntos al azar, le gana al
+p95) pero no saca a `structure` de la pérdida. Cerrado.
+
+### 23 Oct 2026 — P13 A1 como opción binaria: PASA el criterio, pero el diagnóstico lo desarma (`tools/backtest_p13_a1_binaria.py`)
+
+Origen: el user preguntó por otro broker (IQ Option). Exploratorio en muestra (20 pares): A1 acierta 54,3% a 15 min
+(n=522.531). Criterio `docs/p13_a1_binaria_criterio.md` (`0a752de`) declarado antes de mirar los reservados.
+**Resultado en los 6 reservados, H3 (15 min):** n=193.306, **acierto 54,44%, CI [54,22; 54,66]**, mitades 55,1 /
+53,8, 6/6 pares > 52,6% ⇒ **PASA FUERTE** según el criterio (EV por $1: +0,007 con payout 85%, +0,034 con 90%).
+
+**Diagnóstico adversarial (después, misma data):**
+
+| Subconjunto | 20 pares | reservados |
+|---|---|---|
+| Todo | 54,3% | 54,4% |
+| Compras / ventas | 55,2 / 53,5 | 55,3 / 53,6 |
+| **Solo rollover (23-01 server)** | **68,0%** | **67,3%** |
+| Sin rollover | 53,2% | 53,2% |
+| Spread de la vela > mediana / ≤ mediana | 57,2 / 53,1 | 56,5 / 53,0 |
+| **Horario 10-19 server y spread normal** | **52,6%** | **52,1%** |
+| Entrando 5 min tarde | 52,3% | 52,2% |
+
+Lectura: buena parte del acierto es **artefacto del bid de MT5** (el spread se abre, el bid se hunde y "rebota"
+sin que el precio medio se mueva), concentrado en el rollover y en velas de spread ancho, con la asimetría
+compras > ventas típica del artefacto. En una plataforma de binarias, que cotiza su propio precio medio, eso no se
+cobra. **La parte operable (horario líquido, spread normal) acierta 52,1-52,6% ⇒ empata con payout 90% y pierde
+con 85%.** Falla mía de especificación: el criterio debió excluir el rollover y el spread ancho desde el principio
+(lección de Fase 4, que ya había visto el spread del rollover). **No se propone shadow.** Cerrado: no barrer
+horarios ni umbrales.
+
+### 23 Oct 2026 — P11 carry + tendencia semanal: NO PASA (`tools/backtest_p11_carry.py`)
+
+Criterio `docs/p11_carry_criterio.md` (`66101d4`). Tasas de política a fin de mes 2019-11 → 2026-09 armadas con
+fuentes de los bancos centrales (`docs/p11_policy_rates.csv`), swap histórico = teórico − recargo del broker
+calibrado contra el swap real del spec (sale 0,2-0,5 pip/noche, razonable). 20 pares, rebalanceo semanal.
+
+| Variante | posiciones-semana | media semanal | precio | swap | costo |
+|---|---|---|---|---|---|
+| **Carry + tendencia (principal)** | 2.042 | **+0,004%** | +0,008 | +0,019 | 0,004 |
+| Carry solo (desc.) | 3.874 | +0,037% | +0,024 | +0,018 | 0,000 |
+| Tendencia sola (desc.) | 5.404 | −0,051% | −0,025 | −0,020 | 0,004 |
+
+Principal: CI [−0,088, +0,097], mitades +0,008 / −0,001, 11/20 pares, control p95 +0,021 ⇒ falla 4 de 5. La
+tendencia le RESTA al carry (coherente con P2). Lo ganado en los 20 pares viene de los cruces con yen (USDJPY
++28,8%, GBPJPY +29,2%, EURJPY +19,5%, AUDJPY +16,9%): el desplome del yen 2021-24.
+
+### 23 Oct 2026 — P14 carry solo, SOLO 6 reservados: NO PASA (`tools/backtest_p14_carry_solo.py`)
+
+Criterio `docs/p14_carry_solo_criterio.md` (`4d73183`), una sola corrida. 1.388 posiciones-semana, **media
++0,001%/semana**, CI [−0,077, +0,080], mitades −0,037 / +0,039, control p95 +0,042 ⇒ falla 3 de 4. El swap cobra
+(+0,019%/semana) y el precio se lo come (−0,022%): NZDJPY +25% (el yen otra vez), CHFJPY −13%, NZDCHF −9%, NZDCAD
+−12%. **Cerrado el carry en FX sobre esta data:** el carry de 2020-26 fue el yen, no un premio general.
