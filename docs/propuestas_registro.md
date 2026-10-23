@@ -29,7 +29,7 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P12 | **Drift pre-FOMC (Lucca & Moench 2015) en índices:** largo US500/USTEC/DE40 desde el cierre del día anterior al anuncio hasta 14:00 ET del día del FOMC (antes del dato); descriptivo en USD (EURUSD). | Paper + otro instrumento | Es el único efecto de calendario documentado que ocurre ANTES del dato (no hay que reaccionar rápido, que es donde news perdió) y vive en índices, donde el costo medido en P1 es 0,2-0,3 pp. Nunca medido acá (0 menciones de FOMC/Lucca en docs). **Ojo:** la literatura posterior (2016+) reporta que el efecto se debilitó tras publicarse ⇒ prior bajo, y con ~8 reuniones/año hay ~50 eventos en 2020-26 ⇒ el gate tiene que ser por evento, no por vela. Necesita la tabla de fechas FOMC (pública) y `.cache_p1/M15`. | medio día | ❌ **NO PASA 23-oct** (4/5: no le gana a la misma ventana en días normales), ver abajo |
 | P13 | **A1 como OPCIÓN BINARIA** (acierto de dirección a 15 min, sin importar el tamaño). | Otro producto (pedido del user: "¿otro broker, tipo IQ Option?") | En binaria el pago no depende del tamaño del movimiento ⇒ una señal que acierta seguido por poco (A1) es la que mejor encaja. | medio día | ⚠️ **PASA el criterio 23-oct pero es ARTEFACTO**: el diagnóstico adversarial lo reduce a ~52,1-52,6% en horario líquido (empate con payout 90%). Ver abajo. **Shadow en vivo P13b armado 23-oct** (Deriv, desde el 26-oct) |
 | P14 | **Carry SOLO (sin tendencia), solo en los 6 reservados.** | Hipótesis nacida de P11, fuera de muestra | En P11 el carry solo dio +0,037%/semana y la tendencia restaba. | 1 h | ❌ **NO PASA 23-oct**: +0,001%/semana; el swap gana y el precio se lo come |
-| P15 | **Carry de funding en cripto (delta-neutral): comprar spot y vender el perpetuo** cuando el funding promedio de 7 días supera un umbral; BTC/ETH/SOL. | Otro mercado, premio estructural | Los apalancados en largo PAGAN funding a los cortos: la ganancia no depende de adivinar el precio (como el carry de FX, pero el premio cripto es mucho mayor). Data pública y gratis (historial de funding de Binance/Bybit/Hyperliquid), testnets para el shadow. Riesgos: funding negativo en mercados bajistas, riesgo de exchange, liquidación de la pata corta. | 1 día (bajar historial + tool) | **PRÓXIMA** (23-oct) |
+| P15 | **Carry de funding en cripto (delta-neutral): comprar spot y vender el perpetuo** cuando el funding promedio de 7 días supera un umbral; BTC/ETH/SOL. | Otro mercado, premio estructural | Los apalancados en largo PAGAN funding a los cortos: la ganancia no depende de adivinar el precio (como el carry de FX, pero el premio cripto es mucho mayor). Data pública y gratis (historial de funding de Binance/Bybit/Hyperliquid), testnets para el shadow. Riesgos: funding negativo en mercados bajistas, riesgo de exchange, liquidación de la pata corta. | 1 día (bajar historial + tool) | ✅ **PASA 23-oct (primera de la línea), también fuera de muestra**: +4,8%/año sobre el capital (reservados +5,8%), pero 2025-26 casi cero. Ver abajo |
 | P16 | **Prima de volatilidad (vender volatilidad) con filtro de contango del VIX**: estar corto de volatilidad (proxy: ETF SVXY) solo cuando VIX < VIX3M. | Otro mercado, premio estructural | La volatilidad implícita suele estar por encima de la realizada: quien vende el "seguro" cobra un premio documentado. Data diaria gratis (VIX, VIX3M, SVXY). Riesgo de cola (feb-2018, mar-2020): el filtro de contango es lo que se mide. Paper trading en Alpaca o IBKR. | medio día | en cola |
 | P17 | **Deriva post-resultados (PEAD) en acciones de EE.UU.**: comprar tras una sorpresa positiva de ganancias, mantener ~20-60 días. | Otro mercado, anomalía documentada | arXiv 2512.00280 (2025): ~0,43%/mes de alfa, solo en sorpresas positivas. Comisión cero en brokers como Alpaca (con API de paper trading). Falta una fuente gratis de fechas y sorpresas de resultados. | 1-2 días | en cola |
 | P18 | **Sesgo favorito-longshot en mercados de predicción (Polymarket/Kalshi)**: comprar el resultado favorito (precio ≥ 0,90) cerca del cierre. | Otro mercado, sesgo conductual | En apuestas está documentado que los longshots se sobrepagan; en Polymarket sin verificar. Data pública de mercados resueltos. Descartado del mismo rubro: el arbitraje de latencia en los mercados cripto de 15 min (lo cerraron con fees dinámicos en 2026) y el market making (selección adversa; el market maker interno de Kalshi no es rentable). | 1 día | en cola |
@@ -328,3 +328,30 @@ cripto en Hyperliquid) duró ~2 semanas; Qwen3 Max terminó con $12.231 y GPT-5 
 ⇒ resultados de 2 semanas con n chico, más cerca de la suerte que de una estrategia. Un estudio on-chain de 95 M
 de transacciones de Polymarket (abr-2024 → dic-2025) reporta que solo el 0,51% de las billeteras ganó más de
 $1.000. Los videos de agentes ganando muestran a los que ganaron, no a los que perdieron.
+
+### 23 Oct 2026 — P15 carry de funding en cripto: PASA, también fuera de muestra (`tools/backtest_p15_funding.py`)
+
+Criterio `docs/p15_funding_criterio.md` (`748e62f` + enmienda 1 `por bug del tool`, declarada). Datos públicos de
+Binance (funding + velas de 8 h de spot y perpetuo), 2019-09 → 2026-10-22. Spot comprado + perpetuo vendido cuando
+la media de 7 días del funding ≥ 0,005%/8 h, salida si < 0; capital = 2 × nocional; costo 0,38% por ida y vuelta;
+rebalanceo a ±50%.
+
+**Bug encontrado y corregido antes de reportar:** la 1ra corrida daba +13,8%/año, pero "siempre adentro" en DOGE
+daba +1.797% (imposible si es neutral): el rebalanceo no reseteaba el nocional y el funding crecía con la suba de
+la moneda. Corregido según el criterio (rebalanceo = cerrar y reabrir); reglas y umbrales sin cambio.
+
+| | anual sobre capital | CI95 | mitades | caída máx | monedas > 0 | tasa libre media |
+|---|---|---|---|---|---|---|
+| **6 principales (decide)** | **+4,81%** | [+3,77, +6,00] | +7,2 / +2,4 | 1,18% | 6/6 | 2,87% |
+| **4 reservados (fuera de muestra)** | **+5,79%** | [+4,53, +7,29] | +8,9 / +2,6 | 0,52% | 4/4 | 2,90% |
+
+Por año (principales): 2020 +7,4% · **2021 +17,6%** · 2022 −0,1% · 2023 +2,9% · 2024 +5,5% · **2025 +0,7%** ·
+2026 +0,2%. La base (spot vs perpetuo) aporta ~0: todo es funding. "Siempre adentro" da parecido (+3,8%) ⇒ lo que
+gana es el premio en sí, la regla de entrada aporta poco.
+
+**Lectura honesta:** es la **primera idea de toda la línea que pasa, y pasa fuera de muestra** — porque no adivina
+el precio, cobra lo que pagan los apalancados. Pero es **chica y depende del régimen**: en promedio ~2× la tasa
+libre de riesgo, concentrada en el boom de 2021, y en 2025-26 quedó por DEBAJO de la tasa libre. Sobre $600 son
+~$30/año. Riesgos no modelados: quiebra del exchange (las dos patas en el mismo lado) y liquidación si no se
+rebalancea a tiempo. **Próximo paso según el criterio: shadow en vivo** (registrar en papel la misma regla con
+datos públicos en tiempo real, o en testnet) antes de cualquier plata.
