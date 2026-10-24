@@ -31,8 +31,9 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P14 | **Carry SOLO (sin tendencia), solo en los 6 reservados.** | Hipótesis nacida de P11, fuera de muestra | En P11 el carry solo dio +0,037%/semana y la tendencia restaba. | 1 h | ❌ **NO PASA 23-oct**: +0,001%/semana; el swap gana y el precio se lo come |
 | P15 | **Carry de funding en cripto (delta-neutral): comprar spot y vender el perpetuo** cuando el funding promedio de 7 días supera un umbral; BTC/ETH/SOL. | Otro mercado, premio estructural | Los apalancados en largo PAGAN funding a los cortos: la ganancia no depende de adivinar el precio (como el carry de FX, pero el premio cripto es mucho mayor). Data pública y gratis (historial de funding de Binance/Bybit/Hyperliquid), testnets para el shadow. Riesgos: funding negativo en mercados bajistas, riesgo de exchange, liquidación de la pata corta. | 1 día (bajar historial + tool) | ✅ **PASA 23-oct (primera de la línea), también fuera de muestra**: +4,8%/año sobre el capital (reservados +5,8%), pero 2025-26 casi cero. Ver abajo |
 | P16 | **Prima de volatilidad (vender volatilidad) con filtro de contango del VIX**: estar corto de volatilidad (proxy: ETF SVXY) solo cuando VIX < VIX3M. | Otro mercado, premio estructural | La volatilidad implícita suele estar por encima de la realizada: quien vende el "seguro" cobra un premio documentado. Data diaria gratis (VIX, VIX3M, SVXY). Riesgo de cola (feb-2018, mar-2020): el filtro de contango es lo que se mide. Paper trading en Alpaca o IBKR. | medio día | ❌ **NO PASA 23-oct**: CAGR +28,6% pero caída máx 55% y Sharpe 0,80, peores que comprar SPY (34%, 0,95). Ver abajo |
-| P17 | **Deriva post-resultados (PEAD) en acciones de EE.UU.**: comprar tras una sorpresa positiva de ganancias, mantener ~20-60 días. | Otro mercado, anomalía documentada | arXiv 2512.00280 (2025): ~0,43%/mes de alfa, solo en sorpresas positivas. Comisión cero en brokers como Alpaca (con API de paper trading). Falta una fuente gratis de fechas y sorpresas de resultados. | 1-2 días | en cola |
+| P17 | **Deriva post-resultados (PEAD) en acciones de EE.UU.**: comprar tras una sorpresa positiva de ganancias, mantener ~20-60 días. | Otro mercado, anomalía documentada | arXiv 2512.00280 (2025): ~0,43%/mes de alfa, solo en sorpresas positivas. Comisión cero en brokers como Alpaca (con API de paper trading). Falta una fuente gratis de fechas y sorpresas de resultados. | 1-2 días | ❌ **NO PASA 24-oct**: +0,48%/20 días sobre SPY, pero el control (mismas acciones, día al azar) da +0,38% con p95 +0,61%, y la cola NEGATIVA sube igual (+0,47%) ⇒ es la deriva de las ganadoras de hoy, no la sorpresa. Ver abajo |
 | P18 | **Sesgo favorito-longshot en mercados de predicción (Polymarket/Kalshi)**: comprar el resultado favorito (precio ≥ 0,90) cerca del cierre. | Otro mercado, sesgo conductual | En apuestas está documentado que los longshots se sobrepagan; en Polymarket sin verificar. Data pública de mercados resueltos. Descartado del mismo rubro: el arbitraje de latencia en los mercados cripto de 15 min (lo cerraron con fees dinámicos en 2026) y el market making (selección adversa; el market maker interno de Kalshi no es rentable). | 1 día | en cola |
+| P19 | **Shadow en papel del carry de funding (P15)**: cada 8 h, con el funding y los precios públicos de Binance en vivo, registrar qué haría la regla congelada de P15 (entrar/salir, funding cobrado, costo) en una base propia; sin órdenes. | Siguiente paso de lo único que pasó | P15 es la única idea de la línea que pasó, también fuera de muestra, pero 2025-26 rindió casi cero. Antes de cualquier plata hay que ver si el premio sigue vivo HOY y si la ejecución (base spot-perpetuo al entrar) se parece a la del backtest. Mismo esquema que el shadow P13b (proceso propio + tarea). | medio día | en cola (entra la próxima, antes de P18) |
 | P15b | **Rotación del carry de funding a las K=3 monedas que más pagan** (sobre P15). | Cambio sobre lo que pasó | Varias monedas pasan mucho tiempo afuera y esa plata rinde 0; concentrar en las que más pagan la usaría mejor. | medio día | ❌ **NO PASA 23-oct**: +0,21%/año sobre P15, CI cruza cero, y últimos 12 meses −0,9%. Ver abajo |
 
 ## Lo medido por esta línea
@@ -393,3 +394,24 @@ parte del CAGR es 2012-2017, cuando SVXY era −1x; desde mar-2018 es −0,5x y 
 
 **Lectura:** el premio existe y el filtro evita la catástrofe de 2018, pero en este período **comprar y mantener el
 S&P 500 rindió casi lo mismo con menos riesgo**. Cerrado: no barrer el umbral del ratio, otros ETFs ni horarios.
+
+### 24 Oct 2026 — P17 deriva post-resultados (PEAD) en acciones de EE.UU.: NO PASA (`tools/backtest_p17_pead.py`)
+
+Criterio `docs/p17_pead_criterio.md` (`12256eb`). Cambio declarado ANTES de medir por falta de datos: no hay historial
+gratis de la sorpresa de EPS ⇒ la sorpresa se mide por la reacción del precio al anuncio (EAR, Brandt et al. 2008),
+con las fechas exactas de los 8-K ítem 2.02 de EDGAR. 400 empresas más grandes de hoy, eventos 2010 → ago-2026,
+compra al cierre de d+2 si el EAR ≥ p80 de los 365 días previos, 20 días hábiles, resultado − SPY − 0,10%.
+
+| | n | media neta | CI95 (por mes) | mitades | desde sep-2023 |
+|---|---|---|---|---|---|
+| **Señal (EAR ≥ p80)** | 3.582 | **+0,48%** | [+0,02, +0,92] | +0,36 / +0,60 | +0,97% (n=720) |
+| Control: mismas acciones, día al azar lejos de anuncios | | +0,38% | p95 **+0,61%** | | |
+| Cola opuesta (EAR ≤ p20) | 3.607 | **+0,47%** | | | |
+| Todos los anuncios | 17.580 | +0,26% | | | |
+
+Pasa 4 de 5 y **falla el 4 (no supera al azar)**. La lectura importante no es el número: **la cola de malas
+sorpresas sube lo mismo que la de buenas** ⇒ no hay deriva por la sorpresa; lo que aparece es que las grandes
+de HOY subieron más que SPY en cualquier momento (sesgo de supervivencia, exactamente lo que el control estaba
+para neutralizar). Por año alterna signo (2011 −0,8, 2021 −0,9, 2022 −0,2). Reservados (401-700) NO mirados.
+Cerrado: no barrer percentil, entrada, horizonte ni universo. Si se reabre PEAD, solo con la sorpresa de EPS real
+y un universo sin supervivencia (data paga).
