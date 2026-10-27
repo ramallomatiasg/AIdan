@@ -426,5 +426,5 @@ públicos de Binance en cada corrida ⇒ no depende de que la PC esté prendida.
 frontera en `tools/test_shadow_funding_p19.py`). **1ra foto (27-oct):** medio spread spot+perpetuo mediana
 **0,0045%** contra 0,02% asumido por P15 (la ejecución, por ahora, mejor que lo supuesto); BTC, ETH y XRP adentro,
 SOL/BNB/DOGE afuera; decisiones foto = libro 3/3. Lectura a 90 días (~25-ene-2027), decisión a 180 (~25-abr-2027).
-**Falta la tarea programada** (cada 8 h) para que junte fotos solas: propuesta al user, no creada desde la rutina.
+Tarea `aidan-shadow-funding` creada el 27-oct con OK del user (05:05/13:05/21:05 AR), probada: corrió y sumó 6 fotos.
 
