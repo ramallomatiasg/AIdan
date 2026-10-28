@@ -37,6 +37,8 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P20 | **Cash-and-carry con futuros TRIMESTRALES de cripto** (comprar spot + vender el futuro con vencimiento de Binance, BTC/ETH, mantener hasta el vencimiento) cuando la base anualizada supera la tasa libre + costo. | Misma lógica que P15, otro instrumento | Mismo premio que P15 (lo pagan los apalancados en largo) pero **se fija al entrar**: la base pactada no cambia con el régimen día a día, que es justo lo que hizo caer a P15 en 2025-26. Al vencimiento converge al spot ⇒ el resultado se conoce al entrar salvo costos. Data pública (velas de los contratos de entrega de Binance, `dapi`/`fapi` con vencimiento). Nunca medido acá. | 1 día | en cola (nueva 27-oct) |
 | P21 | **Carry de funding (P15) en Hyperliquid y en el diferencial entre exchanges** (mismo motor y reglas congeladas de P15; variante: cobrar el funding del exchange que más paga y cubrir en el que menos). | Misma lógica, otro instrumento/venue | P15 es lo único que pasó, y cayó en 2025-26 en Binance. Hyperliquid liquida funding cada HORA y suele pagar más que Binance (otro público, más apalancado); el diferencial entre exchanges es un premio distinto del nivel. API pública (`api.hyperliquid.xyz`, resuelve desde esta red) con historial de funding. Nunca medido acá (P15 solo usó Binance). | medio día | en cola (nueva 28-oct) |
 | P22 | **Loop de hipótesis con IA sobre datos que AIdan no mira** (posicionamiento COT, tasas, bonos, VIX, dólar, petróleo; 7 monedas, 1999 →): la IA (Groq) propone con lista cerrada, el arnés prueba descubrimiento 1999-2014 → reserva 2015 → shadow hacia adelante, y TODO lo probado vuelve como memoria. Familias cerradas tras 3 fallos, espejos y duplicados rechazados. | Pedido del user (28-oct): que AIdan aprenda de todo y se pula solo | Aprende de 25 años de datos y no de 7 trades/día; mira más que precio. | 1 día | 🧪 **ARMADO 28-oct**: 4 vueltas, 31 hipótesis, 0 pasan el descubrimiento (ver abajo) |
+| P21 | **¿Un broker más barato salva algo?** Fusion Zero (USD 4,50 ida y vuelta) contra IC (USD 7), sobre todo lo ya medido. | Pedido del user (28-oct) | Si el problema fuera el costo, bajar 1/3 la comisión daría vuelta lo que estaba cerca. | medio día | ❌ **NO PASA 28-oct**: ver abajo |
+| P23 | **A1 en EUR/USD con entrada LÍMITE (maker)**: poner la orden en la banda de 2σ en vez de entrar a mercado, con Fusion. | Cambio de ejecución sobre lo único con información | Con Fusion A1 en EUR/USD queda en +0,08 pips (cero). Entrar con límite ahorra el spread y entra en mejor precio, pero sufre selección adversa (solo se llena cuando el precio sigue en contra): hay que medirlo con velas de 1 minuto o ticks, no con M15. | 1 día | en cola (nueva 28-oct) |
 | P15b | **Rotación del carry de funding a las K=3 monedas que más pagan** (sobre P15). | Cambio sobre lo que pasó | Varias monedas pasan mucho tiempo afuera y esa plata rinde 0; concentrar en las que más pagan la usaría mejor. | medio día | ❌ **NO PASA 23-oct**: +0,21%/año sobre P15, CI cruza cero, y últimos 12 meses −0,9%. Ver abajo |
 
 ## Lo medido por esta línea
@@ -473,4 +475,16 @@ La calibración del SÍ es monótona y comprime hacia el medio: lo barato aciert
 **Cerrado: favorito-longshot en Kalshi con esta definición. No barrer tramo de precio, horizonte ni universo.**
 *Lectura:* la compresión hacia el medio es lo que pagaría comprar barato, pero el longshot igual pierde por spread y
 comisión ⇒ tampoco hay un "al revés" rentable que proponer. Reservadas (41-100) no miradas.
+
+### 28 Oct 2026 — P21 broker más barato: NO PASA (`tools/backtest_p21_broker.py`)
+
+Criterio `docs/p21_broker_barato_criterio.md` (`d401247`). Costos verificados: **Fusion Zero USD 4,50** ida y vuelta (el
+más barato), IC USD 7, Pepperstone ~7, FP Markets ~6; Interactive Brokers 0,2 pb pero mínimo USD 25.000 por orden ⇒ no
+sirve para esta cuenta. **Escritorio** (comisión × 0,643, mismo spread y swap): A1 20 pares M5 −0,40 a −0,71 pips ·
+lead-lag −0,42 · rango asiático −0,018 R · fixing −0,20 ⇒ cerrados. Solo **A1 en EUR/USD M15** da positivo (+0,08).
+**Re-medición por el arnés de P9:** A1 en EUR/USD con Fusion = **+0,08 pips/operación, CI [−0,59, +0,74]** (H16, n=4.693;
+mitades +0,09/+0,06, por encima del azar) ⇒ indistinguible de cero, y con lote 0,01 son <1 centavo por operación. Pool
+oro+índices con Fusion: NO PASA igual que en P9 (CI cruza cero). **Conclusión: el costo no es lo único que falta; la
+ventaja bruta de lo medido es demasiado chica para cualquier broker minorista.** Lo único de ejecución que queda sin
+medir es entrar con orden límite (P23).
 
