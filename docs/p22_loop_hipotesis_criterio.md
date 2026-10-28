@@ -90,3 +90,23 @@ de pase):** (a) una familia cuya mejor variante dio neto ≤ 0 se cierra a las 2
 se probaron todas las features, no se aceptan variantes de familias de una sola fuente ya probadas: solo
 combinaciones o familias nuevas; (c) si la IA propone menos de la mitad válida, se le devuelven los rechazos y
 propone una vez más en la misma vuelta.
+
+**Enmienda 2 (28-oct, ANTES de medir los mercados nuevos; pedido del user: buscar donde operar cuesta menos en
+proporción al movimiento) — se suman oro, índices y cripto. El gate de pase (A/B/C) NO cambia.**
+- **Instrumentos nuevos** (precio de cierre diario de Yahoo Finance, público): `XAU` oro (futuro continuo GC=F, desde
+  2000-08), `SPX` S&P 500, `NDX` Nasdaq-100, `DAX` DAX, `BTC` bitcoin (desde 2014-09), `ETH` ether (desde 2017-11).
+  Grupos: `ALL` = las 7 monedas (como antes), `IDX` = SPX+NDX+DAX, `CRYPTO` = BTC+ETH.
+- **Posicionamiento:** COT legacy de oro (088691), E-mini S&P (13874A), Nasdaq mini (209742), bitcoin CME (133741,
+  desde 2018) y ether CME (146021, desde 2021); DAX no tiene. Las features de tasas (`rate_diff*`) solo existen para
+  monedas: en los demás quedan vacías (sin señal).
+- **Costos (ida y vuelta, % del precio, CFD como en IC Markets, redondeados para arriba):** oro e índices **0,02%**,
+  cripto **0,20%**.
+- **Financiación por día calendario:** oro e índices como CFD: el largo paga la tasa a 3 meses + 2,5% anual, el corto
+  cobra la tasa − 2,5% (tasa de EE.UU.; para el DAX la del euro). Cripto: **10% anual en contra, de cualquier lado**
+  (conservador: funding/swap). Los dividendos de los índices NO se suman (conservador para los largos).
+- **Cortes:** oro e índices igual que las monedas (descubrimiento 1999-2014, reserva 2015 →). Cripto tiene poca
+  historia: **descubrimiento 2015-2021, reserva 2022 →**.
+- **Familia:** para los mercados nuevos la familia lleva el tipo de mercado adelante (`oro|`, `indices|`, `cripto|`):
+  la misma idea en otro mercado es una idea distinta. En monedas no cambia nada.
+- **Límites:** el futuro continuo del oro tiene saltos al cambiar de contrato (del orden del carry, que ya se cobra
+  aparte); el cierre diario de Yahoo no es un precio operable exacto (sirve para días, no intradía).
