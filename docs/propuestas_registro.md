@@ -35,6 +35,8 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P18 | **Sesgo favorito-longshot en mercados de predicción (Polymarket/Kalshi)**: comprar el resultado favorito (precio ≥ 0,90) cerca del cierre. | Otro mercado, sesgo conductual | En apuestas está documentado que los longshots se sobrepagan; en Polymarket sin verificar. Data pública de mercados resueltos. Descartado del mismo rubro: el arbitraje de latencia en los mercados cripto de 15 min (lo cerraron con fees dinámicos en 2026) y el market making (selección adversa; el market maker interno de Kalshi no es rentable). | 1 día | en cola |
 | P19 | **Shadow en papel del carry de funding (P15)**: cada 8 h, con el funding y los precios públicos de Binance en vivo, registrar qué haría la regla congelada de P15 (entrar/salir, funding cobrado, costo) en una base propia; sin órdenes. | Siguiente paso de lo único que pasó | P15 es la única idea de la línea que pasó, también fuera de muestra, pero 2025-26 rindió casi cero. Antes de cualquier plata hay que ver si el premio sigue vivo HOY y si la ejecución (base spot-perpetuo al entrar) se parece a la del backtest. Mismo esquema que el shadow P13b (proceso propio + tarea). | medio día | 🧪 **SHADOW ARMADO 27-oct** (`tools/shadow_funding.py`, criterio `docs/p19_shadow_funding_criterio.md`): lectura a 90 días (~25-ene), decisión a 180 (~25-abr). Ver abajo |
 | P20 | **Cash-and-carry con futuros TRIMESTRALES de cripto** (comprar spot + vender el futuro con vencimiento de Binance, BTC/ETH, mantener hasta el vencimiento) cuando la base anualizada supera la tasa libre + costo. | Misma lógica que P15, otro instrumento | Mismo premio que P15 (lo pagan los apalancados en largo) pero **se fija al entrar**: la base pactada no cambia con el régimen día a día, que es justo lo que hizo caer a P15 en 2025-26. Al vencimiento converge al spot ⇒ el resultado se conoce al entrar salvo costos. Data pública (velas de los contratos de entrega de Binance, `dapi`/`fapi` con vencimiento). Nunca medido acá. | 1 día | en cola (nueva 27-oct) |
+| P21 | **Carry de funding (P15) en Hyperliquid y en el diferencial entre exchanges** (mismo motor y reglas congeladas de P15; variante: cobrar el funding del exchange que más paga y cubrir en el que menos). | Misma lógica, otro instrumento/venue | P15 es lo único que pasó, y cayó en 2025-26 en Binance. Hyperliquid liquida funding cada HORA y suele pagar más que Binance (otro público, más apalancado); el diferencial entre exchanges es un premio distinto del nivel. API pública (`api.hyperliquid.xyz`, resuelve desde esta red) con historial de funding. Nunca medido acá (P15 solo usó Binance). | medio día | en cola (nueva 28-oct) |
+| P22 | **Loop de hipótesis con IA sobre datos que AIdan no mira** (posicionamiento COT, tasas, bonos, VIX, dólar, petróleo; 7 monedas, 1999 →): la IA (Groq) propone con lista cerrada, el arnés prueba descubrimiento 1999-2014 → reserva 2015 → shadow hacia adelante, y TODO lo probado vuelve como memoria. Familias cerradas tras 3 fallos, espejos y duplicados rechazados. | Pedido del user (28-oct): que AIdan aprenda de todo y se pula solo | Aprende de 25 años de datos y no de 7 trades/día; mira más que precio. | 1 día | 🧪 **ARMADO 28-oct**: 4 vueltas, 31 hipótesis, 0 pasan el descubrimiento (ver abajo) |
 | P15b | **Rotación del carry de funding a las K=3 monedas que más pagan** (sobre P15). | Cambio sobre lo que pasó | Varias monedas pasan mucho tiempo afuera y esa plata rinde 0; concentrar en las que más pagan la usaría mejor. | medio día | ❌ **NO PASA 23-oct**: +0,21%/año sobre P15, CI cruza cero, y últimos 12 meses −0,9%. Ver abajo |
 
 ## Lo medido por esta línea
@@ -427,4 +429,19 @@ frontera en `tools/test_shadow_funding_p19.py`). **1ra foto (27-oct):** medio sp
 **0,0045%** contra 0,02% asumido por P15 (la ejecución, por ahora, mejor que lo supuesto); BTC, ETH y XRP adentro,
 SOL/BNB/DOGE afuera; decisiones foto = libro 3/3. Lectura a 90 días (~25-ene-2027), decisión a 180 (~25-abr-2027).
 Tarea `aidan-shadow-funding` creada el 27-oct con OK del user (05:05/13:05/21:05 AR), probada: corrió y sumó 6 fotos.
+
+### 28 Oct 2026 — P22 loop de hipótesis: ARMADO (`tools/hyp_loop.py`, `tools/hyp_data.py`)
+
+Criterio `docs/p22_loop_hipotesis_criterio.md` (`59b3109`, declarado antes de medir). Datos públicos: FRED (7 monedas
+diarias desde 1999, tasas a 3 meses, bonos de EE.UU., VIX, dólar amplio, WTI) y CFTC COT. Sin mirar el futuro (COT desde
+el lunes siguiente, mensuales con 2 meses de retraso, cierres al día siguiente; test). **Control del arnés en cada vuelta:**
+una señal que acierta el 60% pasa (+21 bps por período) y 20 de ruido persistente no pasan (0/20); con una sola moneda
+hace falta ~58% de acierto semanal para pasar. Sanidad: el carry da lo que dice la literatura (+61 bps/mes hasta 2008,
+~0 después).
+
+**4 vueltas (28-oct): 31 hipótesis evaluadas, 5 rechazadas por espejo/misma familia, 0 pasan el descubrimiento.**
+Vueltas 1-3: cada feature sola, en los dos sentidos (la IA exploró sola el lado contrario de lo que ya había fallado).
+Vuelta 4: combinaciones de 2 fuentes en monedas puntuales (petróleo→CAD, tasas→JPY); varias quedaron con 6-17
+períodos, insuficientes. Lo más cerca: carry siguiendo (+36,6 bps por 20 días, CI cruza cero, se murió en la 2da
+mitad) y momentum de 250 días (+13,8). **Falta la tarea programada** (lun-vie 20:00, `--cycle --n 8`): pendiente OK del user.
 
