@@ -55,3 +55,9 @@ en dos niveles:
   diferencia).
 - El payout de Deriv puede no ser el de IQ Option ni el de otra plataforma.
 - Ritmo esperado (del backtest): ~6 señales por instrumento por día en el horario ⇒ n=400 en ~1-2 semanas.
+
+**Enmienda 1 (28-oct, NO toca el criterio):** Deriv publicó una API nueva cuyo endpoint público
+(`wss://api.derivws.com/trading/v1/options/ws/public`) **cotiza `proposal` sin app_id ni cuenta**. Desde el 28-oct
+14:28 UTC el shadow guarda el payout real por ahí; `DERIV_APP_ID` deja de hacer falta (si existe, se sigue usando la
+API vieja). Las 62 señales del 26 al 28-oct quedaron sin payout. Primeras cotizaciones (Rise/Fall 15 min, stake 10):
+**17,92 a 18,50** ⇒ break-even **54,1-55,8%**, más exigente que el 52,6% supuesto (payout 90%).

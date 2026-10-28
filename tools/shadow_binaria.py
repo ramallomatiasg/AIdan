@@ -10,7 +10,8 @@ Qué hace, en cada cierre de vela M5 de lunes a viernes 07:00-16:00 UTC:
   1. Pide las últimas velas M5 de cada instrumento a la API pública de Deriv.
   2. Calcula A1 con `gen_A1` (importada, la misma función de los backtests).
   3. Si hay señal y no hay otra abierta en ese instrumento, guarda el último tick como entrada y la expiración
-     a +15 min. Con `DERIV_APP_ID` en el entorno, además pide la cotización (proposal) y guarda el payout real.
+     a +15 min. Además pide la cotización (proposal) y guarda el payout real: por el endpoint público de la API
+     nueva de Deriv (sin app_id ni cuenta, desde el 28-oct) o, si hay `DERIV_APP_ID` en el entorno, por la vieja.
   4. Resuelve las señales vencidas con el último tick <= expiración.
 
 Uso:
@@ -38,6 +39,7 @@ SYMBOLS = ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxAUDUSD', 'frxUSDCHF', 'frx
            'frxEURGBP', 'frxEURJPY', 'frxGBPJPY', 'frxAUDJPY']
 ENDPOINTS = ['red.derivws.com', 'ws.derivws.com', 'green.derivws.com', 'blue.derivws.com']
 PUBLIC_APP_ID = '1089'          # sirve para velas y ticks; NO para cotizaciones (verificado 23-oct)
+PUBLIC_V1_WS = 'wss://api.derivws.com/trading/v1/options/ws/public'   # API nueva: SÍ cotiza sin app_id (28-oct)
 WINDOW_UTC = (7, 16)            # lunes a viernes, [07:00, 16:00) UTC
 RESOLVE_GRACE_MIN = 20          # sigue vivo hasta 16:20 UTC para resolver las últimas
 GRAN = 300
@@ -185,6 +187,34 @@ class Api:
         return dict(payout=float(p['payout']), ask=float(p['ask_price']), spot=float(p['spot'])), None
 
 
+class PublicQuoter(Api):
+    """Cotizaciones con la API NUEVA de Deriv: su endpoint público cotiza `proposal` SIN app_id ni cuenta
+    (verificado 28-oct: EUR/USD Rise 15 min, stake 10 ⇒ payout 17,92). Solo cotiza: no hay `buy` en el módulo."""
+
+    def __init__(self):
+        super().__init__('public-v1')
+
+    async def __aenter__(self):
+        import aiohttp
+        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, connect=15))
+        try:
+            self.ws = await self.session.ws_connect(PUBLIC_V1_WS, timeout=aiohttp.ClientWSTimeout(ws_close=15),
+                                                    heartbeat=30)
+        except Exception:
+            await self.session.close()
+            raise
+        return self
+
+    async def proposal(self, sym, contract_type):
+        r = await self.call({'proposal': 1, 'amount': STAKE, 'basis': 'stake', 'contract_type': contract_type,
+                             'currency': 'USD', 'duration': EXPIRY_SEC // 60, 'duration_unit': 'm',
+                             'underlying_symbol': sym})
+        if 'error' in r:
+            return None, r['error'].get('message')
+        p = r['proposal']
+        return dict(payout=float(p['payout']), ask=float(p['ask_price']), spot=float(p['spot'])), None
+
+
 async def resolve_pending(api, conn, now_epoch):
     rows = conn.execute("SELECT id, symbol, direction, entry_spot, expiry_epoch FROM signals "
                         "WHERE outcome IS NULL AND expiry_epoch <= ?", (now_epoch - 5,)).fetchall()
@@ -230,7 +260,7 @@ async def scan(api, conn, quote_app):
             continue
         te, pe = tk[-1]
         direction = 'CALL' if d > 0 else 'PUT'
-        prop, perr = (None, 'sin DERIV_APP_ID')
+        prop, perr = (None, 'sin cotizador (no conectó)')
         if quote_app is not None:
             prop, perr = await quote_app.proposal(sym, direction)
         try:
@@ -252,9 +282,13 @@ async def cycle(conn, ignore_window, app_id):
     async with Api(PUBLIC_APP_ID) as api:
         quote = None
         try:
-            if app_id:
-                quote = Api(app_id)
-                await quote.__aenter__()
+            # con app_id propio, la API vieja; si no, el endpoint público de la API nueva (no hace falta registrar nada)
+            cand = Api(app_id) if app_id else PublicQuoter()
+            try:
+                await cand.__aenter__()
+                quote = cand
+            except Exception as e:
+                print(f'  cotizador no disponible ({e!r}): la señal se guarda sin payout')
             now_epoch = await api.server_time()
             await resolve_pending(api, conn, now_epoch)
             if ignore_window or in_window(dt.datetime.utcnow()):
@@ -273,7 +307,7 @@ def run(db, once, ignore_window):
     conn = open_db(db)
     app_id = os.environ.get('DERIV_APP_ID') or None
     print(f'=== shadow_binaria {dt.datetime.utcnow():%Y-%m-%d %H:%M} UTC  db={db}  '
-          f'payout={"SI (app_id propio)" if app_id else "NO (falta DERIV_APP_ID)"} ===')
+          f'payout={"app_id propio" if app_id else "endpoint público de la API nueva"} ===')
     end = dt.datetime.utcnow().replace(hour=WINDOW_UTC[1], minute=RESOLVE_GRACE_MIN, second=0, microsecond=0)
     while True:
         try:
