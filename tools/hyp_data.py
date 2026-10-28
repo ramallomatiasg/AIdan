@@ -31,6 +31,25 @@ PIP = {c: (0.01 if c == 'JPY' else 0.0001) for c in CCYS}
 COST_PIPS = {'EUR': 0.8, 'JPY': 0.9, 'GBP': 1.0, 'AUD': 1.0, 'CHF': 1.2, 'CAD': 1.2, 'NZD': 1.3}
 START = '1997-01-01'
 
+# Enmienda 2 (28-oct): otros mercados. código: (ticker Yahoo, COT, clase, costo ida y vuelta, moneda de la tasa)
+OTHER = {'XAU': ('GC=F', '088691', 'oro', 0.0002, 'USD'),
+         'SPX': ('^GSPC', '13874A', 'indices', 0.0002, 'USD'),
+         'NDX': ('^NDX', '209742', 'indices', 0.0002, 'USD'),
+         'DAX': ('^GDAXI', None, 'indices', 0.0002, 'EUR'),
+         'BTC': ('BTC-USD', '133741', 'cripto', 0.0020, None),
+         'ETH': ('ETH-USD', '146021', 'cripto', 0.0020, None)}
+INSTRUMENTS = CCYS + list(OTHER)
+GROUPS = {'ALL': CCYS, 'IDX': ['SPX', 'NDX', 'DAX'], 'CRYPTO': ['BTC', 'ETH']}
+CFD_MARKUP = 0.025               # oro/índices: el largo paga tasa + 2,5%, el corto cobra tasa − 2,5%
+CRYPTO_FIN = 0.10                # cripto: 10% anual en contra de cualquier lado
+SPLITS = {'cripto': ('2015-01-01', '2021-12-31', '2022-01-01')}   # el resto: el corte por defecto del loop
+
+
+def asset_class(code):
+    if code in GROUPS:
+        return asset_class(GROUPS[code][0])
+    return 'fx' if code in CCYS else OTHER[code][2]
+
 Z = [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0]
 CATALOG = {
     # posicionamiento (CFTC COT, semanal, usable desde el lunes siguiente a la publicación)
@@ -98,6 +117,24 @@ def fred(series, refresh=False):
     df = pd.read_csv(io.StringIO(txt), na_values='.')
     s = pd.Series(df.iloc[:, 1].astype(float).values, index=pd.to_datetime(df.iloc[:, 0]), name=series)
     return s.dropna()
+
+
+def yahoo(ticker, refresh=False):
+    """Cierre diario de Yahoo Finance (API pública del gráfico). Fecha = día UTC de la sesión."""
+    def fetch():
+        r = requests.get(f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}',
+                         params={'period1': 0, 'period2': int(time.time()), 'interval': '1d'},
+                         headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}, timeout=60)
+        r.raise_for_status()
+        return r.text
+    safe = ticker.replace('^', 'idx_').replace('=', '_')
+    j = json.loads(_cached(f'yahoo_{safe}.json', fetch, refresh))
+    res = j['chart']['result'][0]
+    close = res['indicators']['quote'][0]['close']
+    idx = pd.to_datetime(res['timestamp'], unit='s').normalize()
+    s = pd.Series(close, index=idx, dtype=float).dropna()
+    s = s[s > 0]
+    return s[~s.index.duplicated(keep='last')].sort_index()
 
 
 def cot(code, refresh=False):
@@ -200,6 +237,32 @@ def build_panel(refresh=False):
         for k, v in gfeat.items():
             df[k] = v.values
         panel[c] = df
+    rate_ccy = {'USD': usd_rate, 'EUR': fred(RATES['EUR'], refresh)}
+    today = pd.Timestamp.today().normalize()
+    for code, (ticker, cot_code, _cls, _cost, rccy) in OTHER.items():
+        px = yahoo(ticker, refresh)
+        px = px[px.index < today]                       # la vela de hoy puede estar a medio formar
+        quoted = px.reindex(cal, method='ffill', limit=4)
+        df = pd.DataFrame({'quoted': quoted, 'fx': quoted}, index=cal)
+        for k in (20, 60, 250):
+            df[f'mom{k}_z'] = _volnorm_mom(quoted, k)
+        dist = quoted / quoted.rolling(200, min_periods=150).mean() - 1
+        df['dist_ma200_z'] = _z(dist, 252, 120)
+        if cot_code:
+            cw = cot(cot_code, refresh)
+            cw = cw[cw.index >= '1993-01-01']
+            df['cot_spec_z52'] = _asof(_z(cw['spec'], 52, 26), 'cot', cal, 21)
+            df['cot_spec_chg_z'] = _asof(_z(cw['spec'].diff(), 52, 26), 'cot', cal, 21)
+            df['cot_comm_z52'] = _asof(_z(cw['comm'], 52, 26), 'cot', cal, 21)
+        else:
+            for k in ('cot_spec_z52', 'cot_spec_chg_z', 'cot_comm_z52'):
+                df[k] = np.nan
+        df['rate_diff'] = np.nan                           # las features de tasas solo existen para monedas
+        df['rate_diff_chg3m_z'] = np.nan
+        df['fin_rate'] = _asof(rate_ccy[rccy], 'monthly', cal, 130) if rccy else np.nan
+        for k, v in gfeat.items():
+            df[k] = v.values
+        panel[code] = df
     return panel
 
 

@@ -137,4 +137,43 @@ def test_reintento_con_los_rechazos(tmp_path):
         return ([dict(pairs='MXN')] if fb is None else []), 'fake'
     panel = hd.build_panel()
     hl.cycle(hl.connect(str(tmp_path / 'h.db')), panel, fake, 4)
-    assert len(calls) == 2 and calls[0] is None and 'moneda inválida' in calls[1]
+    assert len(calls) == 2 and calls[0] is None and 'instrumento inválido' in calls[1]
+
+
+# ── enmienda 2: oro, índices y cripto ────────────────────────────────────────
+
+def test_misma_idea_en_otro_mercado_es_otra_familia():
+    fx = _spec()
+    spx = _spec(pairs='SPX')
+    idx = _spec(pairs='IDX', conditions=[dict(feature='cot_spec_z52', op='>', threshold=2.0)])
+    assert hl.family_of(fx) != hl.family_of(spx)
+    assert hl.family_of(spx) == hl.family_of(idx) and hl.family_of(spx).startswith('indices|')
+    assert hl.validate(_spec(pairs='BTC'), set(), set(), set())[0]
+    assert not hl.validate(_spec(pairs='SOL'), set(), set(), set())[0]
+
+
+def test_cortes_por_mercado():
+    assert hl.seg_bounds('EUR', 'disc', 'disc') == hl.DISC
+    assert hl.seg_bounds('SPX', 'hold', '2026-10-01') == (hl.HOLD_START, '2026-10-01')
+    assert hl.seg_bounds('BTC', 'disc', 'disc') == ('2015-01-01', '2021-12-31')
+    assert hl.seg_bounds('ETH', 'hold', '2026-10-01') == ('2022-01-01', '2026-10-01')
+
+
+def test_costos_y_financiacion_por_mercado():
+    cal = pd.bdate_range('2020-01-01', periods=40)
+    df = pd.DataFrame({'fx': 100.0, 'quoted': 100.0, 'rate_diff': np.nan, 'fin_rate': 4.0}, index=cal)
+    spx = hl.legs({'SPX': df}, 'SPX', 5, '2020-01-01', '2020-03-01')
+    assert np.allclose(spx['cost'], 0.0002)
+    assert np.all(spx['carry'] < 0) and np.all(spx['mark'] > 0)          # el largo paga tasa + 2,5%
+    btc = hl.legs({'BTC': df}, 'BTC', 5, '2020-01-01', '2020-03-01')
+    assert np.allclose(btc['cost'], 0.002) and np.allclose(btc['carry'], 0)
+    assert np.allclose(btc['mark'], 0.10 * 7 / 365)                       # 5 días hábiles = 7 corridos
+
+
+def test_rechaza_datos_que_no_existen_en_ese_mercado():
+    v = lambda s: hl.validate(s, set(), set(), set())  # noqa: E731
+    assert not v(_spec(pairs='DAX', conditions=[dict(feature='rate_diff', op='>', threshold=0.0)]))[0]
+    assert not v(_spec(pairs='DAX'))[0]                                  # COT en DAX
+    assert not v(_spec(pairs='ETH'))[0]                                  # COT de ETH desde 2021
+    assert v(_spec(pairs='IDX'))[0]                                      # en el grupo, SPX y NDX sí tienen
+    assert v(_spec(pairs='SPX'))[0]

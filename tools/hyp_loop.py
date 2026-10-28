@@ -87,7 +87,9 @@ def stance(cond, position):
 
 
 def family_of(spec):
-    return '+'.join(sorted(f"{c['feature']}:{stance(c, spec['position'])}" for c in spec['conditions']))
+    base = '+'.join(sorted(f"{c['feature']}:{stance(c, spec['position'])}" for c in spec['conditions']))
+    cls = hd.asset_class(spec['pairs'])                # enmienda 2: la misma idea en otro mercado es otra familia
+    return base if cls == 'fx' else f'{cls}|{base}'
 
 
 def variant_of(spec):
@@ -100,8 +102,8 @@ def variant_of(spec):
 def validate(spec, closed, seen_variants, cycle_families, tested_families=(), combo_phase=False):
     """Devuelve (ok, motivo). Lista cerrada: todo lo que no está en el catálogo se rechaza."""
     try:
-        if spec.get('pairs') not in hd.CCYS + ['ALL']:
-            return False, f"moneda inválida: {spec.get('pairs')}"
+        if spec.get('pairs') not in hd.INSTRUMENTS + list(hd.GROUPS):
+            return False, f"instrumento inválido: {spec.get('pairs')}"
         conds = spec.get('conditions') or []
         if not 1 <= len(conds) <= 2:
             return False, 'hace falta 1 o 2 condiciones'
@@ -115,6 +117,14 @@ def validate(spec, closed, seen_variants, cycle_families, tested_families=(), co
                 return False, f"operador inválido: {c.get('op')}"
             if float(c.get('threshold')) not in hd.CATALOG[c['feature']][1]:
                 return False, f"umbral fuera de la lista para {c['feature']}: {c.get('threshold')}"
+        members = hd.GROUPS.get(spec['pairs'], [spec['pairs']])
+        for c in conds:
+            if c['feature'].startswith('rate_diff') and hd.asset_class(spec['pairs']) != 'fx':
+                return False, f"{c['feature']} solo existe en monedas"
+            if c['feature'].startswith('cot_') and not any(m in hd.CCYS or hd.OTHER[m][1] for m in members):
+                return False, f"{spec['pairs']} no tiene COT"
+            if c['feature'].startswith('cot_') and spec['pairs'] == 'ETH':
+                return False, 'el COT de ETH empieza en 2021: no hay datos en el descubrimiento'
         if spec.get('position') not in ('long_fx', 'short_fx'):
             return False, f"posición inválida: {spec.get('position')}"
         if spec.get('symmetric'):
@@ -162,8 +172,19 @@ def raw_positions(df, spec):
     return np.where(m, sign, 0).astype(float)
 
 
+def seg_bounds(code, start, end):
+    """'disc' / 'hold' según el tipo de mercado (cripto tiene su propio corte, enmienda 2); fechas tal cual."""
+    sp = hd.SPLITS.get(hd.asset_class(code))
+    if start == 'disc':
+        return (sp[0], sp[1]) if sp else DISC
+    if start == 'hold':
+        return (sp[2] if sp else HOLD_START), end
+    return start, end
+
+
 def legs(panel, ccy, h, start, end, after=None):
-    """Para una moneda y horizonte: índices de los períodos (no se pisan) y sus retornos, costos y swap."""
+    """Para un instrumento y horizonte: índices de los períodos (no se pisan) y sus retornos, costos y swap."""
+    start, end = seg_bounds(ccy, start, end)
     df = panel[ccy]
     idx = df.index
     lo = idx.searchsorted(pd.Timestamp(start))
@@ -176,11 +197,22 @@ def legs(panel, ccy, h, start, end, after=None):
     fx = df['fx'].to_numpy(dtype=float)
     q = df['quoted'].to_numpy(dtype=float)
     ret = np.log(fx[anchors + h] / fx[anchors])
-    cost = hd.COST_PIPS[ccy] * hd.PIP[ccy] / q[anchors]                     # ida y vuelta, en fracción
     days = (idx[anchors + h] - idx[anchors]).days.to_numpy(dtype=float)
-    rd = df['rate_diff'].to_numpy(dtype=float)[anchors]
-    carry = np.nan_to_num(rd) / 100.0 * days / 365.0
-    mark = MARKUP * days / 365.0
+    cls = hd.asset_class(ccy)
+    if cls == 'fx':
+        cost = hd.COST_PIPS[ccy] * hd.PIP[ccy] / q[anchors]                 # ida y vuelta, en fracción
+        rd = df['rate_diff'].to_numpy(dtype=float)[anchors]
+        carry = np.nan_to_num(rd) / 100.0 * days / 365.0
+        mark = MARKUP * days / 365.0
+    elif cls == 'cripto':
+        cost = np.full(anchors.size, hd.OTHER[ccy][3])
+        carry = np.zeros(anchors.size)
+        mark = hd.CRYPTO_FIN * days / 365.0
+    else:                                                                   # oro e índices como CFD
+        cost = np.full(anchors.size, hd.OTHER[ccy][3])
+        fr = df['fin_rate'].to_numpy(dtype=float)[anchors]
+        carry = -np.nan_to_num(fr) / 100.0 * days / 365.0                   # el largo paga la tasa, el corto la cobra
+        mark = hd.CFD_MARKUP * days / 365.0
     ok = np.isfinite(ret) & np.isfinite(cost)
     return dict(anchors=anchors[ok], dates=idx[anchors[ok]], ret=ret[ok], cost=cost[ok],
                 carry=carry[ok], mark=mark[ok])
@@ -240,7 +272,7 @@ def evaluate(panel, spec, start, end, after=None, pos_override=None, control=Fal
     """Evalúa la regla en [start, end]. `pos_override(ccy, leg, df) -> pos` reemplaza la regla (controles)."""
     rng = rng or np.random.default_rng(SEED)
     h = int(spec['horizon'])
-    ccys = hd.CCYS if spec['pairs'] == 'ALL' else [spec['pairs']]
+    ccys = hd.GROUPS.get(spec['pairs'], [spec['pairs']])
     built = []
     for c in ccys:
         leg = legs(panel, c, h, start, end, after)
@@ -344,7 +376,11 @@ def memory(conn):
               (v['n'] >= CLOSE_AFTER or (v['n'] >= 2 and v['best'] is not None and v['best'] <= 0))}
     few = sum(1 for r in rows if r['disc_json'] and json.loads(r['disc_json']).get('n', 0) < MIN_ACTIVE)
     combo_phase = all(e['n'] > 0 for e in feat.values())
-    return dict(families=fam, features=feat, closed=closed, variants=variants, few=few, combo_phase=combo_phase)
+    classes = {c: 0 for c in ('fx', 'oro', 'indices', 'cripto')}
+    for r in rows:
+        classes[hd.asset_class(json.loads(r['spec_json'])['pairs'])] += 1
+    return dict(families=fam, features=feat, closed=closed, variants=variants, few=few, combo_phase=combo_phase,
+                classes=classes)
 
 
 def memory_text(mem):
@@ -353,6 +389,7 @@ def memory_text(mem):
         b = '-' if e['best'] is None else f"{e['best']:+.1f}"
         w = '-' if e['worst'] is None else f"{e['worst']:+.1f}"
         lines.append(f"  {f}: {e['n']} / {e['passA']} / mejor {b} peor {w}  — {hd.CATALOG[f][0]}")
+    lines.append('HIPÓTESIS PROBADAS POR MERCADO: ' + ', '.join(f'{k} {v}' for k, v in mem['classes'].items()))
     lines.append('FAMILIAS CERRADAS (no proponer nada de estas): ' + (', '.join(sorted(mem['closed'])) or 'ninguna'))
     tested = [f"{k} ({v['n']} variantes, {v['passA']} pasaron)" for k, v in mem['families'].items()
               if k not in mem['closed']]
@@ -375,16 +412,26 @@ def llm_propose(mem, n, feedback=None):
              "que COMBINAR 2 condiciones de FUENTES distintas, y cuando el mecanismo es de una moneda puntual (petróleo "
              "-> CAD, tasas de Japón -> JPY, riesgo -> AUD/NZD contra JPY/CHF) usá esa moneda, no ALL. El espejo de una "
              "idea (el otro extremo de la feature con la posición opuesta) es la MISMA familia: no lo propongas.")
+    new_markets = [k for k, v in mem['classes'].items() if v == 0]
+    if new_markets:
+        phase = (f"MERCADOS SIN PROBAR TODAVÍA: {', '.join(new_markets)}. Al menos la mitad de las hipótesis tienen que "
+                 "ser en esos mercados (ideas simples primero: ahí todavía no se probó nada). " + phase)
     prompt = f"""Sos un investigador cuantitativo. Proponé {n + 4} hipótesis NUEVAS y DISTINTAS entre sí para operar
-monedas contra el USD (EUR, JPY, GBP, CHF, CAD, AUD, NZD) con horizonte de días, usando SOLO este catálogo:
+con horizonte de días alguno de estos mercados:
+  monedas contra el USD: EUR, JPY, GBP, CHF, CAD, AUD, NZD (o ALL = las 7). Costo ~0,01% por operación + swap.
+  oro: XAU. Índices: SPX (S&P 500), NDX (Nasdaq-100), DAX (o IDX = los 3). Costo 0,02%; el largo paga tasa + 2,5% anual.
+  cripto: BTC, ETH (o CRYPTO = los 2). Costo 0,20% y 10% anual de financiación.
+usando SOLO este catálogo:
 {catalog}
 
 Formato de cada hipótesis (JSON):
-{{"pairs": "EUR|JPY|GBP|CHF|CAD|AUD|NZD|ALL", "conditions": [{{"feature": "...", "op": ">" o "<", "threshold": número de la lista}}]
- (1 o 2 condiciones, se cumplen las dos), "position": "long_fx" (comprar la moneda contra USD) o "short_fx",
+{{"pairs": "EUR|JPY|GBP|CHF|CAD|AUD|NZD|ALL|XAU|SPX|NDX|DAX|IDX|BTC|ETH|CRYPTO", "conditions": [{{"feature": "...", "op": ">" o "<", "threshold": número de la lista}}]
+ (1 o 2 condiciones, se cumplen las dos), "position": "long_fx" (comprar el instrumento; en monedas, la moneda contra USD) o "short_fx" (venderlo),
  "symmetric": false (o true con 1 condición, op ">" y umbral >= 0: arriba del umbral la posición, debajo de -umbral la contraria),
  "horizon": 5|10|20 (días hábiles), "rationale": "mecanismo económico: quién paga este premio y por qué"}}
-Todas las features de moneda están orientadas a la moneda extranjera: positivo = la moneda viene fuerte / está más cara / sus especuladores están largos.
+Todas las features del instrumento están orientadas a ESE instrumento: positivo = viene fuerte / está caro / sus especuladores están largos.
+Las features de tasas (rate_diff*) solo existen en monedas; el DAX no tiene COT; el COT de BTC empieza en 2018 y el de ETH en 2021.
+La misma idea en otro tipo de mercado cuenta como familia NUEVA.
 
 Memoria de TODO lo probado hasta ahora (aprendé de esto: no repitas familias cerradas, explorá features poco
 probadas, y si una feature mostró algo de información probá combinarla con OTRA fuente de datos distinta):
@@ -492,7 +539,8 @@ def cycle(conn, panel, propose, n_max):
     conn.execute('UPDATE cycles SET source=? WHERE id=?', (source, cid))
     # exploración antes que refinamiento: primero las que usan features menos probadas
     # y, una vez probada cada feature, primero las que combinan dos FUENTES distintas (confluencia)
-    valid.sort(key=lambda s: (min(mem['features'][c['feature']]['n'] for c in s['conditions']),
+    valid.sort(key=lambda s: (mem['classes'][hd.asset_class(s['pairs'])],
+                              min(mem['features'][c['feature']]['n'] for c in s['conditions']),
                               -len({hd.SOURCE[c['feature']] for c in s['conditions']})))
     chosen = valid[:n_max]
     k_hold = conn.execute('SELECT COUNT(*) FROM hypotheses WHERE hold_json IS NOT NULL').fetchone()[0]
@@ -503,13 +551,13 @@ def cycle(conn, panel, propose, n_max):
                            (cid, now, source, family_of(spec), variant_of(spec), json.dumps(spec),
                             spec['rationale'], 'propuesta')).lastrowid
         conn.commit()                                          # pre-declarada antes de mirar
-        sa = evaluate(panel, spec, *DISC, control=True, rng=rng)
+        sa = evaluate(panel, spec, 'disc', 'disc', control=True, rng=rng)
         pa, ca = gate_a(sa)
         sa['checks'] = ca
         status, hold, promoted = 'falló_A', None, None
         if pa:
             k_hold += 1
-            sb = evaluate(panel, spec, HOLD_START, data_end, rng=rng)
+            sb = evaluate(panel, spec, 'hold', data_end, rng=rng)
             pb, cb = gate_b(sb, k_hold)
             sb['checks'] = cb
             hold = json.dumps(sb)
