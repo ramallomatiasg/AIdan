@@ -84,3 +84,9 @@ veces. Así se sabe que el arnés detecta información cuando la hay y no invent
 - El COT de NZD empieza ~2004, el dólar amplio 2006 y algunas tasas OECD dejan de publicarse: dato faltante = sin
   señal (la hipótesis queda plana ese período).
 - Nada de esto mide si AIdan intradía puede mejorar: mide si existe información en datos que AIdan no mira.
+
+**Enmienda 1 (28-oct, después de 5 vueltas, por pedido del user de que no gire sobre la misma idea — NO toca el gate
+de pase):** (a) una familia cuya mejor variante dio neto ≤ 0 se cierra a las 2 variantes (no a las 3); (b) cuando ya
+se probaron todas las features, no se aceptan variantes de familias de una sola fuente ya probadas: solo
+combinaciones o familias nuevas; (c) si la IA propone menos de la mitad válida, se le devuelven los rechazos y
+propone una vez más en la misma vuelta.

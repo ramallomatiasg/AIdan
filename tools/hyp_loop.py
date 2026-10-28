@@ -97,7 +97,7 @@ def variant_of(spec):
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
 
-def validate(spec, closed, seen_variants, cycle_families):
+def validate(spec, closed, seen_variants, cycle_families, tested_families=(), combo_phase=False):
     """Devuelve (ok, motivo). Lista cerrada: todo lo que no está en el catálogo se rechaza."""
     try:
         if spec.get('pairs') not in hd.CCYS + ['ALL']:
@@ -133,6 +133,8 @@ def validate(spec, closed, seen_variants, cycle_families):
         return False, 'duplicado exacto de una ya probada'
     if fam in cycle_families:
         return False, 'misma familia que otra de esta vuelta'
+    if combo_phase and len(spec['conditions']) == 1 and fam in tested_families:
+        return False, 'variante de una idea de una sola fuente ya probada: en esta etapa, combinaciones o ideas nuevas'
     return True, ''
 
 
@@ -337,9 +339,12 @@ def memory(conn):
             if m is not None:
                 e['best'] = m if e['best'] is None else max(e['best'], m)
                 e['worst'] = m if e['worst'] is None else min(e['worst'], m)
-    closed = {k for k, v in fam.items() if v['passA'] == 0 and v['n'] >= CLOSE_AFTER}
+    # enmienda 1 (28-oct): una familia cuya MEJOR variante dio neto <= 0 se cierra a las 2, no a las 3
+    closed = {k for k, v in fam.items() if v['passA'] == 0 and
+              (v['n'] >= CLOSE_AFTER or (v['n'] >= 2 and v['best'] is not None and v['best'] <= 0))}
     few = sum(1 for r in rows if r['disc_json'] and json.loads(r['disc_json']).get('n', 0) < MIN_ACTIVE)
-    return dict(families=fam, features=feat, closed=closed, variants=variants, few=few)
+    combo_phase = all(e['n'] > 0 for e in feat.values())
+    return dict(families=fam, features=feat, closed=closed, variants=variants, few=few, combo_phase=combo_phase)
 
 
 def memory_text(mem):
@@ -359,7 +364,7 @@ def memory_text(mem):
 
 # ── proponente (Groq) ────────────────────────────────────────────────────────
 
-def llm_propose(mem, n):
+def llm_propose(mem, n, feedback=None):
     import requests
     from src.common.config import Config
     catalog = '\n'.join(f"  {k} [fuente: {hd.SOURCE[k]}]: {v[0]}. Umbrales permitidos: {v[1]}"
@@ -392,6 +397,9 @@ tasas + otros mercados, etc.). El mecanismo tiene que explicar quién pierde pla
 Una hipótesis necesita >= 30 períodos con posición en 1999-2014 o no puede pasar (ya pasaron {mem['few']} que
 quedaron cortas): con 2 condiciones en una sola moneda usá umbrales moderados (0, ±0.5, ±1), no extremos.
 Respondé SOLO un JSON: {{"hypotheses": [ ... ]}}"""
+    if feedback:
+        prompt += ('\n\nTu propuesta anterior de esta vuelta tuvo estos RECHAZOS (aprendé de ellos y proponé OTRAS, '
+                   'distintas de las rechazadas y de las aceptadas):\n' + feedback)
     keys = [k for k in getattr(Config, 'GROQ_API_KEYS', []) if k] or [Config.GROQ_API_KEY]
     last = None
     for key in [k for k in keys for _ in range(3)]:            # cada key hasta 3 veces (límite por minuto)
@@ -431,12 +439,22 @@ def score_shadows(conn, panel, data_end):
     return out
 
 
-def cycle(conn, panel, specs, source, n_max):
+def _summary(spec):
+    try:
+        conds = ' y '.join(f"{c['feature']} {c['op']} {c['threshold']}" for c in spec['conditions'])
+        return f"{spec.get('pairs')} {spec.get('position')} si {conds} (h{spec.get('horizon')})"
+    except Exception:
+        return str(spec)[:120]
+
+
+def cycle(conn, panel, propose, n_max):
+    """`propose(mem, n, feedback) -> (specs, source)`; si sale menos de la mitad válida, se le devuelven los
+    rechazos y propone una vez más (aprende de lo rechazado en la misma vuelta)."""
     data_end = str(max(df.index[-1] for df in panel.values()).date())
     rng = np.random.default_rng(SEED)
     ctrl = run_controls(panel, rng)
-    cur = conn.execute('INSERT INTO cycles (started_at, data_end, control_json, source) VALUES (?,?,?,?)',
-                       (dt.datetime.now().isoformat(timespec='seconds'), data_end, json.dumps(ctrl), source))
+    cur = conn.execute('INSERT INTO cycles (started_at, data_end, control_json) VALUES (?,?,?)',
+                       (dt.datetime.now().isoformat(timespec='seconds'), data_end, json.dumps(ctrl)))
     cid = cur.lastrowid
     print(f"control del arnés: positivo 60% {'PASA' if ctrl['positive_60pct_passes'] else 'NO PASA'} "
           f"({ctrl['positive_mean_bps']:+.1f} bps) · ruido pasó {ctrl['null_passes_of_20']}/20 ⇒ "
@@ -446,18 +464,32 @@ def cycle(conn, panel, specs, source, n_max):
         conn.commit()
         return
     mem = memory(conn)
-    valid, fams = [], set()
+    valid, fams, specs = [], set(), []
     now = dt.datetime.now().isoformat(timespec='seconds')
-    for spec in specs:
-        ok, why = validate(spec, mem['closed'], mem['variants'], fams)
-        if ok:
-            fams.add(family_of(spec))
-            valid.append(spec)
-        else:
-            conn.execute('INSERT INTO hypotheses (cycle_id, created_at, source, family, variant, spec_json, '
-                         'rationale, status, reason) VALUES (?,?,?,?,?,?,?,?,?)',
-                         (cid, now, source, _safe_family(spec), None, json.dumps(spec),
-                          spec.get('rationale') if isinstance(spec, dict) else None, 'rechazada', why))
+    feedback, source = None, None
+    for attempt in range(2):
+        batch, source = propose(mem, n_max, feedback)
+        if batch is None:
+            break
+        specs += batch
+        rejected = []
+        for spec in batch:
+            ok, why = validate(spec, mem['closed'], mem['variants'], fams, set(mem['families']),
+                               mem['combo_phase'])
+            if ok:
+                fams.add(family_of(spec))
+                valid.append(spec)
+            else:
+                rejected.append(f'- {_summary(spec)}: {why}')
+                conn.execute('INSERT INTO hypotheses (cycle_id, created_at, source, family, variant, spec_json, '
+                             'rationale, status, reason) VALUES (?,?,?,?,?,?,?,?,?)',
+                             (cid, now, source, _safe_family(spec), None, json.dumps(spec),
+                              spec.get('rationale') if isinstance(spec, dict) else None, 'rechazada', why))
+        conn.commit()
+        if len(valid) >= max(2, n_max // 2) or not rejected:
+            break
+        feedback = '\n'.join(rejected)
+    conn.execute('UPDATE cycles SET source=? WHERE id=?', (source, cid))
     # exploración antes que refinamiento: primero las que usan features menos probadas
     # y, una vez probada cada feature, primero las que combinan dos FUENTES distintas (confluencia)
     valid.sort(key=lambda s: (min(mem['features'][c['feature']]['n'] for c in s['conditions']),
@@ -549,13 +581,14 @@ def main():
         return
     if a.spec:
         with open(a.spec, encoding='utf-8') as f:
-            specs, source = json.load(f), 'manual'
+            manual = json.load(f)
+        propose = lambda mem, n, fb: (None, 'manual') if fb else (manual, 'manual')  # noqa: E731
     elif a.cycle:
-        specs, source = llm_propose(memory(conn), a.n)
+        propose = llm_propose
     else:
         ap.print_help()
         return
-    cycle(conn, panel, specs, source, a.n)
+    cycle(conn, panel, propose, a.n)
     report(conn)
 
 

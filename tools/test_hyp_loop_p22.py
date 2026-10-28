@@ -107,3 +107,34 @@ def test_gate_a_exige_ganarle_al_azar():
     assert not hl.gate_a(s)[0]
     s['control_p95_bps'] = 4.0
     assert hl.gate_a(s)[0]
+
+
+def test_familia_negativa_se_cierra_a_las_2(tmp_path):
+    import json
+    conn = hl.connect(str(tmp_path / 'h.db'))
+    for th, m in ((0.5, -3.0), (1.0, -1.0)):
+        s = _spec(conditions=[dict(feature='vix_z', op='>', threshold=th)])
+        conn.execute("INSERT INTO hypotheses (family, variant, spec_json, status, disc_json) VALUES (?,?,?,?,?)",
+                     (hl.family_of(s), hl.variant_of(s), json.dumps(s), 'falló_A', json.dumps({'mean_bps': m})))
+    assert hl.family_of(_spec(conditions=[dict(feature='vix_z', op='>', threshold=1.5)])) in hl.memory(conn)['closed']
+
+
+def test_en_etapa_de_combinacion_no_se_repite_una_sola_fuente():
+    a = _spec()
+    ok, why = hl.validate(a, set(), set(), set(), {hl.family_of(a)}, combo_phase=True)
+    assert not ok and 'una sola fuente' in why
+    combo = _spec(conditions=[dict(feature='cot_spec_z52', op='>', threshold=1.0),
+                              dict(feature='rate_diff', op='>', threshold=0.0)])
+    assert hl.validate(combo, set(), set(), set(), {hl.family_of(a)}, combo_phase=True)[0]
+
+
+def test_reintento_con_los_rechazos(tmp_path):
+    """Si la IA propone poco válido, se le devuelven los rechazos una vez (y el manual no reintenta)."""
+    calls = []
+
+    def fake(mem, n, fb):
+        calls.append(fb)
+        return ([dict(pairs='MXN')] if fb is None else []), 'fake'
+    panel = hd.build_panel()
+    hl.cycle(hl.connect(str(tmp_path / 'h.db')), panel, fake, 4)
+    assert len(calls) == 2 and calls[0] is None and 'moneda inválida' in calls[1]

@@ -443,5 +443,16 @@ hace falta ~58% de acierto semanal para pasar. Sanidad: el carry da lo que dice 
 Vueltas 1-3: cada feature sola, en los dos sentidos (la IA exploró sola el lado contrario de lo que ya había fallado).
 Vuelta 4: combinaciones de 2 fuentes en monedas puntuales (petróleo→CAD, tasas→JPY); varias quedaron con 6-17
 períodos, insuficientes. Lo más cerca: carry siguiendo (+36,6 bps por 20 días, CI cruza cero, se murió en la 2da
-mitad) y momentum de 250 días (+13,8). **Falta la tarea programada** (lun-vie 20:00, `--cycle --n 8`): pendiente OK del user.
+mitad) y momentum de 250 días (+13,8). **Tarea `aidan-hyp-loop` creada con OK del user** (lun-vie 20:00, `--cycle --n 8`,
+pythonw, log en `state/hyp_loop_YYYYMMDD.log`), probada desde el scheduler.
+
+**Enmienda 1 (anti-repetición, no toca el gate):** la 5ta vuelta propuso solo 3 ideas y 2 eran variantes de familias de
+una sola fuente que ya habían fallado ⇒ familia con mejor neto ≤ 0 se cierra a las 2 variantes; con todas las features
+probadas solo se aceptan combinaciones o familias nuevas; si la IA propone poco válido, se le devuelven los rechazos.
+**Vuelta 6: 8 combinaciones de 2 fuentes, y la primera que pasa el descubrimiento: #40** = especuladores largos en EUR
+(COT z > 0,5) **y** tasa europea > EE.UU. + 0,5 ⇒ comprar EUR 10 días: n=63, **+70 bps por período, CI [+21, +111]**,
+las dos mitades positivas (+100 / +42), azar p95 +29. **Falló la reserva con n=0**: entre 2015 y hoy la tasa europea nunca
+superó a la de EE.UU. por 0,5 ⇒ no está refutada, es una idea **dormida** (sin datos nuevos para probarla); por criterio
+cuenta como `falló_B` y gastó la 1ra mirada a la reserva (k=1). Si el régimen vuelve, se puede re-declarar como idea nueva.
+
 
