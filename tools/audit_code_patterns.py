@@ -1,4 +1,4 @@
-"""Auditoria automatica de los patrones de bug que YA hicieron dano en AIdan.
+﻿"""Auditoria automatica de los patrones de bug que YA hicieron dano en AIdan.
 
 READ-ONLY. No toca codigo, no toca la DB, no usa MT5. Solo lee y reporta.
 
@@ -266,7 +266,7 @@ def check_sql_sin_guard():
 # ── 7. incoherencias de estado en la DB ──────────────────────────────────────
 # Filas ya triadas (3-oct-2026). Agregar aca SOLO despues de revisar el caso a mano.
 CONOCIDOS_DB_CIERRE_FANTASMA = '1042'
-CONOCIDOS_DB_MFE_CONTAMINADO = '1007'
+CONOCIDOS_DB_MFE_CONTAMINADO = '1007,1102'  # 1102 (30-oct): TP real con overshoot del spike, no restart
 
 
 def check_db_estado():

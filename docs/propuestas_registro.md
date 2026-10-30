@@ -34,11 +34,12 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P17 | **Deriva post-resultados (PEAD) en acciones de EE.UU.**: comprar tras una sorpresa positiva de ganancias, mantener ~20-60 días. | Otro mercado, anomalía documentada | arXiv 2512.00280 (2025): ~0,43%/mes de alfa, solo en sorpresas positivas. Comisión cero en brokers como Alpaca (con API de paper trading). Falta una fuente gratis de fechas y sorpresas de resultados. | 1-2 días | ❌ **NO PASA 24-oct**: +0,48%/20 días sobre SPY, pero el control (mismas acciones, día al azar) da +0,38% con p95 +0,61%, y la cola NEGATIVA sube igual (+0,47%) ⇒ es la deriva de las ganadoras de hoy, no la sorpresa. Ver abajo |
 | P18 | **Sesgo favorito-longshot en mercados de predicción (Polymarket/Kalshi)**: comprar el resultado favorito (precio ≥ 0,90) cerca del cierre. | Otro mercado, sesgo conductual | En apuestas está documentado que los longshots se sobrepagan; en Polymarket sin verificar. Data pública de mercados resueltos. Descartado del mismo rubro: el arbitraje de latencia en los mercados cripto de 15 min (lo cerraron con fees dinámicos en 2026) y el market making (selección adversa; el market maker interno de Kalshi no es rentable). | 1 día | ❌ **NO PASA 28-oct** (Kalshi, no Polymarket: DNS): n=664 eventos, −13,99%/apuesta neto, CI [−17,4, −11,1]; el favorito acierta 86% contra 93% del precio ⇒ en Kalshi el sesgo va al REVÉS. Ver abajo |
 | P19 | **Shadow en papel del carry de funding (P15)**: cada 8 h, con el funding y los precios públicos de Binance en vivo, registrar qué haría la regla congelada de P15 (entrar/salir, funding cobrado, costo) en una base propia; sin órdenes. | Siguiente paso de lo único que pasó | P15 es la única idea de la línea que pasó, también fuera de muestra, pero 2025-26 rindió casi cero. Antes de cualquier plata hay que ver si el premio sigue vivo HOY y si la ejecución (base spot-perpetuo al entrar) se parece a la del backtest. Mismo esquema que el shadow P13b (proceso propio + tarea). | medio día | 🧪 **SHADOW ARMADO 27-oct** (`tools/shadow_funding.py`, criterio `docs/p19_shadow_funding_criterio.md`): lectura a 90 días (~25-ene), decisión a 180 (~25-abr). Ver abajo |
-| P20 | **Cash-and-carry con futuros TRIMESTRALES de cripto** (comprar spot + vender el futuro con vencimiento de Binance, BTC/ETH, mantener hasta el vencimiento) cuando la base anualizada supera la tasa libre + costo. | Misma lógica que P15, otro instrumento | Mismo premio que P15 (lo pagan los apalancados en largo) pero **se fija al entrar**: la base pactada no cambia con el régimen día a día, que es justo lo que hizo caer a P15 en 2025-26. Al vencimiento converge al spot ⇒ el resultado se conoce al entrar salvo costos. Data pública (velas de los contratos de entrega de Binance, `dapi`/`fapi` con vencimiento). Nunca medido acá. | 1 día | en cola (nueva 27-oct) |
+| P20 | **Cash-and-carry con futuros TRIMESTRALES de cripto** (comprar spot + vender el futuro con vencimiento de Binance, BTC/ETH, mantener hasta el vencimiento) cuando la base anualizada supera la tasa libre + costo. | Misma lógica que P15, otro instrumento | Mismo premio que P15 (lo pagan los apalancados en largo) pero **se fija al entrar**: la base pactada no cambia con el régimen día a día, que es justo lo que hizo caer a P15 en 2025-26. Al vencimiento converge al spot ⇒ el resultado se conoce al entrar salvo costos. Data pública (velas de los contratos de entrega de Binance, `dapi`/`fapi` con vencimiento). Nunca medido acá. | 1 día | ❌ **NO PASA 30-oct**: +2,81%/año sobre el capital contra tasa libre 3,40%; 2025 +2,8% y 2026 +0,4%, también debajo ⇒ no arregla lo que hizo caer a P15. Ver abajo. Cerrado |
 | P21 | **Carry de funding (P15) en Hyperliquid y en el diferencial entre exchanges** (mismo motor y reglas congeladas de P15; variante: cobrar el funding del exchange que más paga y cubrir en el que menos). | Misma lógica, otro instrumento/venue | P15 es lo único que pasó, y cayó en 2025-26 en Binance. Hyperliquid liquida funding cada HORA y suele pagar más que Binance (otro público, más apalancado); el diferencial entre exchanges es un premio distinto del nivel. API pública (`api.hyperliquid.xyz`, resuelve desde esta red) con historial de funding. Nunca medido acá (P15 solo usó Binance). | medio día | en cola (nueva 28-oct) |
 | P22 | **Loop de hipótesis con IA sobre datos que AIdan no mira** (posicionamiento COT, tasas, bonos, VIX, dólar, petróleo; 7 monedas, 1999 →): la IA (Groq) propone con lista cerrada, el arnés prueba descubrimiento 1999-2014 → reserva 2015 → shadow hacia adelante, y TODO lo probado vuelve como memoria. Familias cerradas tras 3 fallos, espejos y duplicados rechazados. | Pedido del user (28-oct): que AIdan aprenda de todo y se pula solo | Aprende de 25 años de datos y no de 7 trades/día; mira más que precio. | 1 día | 🧪 **ARMADO 28-oct**: 4 vueltas, 31 hipótesis, 0 pasan el descubrimiento (ver abajo) |
 | P21 | **¿Un broker más barato salva algo?** Fusion Zero (USD 4,50 ida y vuelta) contra IC (USD 7), sobre todo lo ya medido. | Pedido del user (28-oct) | Si el problema fuera el costo, bajar 1/3 la comisión daría vuelta lo que estaba cerca. | medio día | ❌ **NO PASA 28-oct**: ver abajo |
 | P23 | **A1 en EUR/USD con entrada LÍMITE (maker)**: poner la orden en la banda de 2σ en vez de entrar a mercado, con Fusion. | Cambio de ejecución sobre lo único con información | Con Fusion A1 en EUR/USD queda en +0,08 pips (cero). Entrar con límite ahorra el spread y entra en mejor precio, pero sufre selección adversa (solo se llena cuando el precio sigue en contra): hay que medirlo con velas de 1 minuto o ticks, no con M15. | 1 día | en cola (nueva 28-oct) |
+| P24 | **Prima nocturna en índices (overnight drift)**: largo US30/USTEC/DE40 del cierre de la sesión de contado a la apertura siguiente, neto de spread y del swap REAL de MT5; descriptivo: el tramo intradía (apertura → cierre). | Paper + otro instrumento | Lou, Polk & Skouras (2019) y Cliff, Cooper & Gulen (2008): en EE.UU. casi todo el retorno de las acciones se gana de noche y el intradía rinde ~0. No adivina dirección intradía (lo refutado acá) y vive en índices, donde el costo medido en P1 es 0,2-0,3 pp. El riesgo es el swap del CFD (se cobra justo por la noche que se mantiene). Data ya bajada (`.cache_p1/M15`). Nunca medido acá. | medio día | en cola (nueva 30-oct) |
 | P15b | **Rotación del carry de funding a las K=3 monedas que más pagan** (sobre P15). | Cambio sobre lo que pasó | Varias monedas pasan mucho tiempo afuera y esa plata rinde 0; concentrar en las que más pagan la usaría mejor. | medio día | ❌ **NO PASA 23-oct**: +0,21%/año sobre P15, CI cruza cero, y últimos 12 meses −0,9%. Ver abajo |
 
 ## Lo medido por esta línea
@@ -475,6 +476,31 @@ La calibración del SÍ es monótona y comprime hacia el medio: lo barato aciert
 **Cerrado: favorito-longshot en Kalshi con esta definición. No barrer tramo de precio, horizonte ni universo.**
 *Lectura:* la compresión hacia el medio es lo que pagaría comprar barato, pero el longshot igual pierde por spread y
 comisión ⇒ tampoco hay un "al revés" rentable que proponer. Reservadas (41-100) no miradas.
+
+### 30 Oct 2026 — P20 cash-and-carry con futuros trimestrales: NO PASA (`tools/backtest_p20_cash_carry.py`)
+
+Criterio `docs/p20_cash_and_carry_criterio.md` (`18706b2`, + enmienda 1 por un bug de datos, declarada abajo).
+Binance USDT-M trimestrales de BTC y ETH (feb-2021 → 29-oct-2026, 2.094 días): spot comprado + trimestral vendido
+cuando la base pactada neta anualizada supera la tasa libre, hasta el vencimiento; costo 0,38% por ida y vuelta,
+capital 2 × nocional.
+
+| | anual sobre capital | CI95 | mitades | caída máx | monedas > 0 | tasa libre media |
+|---|---|---|---|---|---|---|
+| **BTC+ETH** | **+2,81%** | [+0,84, +5,50] | +2,2 / +3,4 | 4,6% | 2/2 | **3,40%** |
+
+Por año: 2021 +3,8% (rf 0,1%) · 2022 +1,8% (1,9%) · 2023 +0,9% (5,1%) · **2024 +6,9% (5,1%)** · 2025 +2,8% (4,2%) ·
+2026 +0,4% (3,7%). BTC 19 trades (0 forzadas, 74% del tiempo adentro), ETH 17 (2 salidas forzadas por suba ≥80%
+en 2021). Falla solo el criterio 1, pero es el que importa: **rinde menos que dejar la plata en la tasa libre**, y
+en 2025-26 (la razón de P20) también queda debajo. Fijar la base no ayuda si la base misma se achicó: el premio
+de apalancamiento cayó para el funding y para los trimestrales a la vez.
+
+**Enmienda 1 (bug de datos, antes de reportar):** la serie continua `NEXT_QUARTER` repite el último precio los días
+en que el contrato siguiente no cotiza (~505 días por moneda, p.ej. 56.774,5 del 27-mar al 15-abr-2021). Se descarta
+un open idéntico al del día anterior. **No cambió ningún trade ni el resultado** (+2,81% antes y después).
+
+**Cerrado:** cash-and-carry trimestral sobre esta data; no se barren umbral, días mínimos ni contrato. Con P15
+(funding) cayendo igual, la línea de "premio de apalancamiento cripto" depende de que vuelva un mercado como 2021;
+el shadow P19 es lo que lo va a mostrar.
 
 ### 28 Oct 2026 — P21 broker más barato: NO PASA (`tools/backtest_p21_broker.py`)
 

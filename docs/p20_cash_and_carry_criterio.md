@@ -57,3 +57,8 @@ contrato.
 - **Riesgo de exchange no modelado** (las dos patas en el mismo lado).
 - La serie continua puede tener saltos en el cambio de contrato; el tool verifica que el `CURRENT_QUARTER` de
   la fecha corresponda al vencimiento calculado (si la base salta >5% de un día a otro, se marca y se reporta).
+
+**Enmienda 1 (30-oct, DESPUÉS de una primera corrida, por un bug de datos — declarado):** la serie continua
+`NEXT_QUARTER` de Binance repite el último precio los días en que el contrato siguiente todavía no cotiza (~505
+días por moneda). El tool descarta un open idéntico al del día anterior (= sin dato). Reglas, umbrales y criterio
+sin cambio; el resultado fue el mismo antes y después (+2,81%/año, NO PASA).
