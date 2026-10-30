@@ -6,6 +6,30 @@ En CLAUDE.md queda la tabla corta de las últimas versiones y un puntero acá.
 
 ---
 
+## v3.65.1 — Calendar play: `actual` nunca se completaba (30 Oct 2026)
+
+**Origen.** Auditoría semanal del 30-oct: el shadow calendar play tenía 7 filas (FOMC 28-oct, BCE 29-oct)
+y **ninguna con `actual`** ⇒ el scorer no podía puntuar nada. OK del user para arreglarlo.
+
+**Causas (las dos fuentes estaban muertas, no una):**
+1. El feed gratis de Forex Factory (`ff_calendar_thisweek.json`) trae `actual` vacío siempre (los datos
+   de las 08:30 ET del 30-oct seguían en `''` cinco horas después). La rama FF queda por si cambia.
+2. `news_titles_between` formateaba los límites como `'2026-10-28 18:00:00'` y `published_at` se guarda
+   `'2026-10-28T18:00:03'`: comparando como texto `'T' > ' '` ⇒ toda nota del mismo día quedaba fuera
+   del `BETWEEN` ⇒ devolvía `[]` siempre. El fallback a Forexlive nunca tuvo un título para parsear.
+3. Aun con títulos: el regex exigía el número pegado al `vs` (`+0.5% m/m vs ...` no parseaba: 4 de 48
+   títulos reales con "vs expected" desde septiembre) y las decisiones de tasas no traen "vs expected".
+
+**Fix.** Consulta y orden normalizados (`replace(published_at,' ','T')`); calificadores en el parser
+(m/m, y/y, q/q, billion, million, annualized, `$`); `parse_rate_title` para decisiones del Fed/BCE
+(sin cambio ⇒ previous; "hike/cut to X%" ⇒ X, techo del rango; "by N bps" ⇒ previous ± N);
+guarda de país (un dato de Canadá o Italia a la misma hora no es el de EE.UU./eurozona); warning si un
+evento con forecast queda sin actual. **No cambia ninguna decisión: el módulo sigue sin path de
+ejecución.** Verificado contra las filas reales: FOMC → 4.00%, BCE → 2.65% (las dos sin sorpresa).
+Tests: `tools/test_calendar_play_actual_v3651.py` (13, títulos reales + SQLite temporal) y los 18 de
+v3.63.0 en verde. `tests/` 194/195: el que falla (`test_home_fast_v3650::test_default_apagado`) falla
+igual sin este cambio porque el `.env` tiene `NEWS_HOME_FAST=true` desde el 27-oct.
+
 ## v3.65.0 — Canal rápido de noticias: la home de investinglive (5 Oct 2026)
 
 **Origen.** El user pidió arreglar el feed RSS ("mediana 8,9 min de atraso"). Ese número era del

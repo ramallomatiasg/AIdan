@@ -83,10 +83,24 @@ def parse_number(s):
     return v * {'K': 1e3, 'M': 1e6, 'B': 1e9}.get(suf, 1.0)
 
 
+# v3.65.1: entre el numero y el 'vs'/'expected' puede venir un calificador ('+0.5% m/m vs',
+# '+5.4% vs +4.6% y/y expected', '-134.9 billion vs -130.2 billion expected'): antes el regex
+# exigia el numero pegado y esos titulos reales no parseaban.
+_QUAL = r'(?:\s*([mqy]/[mqy]|mom|yoy|qoq|billion|bln|bn|million|mln|annualized|saar))?'
 _VS = re.compile(
-    r'([-+]?\d+(?:[.,]\d+)?\s*[%KMBkmb]?)\s+(?:vs\.?|versus|against)\s+'
-    r'([-+]?\d+(?:[.,]\d+)?\s*[%KMBkmb]?)\s*(?:expected|exp\.?|estimate|est\.?|consensus|forecast)',
+    r'\$?([-+]?\d+(?:[.,]\d+)?\s*[%KMBkmb]?)' + _QUAL + r'\s+(?:vs\.?|versus|against)\s+'
+    r'\$?([-+]?\d+(?:[.,]\d+)?\s*[%KMBkmb]?)' + _QUAL +
+    r'\s*(?:expected|exp\.?|estimate|est\.?|consensus|forecast)',
     re.IGNORECASE)
+
+
+def _scale(qual):
+    q = (qual or '').lower()
+    if q in ('billion', 'bln', 'bn'):
+        return 1e9
+    if q in ('million', 'mln'):
+        return 1e6
+    return 1.0
 
 
 def parse_vs_title(title):
@@ -96,10 +110,69 @@ def parse_vs_title(title):
     m = _VS.search(title)
     if not m:
         return None
-    a, e = parse_number(m.group(1)), parse_number(m.group(2))
+    a, e = parse_number(m.group(1)), parse_number(m.group(3))
     if a is None or e is None:
         return None
-    return a, e
+    return a * _scale(m.group(2)), e * _scale(m.group(4))
+
+
+# Paises que NO son el del evento: un dato de Canada o de Italia a la misma hora que uno de
+# EE.UU./eurozona compartia keywords ('retail sales', 'CPI') y se tomaba como el actual.
+_FOREIGN = {
+    'USD': re.compile(r'\b(canada|canadian|uk|britain|british|japan|japanese|australia|australian|'
+                      r'new zealand|china|chinese|swiss|switzerland|german|germany|france|french|'
+                      r'italy|italian|spain|spanish|eurozone|euro area)\b', re.IGNORECASE),
+    'EUR': re.compile(r'\b(us|u\.s\.|canada|canadian|uk|britain|japan|australia|china|swiss|'
+                      r'italy|italian|germany|german|france|french|spain|spanish)\b', re.IGNORECASE),
+}
+_EZ = re.compile(r'\b(eurozone|euro area|ecb)\b', re.IGNORECASE)
+
+
+def foreign_title(title, currency):
+    """True si el titulo es de OTRO pais (para EUR, un dato nacional sin 'eurozona')."""
+    rx = _FOREIGN.get(currency)
+    if not rx or not title:
+        return False
+    if currency == 'EUR' and _EZ.search(title):
+        return False
+    return bool(rx.search(title))
+
+
+# ── decisiones de tasas (v3.65.1): no traen 'X vs Y expected' ──
+_RATE_EVENT = re.compile(r'(funds rate|refinancing rate|deposit (facility )?rate|interest rate|'
+                         r'cash rate|bank rate|policy rate)', re.IGNORECASE)
+_CB = {'USD': re.compile(r'\b(fed|fomc)\b', re.IGNORECASE),
+       'EUR': re.compile(r'\b(ecb)\b', re.IGNORECASE)}
+_DECISION = re.compile(r'\bdecision\b|\b(fed|fomc|ecb)\s+(leaves|holds|keeps|hikes|raises|cuts|lowers)\b',
+                       re.IGNORECASE)
+_MOVE_TO = re.compile(r'\b(hikes?|raises?|cuts?|lowers?|reduces?)\b[^%]*?\bto\s+(\d+(?:\.\d+)?)%?'
+                      r'(?:\s*[-–]\s*(\d+(?:\.\d+)?)%)?', re.IGNORECASE)
+_MOVE_BY = re.compile(r'\b(hikes?|raises?|cuts?|lowers?|reduces?)\b.*?\bby\s+(\d+)\s*(?:bps|bp|basis points?)',
+                      re.IGNORECASE)
+_HOLD = re.compile(r'\b(unchanged|no change|holds?|leaves?|left|keeps?|on hold|steady)\b', re.IGNORECASE)
+
+
+def is_rate_event(ev):
+    return bool(_RATE_EVENT.search(ev.get('event', '') or ''))
+
+
+def parse_rate_title(title, currency, previous):
+    """'FOMC decision Oct 28: Rates left unchanged' -> '4.00%' (= previous) · 'Fed cuts to
+    3.75%-4.00%' -> '4.00%' (techo del rango, como lo publica FF) · 'ECB hikes by 25 bps' ->
+    previous+0,25. None si el titulo no es la decision de ESE banco central o no se entiende."""
+    if not title or currency not in _CB or not _CB[currency].search(title) or not _DECISION.search(title):
+        return None
+    m = _MOVE_TO.search(title)
+    if m:
+        return f'{float(m.group(3) or m.group(2)):.2f}%'
+    prev = parse_number(previous)
+    m = _MOVE_BY.search(title)
+    if m and prev is not None:
+        sign = 1 if m.group(1).lower().startswith(('hike', 'raise')) else -1
+        return f'{prev + sign * int(m.group(2)) / 100:.2f}%'
+    if _HOLD.search(title) and prev is not None:
+        return f'{prev:.2f}%'
+    return None
 
 
 _STOP = {'the', 'of', 'and', 'us', 'u.s.', 'eurozone', 'euro', 'area', 'zone', 'm/m', 'y/y',
@@ -238,11 +311,13 @@ def record_release(events_same_ts, get_exec, db, sleep=time.sleep, clock=time.ti
 
 
 def resolve_actual(events_same_ts, db, news_rows_fn):
-    """A T+20min: completar `actual`. Prefiere FF (si /calendar ya refresco con actual),
-    si no parsea el titulo de Forexlive ('X vs Y expected') dentro de [T, T+10min]."""
+    """A T+20min: completar `actual`. Prefiere FF (si /calendar trae actual: el feed gratis
+    NUNCA lo trae, verificado 30-oct, se deja por si cambia); si no, el titulo de Forexlive
+    dentro de [T, T+10min]: 'X vs Y expected' para datos, y la decision para tasas."""
     T = float(events_same_ts[0]['release_ts'])
     _cal_cache['ts'] = 0.0  # forzar refresh
     fresh = {event_key(e): e for e in fetch_events()}
+    titles = None
     for ev in events_same_ts:
         k = event_key(ev)
         ff = fresh.get(k, {}).get('actual')
@@ -250,13 +325,28 @@ def resolve_actual(events_same_ts, db, news_rows_fn):
             db.update_calendar_play_actual(k, str(ff), 'ff')
             continue
         try:
-            for title in news_rows_fn(T, T + 600):
-                if not title_matches_event(title, ev.get('event', '')):
+            if titles is None:
+                titles = news_rows_fn(T, T + 600)
+            cur = ev.get('currency', '')
+            found = False
+            for title in titles:
+                if is_rate_event(ev):
+                    act = parse_rate_title(title, cur, ev.get('previous', ''))
+                    if act:
+                        db.update_calendar_play_actual(k, act, 'forexlive_rate')
+                        found = True
+                        break
+                    continue
+                if foreign_title(title, cur) or not title_matches_event(title, ev.get('event', '')):
                     continue
                 parsed = parse_vs_title(title)
                 if parsed:
                     db.update_calendar_play_actual(k, str(parsed[0]), 'forexlive', str(parsed[1]))
+                    found = True
                     break
+            if not found and (ev.get('forecast') or ''):
+                # fail-loud: un evento con forecast que no se resolvio no puede puntuar
+                logger.warning(f"calendar_play: sin actual para {k} ({len(titles)} titulos en la ventana)")
         except Exception as e:
             logger.warning(f"calendar_play: resolve_actual fallo para {k}: {e}")
 

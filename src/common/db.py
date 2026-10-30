@@ -2933,14 +2933,16 @@ def update_calendar_play_actual(event_key, actual, source, expected_from_title=N
 
 def news_titles_between(ts_from, ts_to):
     """v3.63.0 — titulos de `news` publicados entre dos epochs UTC (para parsear 'X vs Y
-    expected' de Forexlive). published_at se guarda en UTC ISO."""
+    expected' de Forexlive). published_at se guarda en UTC ISO CON 'T' ('2026-10-28T18:00:03').
+    v3.65.1: antes se formateaba con espacio y, comparando como texto, 'T' > ' ' dejaba toda
+    nota del mismo dia FUERA del BETWEEN => devolvia [] siempre y `actual` nunca se completo."""
     try:
         from datetime import datetime as _dt, timezone as _tz
-        a = _dt.fromtimestamp(ts_from, tz=_tz.utc).strftime('%Y-%m-%d %H:%M:%S')
-        b = _dt.fromtimestamp(ts_to, tz=_tz.utc).strftime('%Y-%m-%d %H:%M:%S')
+        a = _dt.fromtimestamp(ts_from, tz=_tz.utc).strftime('%Y-%m-%dT%H:%M:%S')
+        b = _dt.fromtimestamp(ts_to, tz=_tz.utc).strftime('%Y-%m-%dT%H:%M:%S')
         conn = _connect()
-        rows = conn.execute("SELECT title FROM news WHERE published_at BETWEEN ? AND ? ORDER BY published_at",
-                            (a, b)).fetchall()
+        rows = conn.execute("SELECT title FROM news WHERE replace(published_at, ' ', 'T') BETWEEN ? AND ? "
+                            "ORDER BY replace(published_at, ' ', 'T')", (a, b)).fetchall()
         conn.close()
         return [r[0] for r in rows]
     except Exception:
