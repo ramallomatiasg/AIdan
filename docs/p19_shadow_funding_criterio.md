@@ -40,3 +40,18 @@ fallan ⇒** el backtest de P15 no vale como estaba: re-medirlo con el costo/la 
 - 180 días es poco para un premio que depende del régimen (2021 vs 2025): un NO PASA dice "hoy no paga", no "nunca".
 - Las fotos dependen de que la PC esté prendida; el libro no.
 - Riesgo de exchange (quiebra, retiro bloqueado) no se mide en papel.
+
+## Enmienda 1 (4-nov-2026, OK del user) — segundo libro: Hyperliquid (P21-A)
+
+Declarada ANTES de juntar (el libro de Hyperliquid tiene 0 períodos al escribir esto).
+
+- **Qué:** mismo motor, mismas 6 monedas y mismas reglas, pero el perpetuo vendido en **Hyperliquid** (funding
+  horario de Hyperliquid; el spot sigue en Binance) y el costo de P21-A (**0,37%** ida y vuelta). Es la variante que
+  pasó en P21, también fuera de muestra (+6,2%/año contra 4,6% de tasa libre), con 2025-26 debajo de la tasa libre.
+- **Desde:** 4-nov-2026 00:00 UTC, solo hacia adelante. **Lectura a 90 días (2-feb-2027), decisión a 180 (3-may-2027).**
+- **Criterio:** los mismos 3 de arriba, aplicados a este libro; en (2) el medio spread es spot Binance + perpetuo
+  Hyperliquid (mejor nivel del libro `l2Book`).
+- **Descriptivo (no decide):** la diferencia anual Hyperliquid − Binance en el mismo período.
+- **Frontera:** Hyperliquid se lee solo por el endpoint público de información, con 4 tipos de lectura; ninguna
+  clave, ninguna firma, el endpoint de órdenes no se usa (tests en `tools/test_shadow_funding_p19.py`).
+- **Límite extra:** operarlo de verdad implica dos exchanges y pasar USDC entre ellos; eso no se mide en papel.

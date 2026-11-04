@@ -33,6 +33,35 @@ def test_reglas_de_p15_sin_cambios():
     assert 'p15.simulate(' in SRC and 'def simulate' not in SRC
 
 
+def test_hyperliquid_solo_lectura():
+    """Enmienda 1: Hyperliquid se lee solo por /info con tipos de lectura; /exchange (órdenes) no existe."""
+    p21_src = open(os.path.join(ROOT, 'tools', 'backtest_p21_hyperliquid.py'), encoding='utf-8').read()
+    for src in (SRC, p21_src):
+        assert '/exchange' not in src and 'privateKey' not in src and 'eth_account' not in src
+    assert re.findall(r"https://[a-z.]+/[a-z]+", p21_src) == ['https://api.hyperliquid.xyz/info']
+    assert set(sf.HL_TYPES) == {'fundingHistory', 'candleSnapshot', 'l2Book', 'metaAndAssetCtxs'}
+    try:
+        sf.hl_info({'type': 'order'})
+        assert False, 'hl_info aceptó un tipo fuera de la lista'
+    except AssertionError as e:
+        assert 'order' in str(e)
+
+
+def test_costo_de_hyperliquid_no_contamina_binance():
+    """book() con el costo de P21 restaura el de P15 aunque falle, y el libro de Binance usa el de P15."""
+    before = p15.RT_COST
+    t0 = sf.HL_START_MS
+    d = {s: dict(spot=[], perp=[], funding=[]) for s in sf.SYMS}
+    sf.book(d, t0 + 3 * p15.P8H, t0, sf.HL_COST)
+    assert p15.RT_COST == before
+    bad = {s: None for s in sf.SYMS}
+    try:
+        sf.book(bad, t0 + 3 * p15.P8H, t0, sf.HL_COST)
+    except Exception:
+        pass
+    assert p15.RT_COST == before
+
+
 def test_senal_sin_mirar_el_futuro():
     t = 10 * p15.WINDOW_MS
     f = [(t - p15.WINDOW_MS + k * p15.P8H, 0.0001) for k in range(21)] + [(t, 9.9), (t + p15.P8H, 9.9)]
