@@ -72,3 +72,29 @@ PnL total de lo aprobado vs todo; por track; confianza del juez vs resultado; ej
 - **Descriptivo:** subconjunto con evento de impacto alto a ≤ 60 min (antes) o ≤ 30 min (después): tasa de veto y
   separación con y sin calendario.
 - **Orden:** corre después de P27; los dos se reportan juntos.
+
+## P27c — juez + calendario + MEMORIA de casos pasados (declarada el 4-nov, ANTES de ver resultados de P27/P27b)
+
+**Pedido del user:** que el juez entre en un loop de aprendizaje.
+
+- **Qué cambia respecto de P27b:** se agrega un bloque con los **5 casos pasados más parecidos** y cómo terminaron.
+  Cada caso: dirección, track, resumen del contexto (cambio de H4 en las últimas 6 velas, de H1 en las últimas 12,
+  ATR de M15, si había evento alto cerca), **lo que decidió el juez en ese caso** (si ya lo juzgó en esta variante)
+  y el resultado real (ganó/perdió, pips).
+- **Sin mirar el futuro:** solo entran trades **ya cerrados** antes de la entrada que se juzga (`archived_at` <
+  `created_at`, cota conservadora del cierre). Los trades se juzgan en orden cronológico, así la decisión del juez
+  en un caso viejo ya existe cuando aparece como memoria. Es exactamente lo que pasaría en vivo.
+- **Parecido:** misma dirección y mismo track primero; dentro de eso, distancia en (cambio H4, cambio H1, ATR M15,
+  evento alto cerca) normalizados. Fijo, no se ajusta.
+- **Universo:** los mismos 283 de P27b. Se evalúa sobre los que tienen ≥ 20 trades cerrados previos (la memoria
+  necesita material).
+- **Criterio P27c (las 5; NO mover):**
+  1. n evaluados ≥ 200.
+  2. Tasa de veto entre 15% y 85%.
+  3. TAKE − VETO > 0 con CI95 bootstrap inferior > 0.
+  4. Esa diferencia > 0 en las dos mitades.
+  5. **Aporta sobre P27b:** sobre los MISMOS trades, (separación con memoria − separación de P27b) > 0 con CI95 de
+     bootstrap pareado inferior > 0.
+- **Descriptivo:** ¿el aporte de la memoria crece con el tiempo? (último tercio vs primer tercio).
+- **Si pasa:** es el diseño del loop en vivo (cada trade que cierra se suma a la memoria). **Si no pasa:** no se
+  barren K, la medida de parecido ni el formato sobre estos trades.
