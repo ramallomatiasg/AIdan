@@ -46,7 +46,7 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P28 | **LLM operador:** con el mismo contexto de P27 (velas D1→M5, calendario, memoria) el LLM GENERA el plan completo (dirección, entrada, SL, TP y tamaño dentro de límites fijos en código: riesgo máx por trade, pérdida diaria, kill switch, posiciones), primero sobre trades pasados y en papel, con criterio declarado y placebo. | Pedido del user (4-nov): que el LLM decida cómo operar y cuánto | Juzgar una operación armada es más fácil que armarla: solo tiene sentido si P27/P27b/P27c separan. | 1 día | ⏸️ **CONDICIONAL a P27** (acordado 4-nov): si P27 no pasa, no se arma |
 | P29 | **Screen de información:** antes de armar estrategias, medir qué dato anticipa el retorno (IC fuera de muestra, placebo, costo real) sobre FX 20 años, índices/oro 2020-26 y cripto. | Pedido del user (4-nov): "estamos atacando el problema que no es" | Ver `docs/fuentes_de_ventaja_2026-11-04.md`. | 1 día | ✅ **HECHO 4-nov**: 1 de 138 celdas de dirección pasa (DE40 hora del día, 4 h); la volatilidad es predecible en 30 de 33. Ver abajo |
 | P30 | **Estacionalidad horaria en índices europeos, fuera de muestra:** misma medición de P29 F1 en STOXX50, FR40 y UK100 M15 (nunca mirados) + el mapa de horas de DE40 aplicado tal cual a STOXX50. | Lo único que pasó P29 | Si es un flujo real (apertura/cierre europeos), tiene que aparecer en los otros índices de la misma sesión. Necesita bajar M15 de MT5 con AIdan cerrado (sábado). | medio día | en cola (nueva 4-nov) |
-| P31 | **Volatilidad esperada vs costo en los trades de AIdan:** en los 300 trades reales, ¿el movimiento esperado al entrar (R1, la única info confiable del gráfico) dividido el costo separa ganadoras de perdedoras? | P29: la vol es predecible (IC 0,15-0,44) y AIdan opera con pisos fijos en pips | No da dirección; puede evitar operar cuando el movimiento no cubre el costo (generaliza el piso de ATR de m15, que sí funcionó). | medio día | en cola (nueva 4-nov) |
+| P31 | **Volatilidad esperada vs costo en los trades de AIdan:** en los 300 trades reales, ¿el movimiento esperado al entrar (R1, la única info confiable del gráfico) dividido el costo separa ganadoras de perdedoras? | P29: la vol es predecible (IC 0,15-0,44) y AIdan opera con pisos fijos en pips | No da dirección; puede evitar operar cuando el movimiento no cubre el costo (generaliza el piso de ATR de m15, que sí funcionó). | medio día | ❌ **NO PASA 4-nov** (3/5): va en la dirección esperada en las dos mitades pero no es significativo, y lo que queda sigue perdiendo. Ver abajo |
 | P15b | **Rotación del carry de funding a las K=3 monedas que más pagan** (sobre P15). | Cambio sobre lo que pasó | Varias monedas pasan mucho tiempo afuera y esa plata rinde 0; concentrar en las que más pagan la usaría mejor. | medio día | ❌ **NO PASA 23-oct**: +0,21%/año sobre P15, CI cruza cero, y últimos 12 meses −0,9%. Ver abajo |
 
 ## Lo medido por esta línea
@@ -603,3 +603,12 @@ reserva 30%; placebo por corrimiento circular; costo real por instrumento. Calib
   información sólida del gráfico: no dice para dónde, dice cuánto ⇒ **P31**.
 - **Lectura:** en FX con esta cuenta el problema es el costo frente a una ventaja minúscula; en índices el costo es
   4-6 veces menor y ahí aparece lo único que pasa.
+
+### 4 Nov 2026 — P31 movimiento esperado vs costo en los trades de AIdan: NO PASA (`tools/backtest_p31_vol_cost.py`)
+
+Criterio `docs/p31_vol_costo_criterio.md` (`e6db49f`). 737 trades reales (20-abr → 9-oct), rango medio de las 16 velas
+M15 previas; corte del tercio bajo en la 1ra mitad = 6,11 pips. 2da mitad: tercio bajo **−$0,84/trade** (n=172) vs resto
+**−$0,39** (n=197); diferencia −0,45, CI [−1,18, +0,26], placebo p5 −0,57 ⇒ falla 2 y 5. Misma dirección en la 1ra mitad
+(−1,20 vs −0,91). Sacar el tercio bajo habría dejado la 2da mitad en −$76 en vez de −$220, pero **el resto sigue
+perdiendo**: el filtro achica la pérdida (sobre todo por operar menos), no da vuelta el resultado. Descriptivo: en m15 el
+resto queda en +$0,05/trade (coherente con el piso de ATR que ya tiene). **Cerrado** sobre estos trades.
