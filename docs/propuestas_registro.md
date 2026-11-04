@@ -44,6 +44,9 @@ una idea, `grep` en `docs/historial_notas.md` y `docs/research_mercado_2026-08-1
 | P26 | **Valor en FX (PPP): mensual, largo las monedas más baratas y corto las más caras** según el tipo de cambio REAL (con IPC) contra su promedio de 5 años; G10 contra USD, 1999 →, descubrimiento 1999-2014 / reserva 2015 →. | Paper | Asness-Moskowitz-Pedersen (2013, "Value and Momentum Everywhere") y Menkhoff et al. (2017, "Currency Value"): el valor es el tercer premio clásico del FX junto a carry y momentum, y es el único de los tres que este proyecto nunca midió (carry: P11/P14; momentum: Fase 4 E4 y el loop P22). Horizonte de meses ⇒ el costo es despreciable; no adivina dirección intradía. Data gratis: tipos de cambio e IPC mensuales de FRED, que `hyp_data.py` ya baja. Se puede sumar como feature `value_5y_z` al catálogo de P22 en vez de tool aparte. | medio día | en cola (nueva 3-nov) |
 | P27 | **Juez LLM con contexto completo sobre cada señal de AIdan** (TAKE/VETO viendo velas D1→M5, niveles y ATR, sin fechas ni etiquetas de AIdan), probado sobre los 300 trades reales más recientes; `gpt-oss:20b` local. | Pedido del user (4-nov): que la IA decida razonando como juez | La 1ra prueba (shadow trader) no fue justa: veía 10 datos de M5 y repetía las etiquetas de tendencia de AIdan (100% de sus razones). Juzgar señales con contexto es otra pregunta. Placebo con velas de otro trade. | 1 día + ~15 h de cómputo | ❌ **P27 NO PASA 4-nov**: TAKE −$0,58 vs VETO −$0,42 por trade (no separa) y el placebo separa igual o mejor. P27b/P27c en curso. Ver abajo |
 | P28 | **LLM operador:** con el mismo contexto de P27 (velas D1→M5, calendario, memoria) el LLM GENERA el plan completo (dirección, entrada, SL, TP y tamaño dentro de límites fijos en código: riesgo máx por trade, pérdida diaria, kill switch, posiciones), primero sobre trades pasados y en papel, con criterio declarado y placebo. | Pedido del user (4-nov): que el LLM decida cómo operar y cuánto | Juzgar una operación armada es más fácil que armarla: solo tiene sentido si P27/P27b/P27c separan. | 1 día | ⏸️ **CONDICIONAL a P27** (acordado 4-nov): si P27 no pasa, no se arma |
+| P29 | **Screen de información:** antes de armar estrategias, medir qué dato anticipa el retorno (IC fuera de muestra, placebo, costo real) sobre FX 20 años, índices/oro 2020-26 y cripto. | Pedido del user (4-nov): "estamos atacando el problema que no es" | Ver `docs/fuentes_de_ventaja_2026-11-04.md`. | 1 día | ✅ **HECHO 4-nov**: 1 de 138 celdas de dirección pasa (DE40 hora del día, 4 h); la volatilidad es predecible en 30 de 33. Ver abajo |
+| P30 | **Estacionalidad horaria en índices europeos, fuera de muestra:** misma medición de P29 F1 en STOXX50, FR40 y UK100 M15 (nunca mirados) + el mapa de horas de DE40 aplicado tal cual a STOXX50. | Lo único que pasó P29 | Si es un flujo real (apertura/cierre europeos), tiene que aparecer en los otros índices de la misma sesión. Necesita bajar M15 de MT5 con AIdan cerrado (sábado). | medio día | en cola (nueva 4-nov) |
+| P31 | **Volatilidad esperada vs costo en los trades de AIdan:** en los 300 trades reales, ¿el movimiento esperado al entrar (R1, la única info confiable del gráfico) dividido el costo separa ganadoras de perdedoras? | P29: la vol es predecible (IC 0,15-0,44) y AIdan opera con pisos fijos en pips | No da dirección; puede evitar operar cuando el movimiento no cubre el costo (generaliza el piso de ATR de m15, que sí funcionó). | medio día | en cola (nueva 4-nov) |
 | P15b | **Rotación del carry de funding a las K=3 monedas que más pagan** (sobre P15). | Cambio sobre lo que pasó | Varias monedas pasan mucho tiempo afuera y esa plata rinde 0; concentrar en las que más pagan la usaría mejor. | medio día | ❌ **NO PASA 23-oct**: +0,21%/año sobre P15, CI cruza cero, y últimos 12 meses −0,9%. Ver abajo |
 
 ## Lo medido por esta línea
@@ -583,3 +586,20 @@ le da información útil al juez**. Ojo con el número engañoso: seguir al juez
 solo porque opera la mitad; el placebo, con velas al azar, habría perdido −$45. Menos trades = menos pérdida, no juicio.
 A los 37 trades parecía separar (+$1,95 vs −$0,11) y a los 56 ya no: ruido, como estaba advertido. **Cerrado:** no se
 barren modelo, prompt ni temporalidades sobre estos trades. P27b (calendario) y P27c (memoria) se leen al terminar.
+
+### 4 Nov 2026 — P29 screen de información: casi nada tiene información de dirección; la volatilidad sí (`tools/info_screen.py`)
+
+Criterio `docs/p29_info_screen_criterio.md` (`07ee73e`). 138 celdas de dirección + 33 de riesgo; descubrimiento 70% /
+reserva 30%; placebo por corrimiento circular; costo real por instrumento. Calibración OK: la reversión 2σ en EURUSD
+(A1) muestra información y falla el costo, igual que Fase 3b; el control positivo sintético pasa (test).
+
+- **Dirección: 18 celdas con información fuera de muestra, 1 pasa el costo.** En FX la información existe (reversión de
+  corto plazo, hora del día a 1 h) pero es **0,1-0,5 bps brutos contra 0,8-1,8 bps de costo**: el costo es 3-10 veces la
+  ventaja. Cripto: nada (costo 10 bps). Lead-lag de USTEC a FX/oro: nada.
+- **La que pasa: DE40, hora del día, a 4 h:** neto +3,47 bps, CI [+0,72, +6,40], reserva desde oct-2024. Comprar en las
+  horas de servidor 05-08 y 20 rinde +5,65 bps más que estar siempre comprado ⇒ no es solo la suba del índice. Con 138
+  celdas, 1 que pase puede ser azar ⇒ **P30** (índices europeos nunca mirados).
+- **Riesgo: la volatilidad es predecible en 30 de 33 celdas** (IC 0,15-0,44, todos los instrumentos). Es la única
+  información sólida del gráfico: no dice para dónde, dice cuánto ⇒ **P31**.
+- **Lectura:** en FX con esta cuenta el problema es el costo frente a una ventaja minúscula; en índices el costo es
+  4-6 veces menor y ahí aparece lo único que pasa.
