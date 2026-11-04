@@ -39,7 +39,6 @@ import requests
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, ROOT)
 
-from tools.backtest_fase2 import bootstrap_ci  # noqa: E402
 
 M1_FILE = os.path.join(ROOT, '.cache_p23', 'EURUSD_M1.npy')
 PROD_DB = os.path.join(os.environ.get('APPDATA', '.'), 'AIdan', 'state', 'financial_news.db')
@@ -165,13 +164,39 @@ def build_context(M, t):
     return '\n'.join(lines) + '\n\nLevels (pips vs current price): ' + '; '.join(extra), ref
 
 
-def build_prompt(trade, ctx):
+def load_calendar():
+    """P27b: la foto del calendario que AIdan registró al ejecutar cada trade (`event_window_log`, 1ra fila)."""
+    c = sqlite3.connect(f'file:{PROD_DB}?mode=ro', uri=True)
+    out = {}
+    for sid, nxt, imp, mins, prev, pimp, since in c.execute(
+            'SELECT strategy_id, next_event, next_impact, mins_to_next, prev_event, prev_impact, mins_since_prev '
+            'FROM event_window_log ORDER BY id'):
+        out.setdefault(int(sid), dict(next=nxt, next_impact=imp, mins_to_next=mins, prev=prev, prev_impact=pimp,
+                                      mins_since_prev=since))
+    c.close()
+    return out
+
+
+def calendar_line(cal):
+    parts = []
+    if cal['next'] and cal['mins_to_next'] is not None:
+        parts.append(f"next scheduled event '{cal['next']}' ({cal['next_impact']} impact) in "
+                     f"{cal['mins_to_next']:.0f} min")
+    else:
+        parts.append('no high/medium-impact event scheduled soon')
+    if cal['prev'] and cal['mins_since_prev'] is not None:
+        parts.append(f"previous event '{cal['prev']}' ({cal['prev_impact']} impact) {cal['mins_since_prev']:.0f} min ago")
+    return 'Economic calendar (USD/EUR): ' + '; '.join(parts) + '.'
+
+
+def build_prompt(trade, ctx, cal=None):
     hour_utc = ((trade['t'] - 3 * 3600) // 3600) % 24       # server UTC+3 en todo el período (jun-oct)
     dow = dt.datetime.utcfromtimestamp(trade['t']).strftime('%A')
     return (
         f"Proposed trade: {trade['direction']} ({'buy' if trade['direction'] == 'CALL' else 'sell'}) EUR/USD now.\n"
         f"Strategy track: {trade['track']}. Stop loss {trade['sl']} pips, take profit {trade['tp']} pips.\n"
         f"Time: {hour_utc:02d}:00 UTC, {dow}.\n"
+        + (calendar_line(cal) + '\n' if cal else '') +
         f"{ctx}\n\n"
         "Read the multi-timeframe structure, the levels and the volatility, and decide if this specific trade has "
         "positive expected value after costs. TAKE or VETO.\n"
@@ -283,16 +308,18 @@ def own_db():
     return c
 
 
-def run(limit=None):
+def run(limit=None, variants=('main', 'placebo')):
     trades = load_trades()
     M = load_m1()
     by = {x['sid']: x for x in trades}
     pmap = placebo_map(trades)
+    cal = load_calendar() if 'calendar' in variants else {}
     keys = groq_keys() if BACKEND == 'groq' else []
     db = own_db()
     state = {'k': 0}
     done = {(r[0], r[1]) for r in db.execute('SELECT strategy_id, variant FROM judgments WHERE decision IS NOT NULL')}
-    jobs = [(x['sid'], v) for x in trades for v in ('main', 'placebo') if (x['sid'], v) not in done]
+    jobs = [(x['sid'], v) for x in trades for v in variants
+            if (x['sid'], v) not in done and (v != 'calendar' or x['sid'] in cal)]
     print(f'{len(trades)} trades · faltan {len(jobs)} juicios · keys {len(keys)}', flush=True)
     for n, (sid, var) in enumerate(jobs[:limit] if limit else jobs, 1):
         src = sid if var == 'main' else pmap[sid]
@@ -302,7 +329,7 @@ def run(limit=None):
                        'VALUES (?,?,?,?,?)', (sid, var, src, 'sin velas', dt.datetime.now().isoformat()))
             db.commit()
             continue
-        d, usage, err = ask(build_prompt(by[sid], ctx), keys, state)
+        d, usage, err = ask(build_prompt(by[sid], ctx, cal.get(sid) if var == 'calendar' else None), keys, state)
         db.execute('INSERT OR REPLACE INTO judgments VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                    (sid, var, src, d and d['decision'], d and d['confidence'], d and d['reasoning'], MODEL, EFFORT,
                     usage.get('prompt_tokens'), usage.get('completion_tokens'),
@@ -372,9 +399,69 @@ def report():
         print(f"    [{'OK ' if v else 'NO '}] {k}")
     ok = all(crit.values())
     print(f"  >>> {'PASA' if ok else 'NO PASA'}")
+    out = dict(criterio='docs/p27_llm_judge_criterio.md', main=m, placebo=p, criterios=crit, PASA=ok)
+    out['P27b'] = report_calendar(trades, db)
     with open(OUT, 'w', encoding='utf-8') as f:
-        json.dump(dict(criterio='docs/p27_llm_judge_criterio.md', main=m, placebo=p, criterios=crit, PASA=ok), f,
-                  indent=1, default=float)
+        json.dump(out, f, indent=1, default=float)
+
+
+def report_calendar(trades, db):
+    """P27b: juez + calendario. Criterio en docs/p27_llm_judge_criterio.md (sección P27b)."""
+    dec = {}
+    for s, v, d in db.execute("SELECT strategy_id, variant, decision FROM judgments "
+                              "WHERE variant IN ('main','calendar') AND decision IS NOT NULL"):
+        dec.setdefault(s, {})[v] = d
+    print('-' * 80)
+    print('P27b — mismo juez + calendario económico registrado en el momento')
+    rows = [(trades[s]['pnl'], d['calendar'], trades[s]['t']) for s, d in dec.items()
+            if 'calendar' in d and s in trades]
+    c = evaluate(rows, 'calendar')
+    if c.get('diff') is None:
+        print(f"  calendar n={c['n']} — muestra insuficiente / SIN VEREDICTO")
+        return c
+    pair = [(trades[s]['pnl'], d['calendar'] == 'TAKE', d['main'] == 'TAKE') for s, d in dec.items()
+            if 'calendar' in d and 'main' in d and s in trades]
+    pnl = np.array([x[0] for x in pair])
+    tc = np.array([x[1] for x in pair])
+    tm = np.array([x[2] for x in pair])
+
+    def sep(idx, take):
+        a, b = pnl[idx][take[idx]], pnl[idx][~take[idx]]
+        return (a.mean() - b.mean()) if a.size and b.size else np.nan
+    rng = np.random.default_rng(PLACEBO_SEED)
+    allidx = np.arange(len(pair))
+    gain = sep(allidx, tc) - sep(allidx, tm)
+    bs = []
+    for _ in range(5000):
+        ii = rng.integers(0, len(pair), len(pair))
+        bs.append(sep(ii, tc) - sep(ii, tm))
+    bs = np.array([x for x in bs if np.isfinite(x)])
+    gci = [float(np.percentile(bs, 2.5)), float(np.percentile(bs, 97.5))]
+    print(f"  calendar n={c['n']} veto {c['veto_rate']:.0%} · TAKE {c['take_mean']:+.2f} vs VETO {c['veto_mean']:+.2f}"
+          f" · diferencia {c['diff']:+.2f} CI [{c['ci'][0]:+.2f}, {c['ci'][1]:+.2f}]"
+          f" · mitades {c['halves'][0]:+.2f}/{c['halves'][1]:+.2f}")
+    print(f"  aporte del calendario sobre P27 (mismos {len(pair)} trades): {gain:+.2f} CI [{gci[0]:+.2f}, {gci[1]:+.2f}]")
+    cal = load_calendar()
+    near = [i for i, (s, d) in enumerate((s, d) for s, d in dec.items() if 'calendar' in d and 'main' in d
+                                         and s in trades)
+            if cal.get(s) and ((cal[s]['next_impact'] == 'High' and (cal[s]['mins_to_next'] or 1e9) <= 60) or
+                               (cal[s]['prev_impact'] == 'High' and (cal[s]['mins_since_prev'] or 1e9) <= 30))]
+    if near:
+        ni = np.array(near)
+        print(f"  [desc] cerca de evento alto: n={ni.size} · veto con calendario {1 - tc[ni].mean():.0%} vs sin "
+              f"{1 - tm[ni].mean():.0%} · separación con {sep(ni, tc):+.2f} vs sin {sep(ni, tm):+.2f}")
+    crit = {
+        f'1_n>={MIN_N}': c['n'] >= MIN_N,
+        '2_veto_entre_15_y_85%': VETO_BAND[0] <= c['veto_rate'] <= VETO_BAND[1],
+        '3_TAKE>VETO_CI_inf>0': c['ci'][0] > 0,
+        '4_dos_mitades>0': all(h > 0 for h in c['halves']),
+        '5_aporta_sobre_P27_CI_inf>0': gci[0] > 0,
+    }
+    for k, v in crit.items():
+        print(f"    [{'OK ' if v else 'NO '}] {k}")
+    ok = all(crit.values())
+    print(f"  >>> P27b {'PASA' if ok else 'NO PASA'}")
+    return dict(c, aporte=float(gain), aporte_ci=gci, n_cerca_evento=len(near), criterios=crit, PASA=ok)
 
 
 def main():
@@ -387,6 +474,7 @@ def main():
     ap.add_argument('--run', action='store_true')
     ap.add_argument('--limit', type=int)
     ap.add_argument('--report', action='store_true')
+    ap.add_argument('--variants', default='main,placebo', help="main,placebo | calendar (P27b)")
     a = ap.parse_args()
     if a.smoke:
         trades = load_trades()
@@ -397,7 +485,7 @@ def main():
             print('-' * 60)
         print(f'{len(trades)} trades, {trades[0]["created_ar"]} -> {trades[-1]["created_ar"]}')
     if a.run:
-        run(a.limit)
+        run(a.limit, tuple(a.variants.split(',')))
     if a.report:
         report()
 
