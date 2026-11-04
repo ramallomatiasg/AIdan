@@ -51,3 +51,24 @@ PnL total de lo aprobado vs todo; por track; confianza del juez vs resultado; ej
 - 300 trades: alcanza para ver separación grande, no chica.
 - Un modelo puede "reconocer" un período por la forma del gráfico aunque no tenga fechas; el placebo lo acota.
 - Las velas M1 de MT5 guardan el spread mínimo; no afecta: el resultado es el `mt5_pnl` real.
+
+## P27b — misma prueba + calendario económico (declarada el 4-nov, ANTES de ver cualquier resultado de P27)
+
+**Pedido del user:** que el juez sepa si se viene una noticia que pueda dar vuelta la operación.
+
+- **Qué cambia:** solo una línea más en el prompt, sacada de `event_window_log`, que AIdan registró EN EL MOMENTO
+  de cada ejecución (no reconstruida): próximo evento del calendario (nombre, impacto, minutos que faltan) y el
+  anterior (nombre, impacto, minutos desde). Sin fechas: el nombre del evento ("Non-Farm Employment Change") no
+  identifica el día. Mismo modelo, mismo razonamiento, mismas velas.
+- **Universo:** los trades de los 300 que tienen fila en `event_window_log` (283). Los 17 sin fila se excluyen (no
+  tener fila no es lo mismo que no tener evento).
+- **Criterio P27b (las 5; NO mover):**
+  1. n juzgados ≥ 250.
+  2. Tasa de veto entre 15% y 85%.
+  3. TAKE − VETO > 0 con CI95 bootstrap inferior > 0.
+  4. Esa diferencia > 0 en las dos mitades.
+  5. **Aporta sobre P27:** sobre los MISMOS trades, (separación con calendario − separación sin calendario) > 0 con
+     CI95 de bootstrap pareado (remuestreando trades) inferior > 0.
+- **Descriptivo:** subconjunto con evento de impacto alto a ≤ 60 min (antes) o ≤ 30 min (después): tasa de veto y
+  separación con y sin calendario.
+- **Orden:** corre después de P27; los dos se reportan juntos.
