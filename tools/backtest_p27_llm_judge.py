@@ -87,16 +87,19 @@ CREATE TABLE IF NOT EXISTS judgments (
 def load_trades():
     c = sqlite3.connect(f'file:{PROD_DB}?mode=ro', uri=True)
     rows = c.execute(
-        "SELECT strategy_id, direction, trigger_type, sl_pips, tp_pips, created_at, mt5_pnl, pips "
+        "SELECT strategy_id, direction, trigger_type, sl_pips, tp_pips, created_at, mt5_pnl, pips, archived_at "
         "FROM trade_archive WHERE mt5_pnl IS NOT NULL AND created_at < ? "
         "ORDER BY created_at DESC LIMIT ?", (CUTOFF_AR, N_TRADES)).fetchall()
     c.close()
     out = []
-    for sid, d, trig, slp, tpp, ca, pnl, pips in rows:
+    for sid, d, trig, slp, tpp, ca, pnl, pips, aa in rows:
         t_srv = int((dt.datetime.fromisoformat(ca) + dt.timedelta(hours=AR_TO_SERVER_H))
                     .replace(tzinfo=dt.timezone.utc).timestamp())
+        # archived_at está en UTC (verificado: siempre >= 180 min después de created_at en AR) => server = +3 h
+        t_closed = int((dt.datetime.fromisoformat(aa) + dt.timedelta(hours=3))
+                       .replace(tzinfo=dt.timezone.utc).timestamp())
         out.append(dict(sid=int(sid), direction=d, track=trig, sl=slp, tp=tpp, created_ar=ca, t=t_srv,
-                        pnl=float(pnl), pips=pips))
+                        t_closed=t_closed, pnl=float(pnl), pips=pips))
     return sorted(out, key=lambda x: x['t'])
 
 
@@ -189,7 +192,49 @@ def calendar_line(cal):
     return 'Economic calendar (USD/EUR): ' + '; '.join(parts) + '.'
 
 
-def build_prompt(trade, ctx, cal=None):
+MEM_K = 5
+MEM_MIN_PRIOR = 20
+
+
+def features(M, t, cal):
+    """Resumen fijo del contexto para medir parecido (P27c): cambio H4 6 velas, H1 12 velas, ATR M15, evento alto."""
+    h4 = bars_before(M, t, 14400, 6)
+    h1 = bars_before(M, t, 3600, 12)
+    m15 = bars_before(M, t, 900, 15)
+    near = bool(cal and ((cal['next_impact'] == 'High' and (cal['mins_to_next'] or 1e9) <= 60) or
+                         (cal['prev_impact'] == 'High' and (cal['mins_since_prev'] or 1e9) <= 30)))
+    return dict(h4=(h4[-1][4] - h4[0][1]) / PIP if h4 else 0.0, h1=(h1[-1][4] - h1[0][1]) / PIP if h1 else 0.0,
+                atr15=atr(m15) or 0.0, near=near)
+
+
+def memory_cases(trade, pool, feats, past_dec):
+    """Los MEM_K casos más parecidos entre los trades YA CERRADOS antes de la entrada. Devuelve (casos, n_previos)."""
+    prior = [x for x in pool if x['t_closed'] < trade['t'] and x['sid'] != trade['sid']]
+    if not prior:
+        return [], 0
+    f0 = feats[trade['sid']]
+    sc = {k: (np.std([feats[x['sid']][k] for x in prior]) or 1.0) for k in ('h4', 'h1', 'atr15')}
+
+    def dist(x):
+        f = feats[x['sid']]
+        d = sum(((f[k] - f0[k]) / sc[k]) ** 2 for k in sc) + (0 if f['near'] == f0['near'] else 1.0)
+        same = (x['direction'] == trade['direction']) + (x['track'] == trade['track'])
+        return (-same, d)
+    best = sorted(prior, key=dist)[:MEM_K]
+    return [(x, feats[x['sid']], past_dec.get(x['sid'])) for x in best], len(prior)
+
+
+def memory_block(cases):
+    lines = ['Your memory: the most similar past proposals of this system (already closed) and how they ended:']
+    for x, f, dec in cases:
+        res = 'WON' if x['pnl'] > 0 else 'LOST'
+        lines.append(f"- {x['direction']} {x['track']}; H4 6-bar change {f['h4']:+.0f}p, H1 12-bar {f['h1']:+.0f}p, "
+                     f"M15 ATR {f['atr15']:.1f}p, high-impact event near: {'yes' if f['near'] else 'no'}; "
+                     f"you decided {dec or 'n/a'}; result {res} {x['pips']:+.1f} pips")
+    return '\n'.join(lines)
+
+
+def build_prompt(trade, ctx, cal=None, memory=None):
     hour_utc = ((trade['t'] - 3 * 3600) // 3600) % 24       # server UTC+3 en todo el período (jun-oct)
     dow = dt.datetime.utcfromtimestamp(trade['t']).strftime('%A')
     return (
@@ -198,6 +243,7 @@ def build_prompt(trade, ctx, cal=None):
         f"Time: {hour_utc:02d}:00 UTC, {dow}.\n"
         + (calendar_line(cal) + '\n' if cal else '') +
         f"{ctx}\n\n"
+        + (memory + '\n\n' if memory else '') +
         "Read the multi-timeframe structure, the levels and the volatility, and decide if this specific trade has "
         "positive expected value after costs. TAKE or VETO.\n"
         'Answer JSON: {"decision": "TAKE"|"VETO", "confidence": 0-100, "reasoning": "<max 300 chars>"}'
@@ -313,23 +359,32 @@ def run(limit=None, variants=('main', 'placebo')):
     M = load_m1()
     by = {x['sid']: x for x in trades}
     pmap = placebo_map(trades)
-    cal = load_calendar() if 'calendar' in variants else {}
+    needs_cal = {'calendar', 'memory'}
+    cal = load_calendar() if needs_cal & set(variants) else {}
+    feats = {x['sid']: features(M, x['t'], cal.get(x['sid'])) for x in trades} if 'memory' in variants else {}
     keys = groq_keys() if BACKEND == 'groq' else []
     db = own_db()
     state = {'k': 0}
     done = {(r[0], r[1]) for r in db.execute('SELECT strategy_id, variant FROM judgments WHERE decision IS NOT NULL')}
+    # trades ya ordenados por tiempo: la memoria (P27c) solo puede usar decisiones previas de su propia variante
     jobs = [(x['sid'], v) for x in trades for v in variants
-            if (x['sid'], v) not in done and (v != 'calendar' or x['sid'] in cal)]
+            if (x['sid'], v) not in done and (v not in needs_cal or x['sid'] in cal)]
     print(f'{len(trades)} trades · faltan {len(jobs)} juicios · keys {len(keys)}', flush=True)
     for n, (sid, var) in enumerate(jobs[:limit] if limit else jobs, 1):
-        src = sid if var == 'main' else pmap[sid]
+        src = pmap[sid] if var == 'placebo' else sid
         ctx, _ = build_context(M, by[src]['t'])
         if ctx is None:
             db.execute('INSERT OR REPLACE INTO judgments (strategy_id, variant, candles_from, error, created_at) '
                        'VALUES (?,?,?,?,?)', (sid, var, src, 'sin velas', dt.datetime.now().isoformat()))
             db.commit()
             continue
-        d, usage, err = ask(build_prompt(by[sid], ctx, cal.get(sid) if var == 'calendar' else None), keys, state)
+        mem = None
+        if var == 'memory':
+            past = {s: d for s, d in db.execute("SELECT strategy_id, decision FROM judgments "
+                                                "WHERE variant='memory' AND decision IS NOT NULL")}
+            cases, _ = memory_cases(by[sid], trades, feats, past)
+            mem = memory_block(cases) if cases else None
+        d, usage, err = ask(build_prompt(by[sid], ctx, cal.get(sid) if var in needs_cal else None, mem), keys, state)
         db.execute('INSERT OR REPLACE INTO judgments VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                    (sid, var, src, d and d['decision'], d and d['confidence'], d and d['reasoning'], MODEL, EFFORT,
                     usage.get('prompt_tokens'), usage.get('completion_tokens'),
@@ -401,8 +456,61 @@ def report():
     print(f"  >>> {'PASA' if ok else 'NO PASA'}")
     out = dict(criterio='docs/p27_llm_judge_criterio.md', main=m, placebo=p, criterios=crit, PASA=ok)
     out['P27b'] = report_calendar(trades, db)
+    out['P27c'] = report_memory(trades, db)
     with open(OUT, 'w', encoding='utf-8') as f:
         json.dump(out, f, indent=1, default=float)
+
+
+def report_memory(trades, db):
+    """P27c: juez + calendario + memoria. Se evalúa sobre los trades con >= MEM_MIN_PRIOR cerrados previos."""
+    pool = sorted(trades.values(), key=lambda x: x['t'])
+    n_prior = {x['sid']: sum(1 for y in pool if y['t_closed'] < x['t']) for x in pool}
+    dec = {}
+    for s, v, d in db.execute("SELECT strategy_id, variant, decision FROM judgments "
+                              "WHERE variant IN ('calendar','memory') AND decision IS NOT NULL"):
+        dec.setdefault(s, {})[v] = d
+    print('-' * 80)
+    print(f'P27c — juez + calendario + memoria de casos pasados (evaluados con >= {MEM_MIN_PRIOR} previos cerrados)')
+    keep = [s for s, d in dec.items() if 'memory' in d and s in trades and n_prior[s] >= MEM_MIN_PRIOR]
+    m = evaluate([(trades[s]['pnl'], dec[s]['memory'], trades[s]['t']) for s in keep], 'memory')
+    if m.get('diff') is None:
+        print(f"  memory n={m['n']} — muestra insuficiente / SIN VEREDICTO")
+        return m
+    pair = sorted([s for s in keep if 'calendar' in dec[s]], key=lambda s: trades[s]['t'])
+    pnl = np.array([trades[s]['pnl'] for s in pair])
+    tm = np.array([dec[s]['memory'] == 'TAKE' for s in pair])
+    tc = np.array([dec[s]['calendar'] == 'TAKE' for s in pair])
+
+    def sep(idx, take):
+        a, b = pnl[idx][take[idx]], pnl[idx][~take[idx]]
+        return (a.mean() - b.mean()) if a.size and b.size else np.nan
+    rng = np.random.default_rng(PLACEBO_SEED)
+    allidx = np.arange(len(pair))
+    gain = sep(allidx, tm) - sep(allidx, tc)
+    bs = np.array([g for g in (sep(ii, tm) - sep(ii, tc) for ii in
+                               (rng.integers(0, len(pair), len(pair)) for _ in range(5000))) if np.isfinite(g)])
+    gci = [float(np.percentile(bs, 2.5)), float(np.percentile(bs, 97.5))]
+    print(f"  memory n={m['n']} veto {m['veto_rate']:.0%} · TAKE {m['take_mean']:+.2f} vs VETO {m['veto_mean']:+.2f}"
+          f" · diferencia {m['diff']:+.2f} CI [{m['ci'][0]:+.2f}, {m['ci'][1]:+.2f}]"
+          f" · mitades {m['halves'][0]:+.2f}/{m['halves'][1]:+.2f}")
+    print(f"  aporte de la memoria sobre P27b (mismos {len(pair)} trades): {gain:+.2f} CI [{gci[0]:+.2f}, {gci[1]:+.2f}]")
+    th = len(pair) // 3
+    if th >= 10:
+        first, last = np.arange(th), np.arange(len(pair) - th, len(pair))
+        print(f"  [desc] aporte 1er tercio {sep(first, tm) - sep(first, tc):+.2f} vs último tercio "
+              f"{sep(last, tm) - sep(last, tc):+.2f}")
+    crit = {
+        '1_n>=200': m['n'] >= 200,
+        '2_veto_entre_15_y_85%': VETO_BAND[0] <= m['veto_rate'] <= VETO_BAND[1],
+        '3_TAKE>VETO_CI_inf>0': m['ci'][0] > 0,
+        '4_dos_mitades>0': all(h > 0 for h in m['halves']),
+        '5_aporta_sobre_P27b_CI_inf>0': gci[0] > 0,
+    }
+    for k, v in crit.items():
+        print(f"    [{'OK ' if v else 'NO '}] {k}")
+    ok = all(crit.values())
+    print(f"  >>> P27c {'PASA' if ok else 'NO PASA'}")
+    return dict(m, aporte=float(gain), aporte_ci=gci, criterios=crit, PASA=ok)
 
 
 def report_calendar(trades, db):
