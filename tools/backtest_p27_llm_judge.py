@@ -113,7 +113,7 @@ def bars_before(M, t, size, count):
     if end == 0:
         return []
     last_closed_bucket = (t // size) * size                  # el bucket de t está en formación: se excluye
-    lo_t = last_closed_bucket - size * (count + 2)
+    lo_t = last_closed_bucket - size * (int(count * 1.5) + 5) - 3 * 86400   # margen para fines de semana y feriados
     start = np.searchsorted(M['t'], lo_t)
     tt = M['t'][start:end]
     keys = (tt // size) * size
