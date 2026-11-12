@@ -44,3 +44,10 @@ No se activa. Proponer: papel en vivo + el mismo test con los ETF de ether (otra
 ## Si NO PASA
 Cerrar flujos de ETF → dirección de BTC al día siguiente. No probar otro horizonte, otro umbral, ni fondos
 sueltos (IBIT solo).
+
+## Enmienda 1 (11-nov, antes de leer el resultado válido)
+La primera corrida descartó 579 de 728 días: en farside un fondo que **todavía no existía** figura con "-",
+y la regla "algún fondo sin dato" sacaba todo lo anterior al lanzamiento del último ETF. Corrección de lectura
+(no de parámetro): un "-" cuenta como dato faltante solo si ese fondo ya había tenido un valor numérico en un
+día anterior; antes de su primer dato vale 0. El resto del criterio no cambia. La corrida descartada (n=52,
+abr-oct 2026) queda anotada en el registro.
