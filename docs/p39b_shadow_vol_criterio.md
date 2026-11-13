@@ -63,3 +63,19 @@ alcanzable el premio sobrevive a SU costo real (spreads probablemente más ancho
 - **Lecturas:** diagnóstico por exchange (brecha DVOL − IV bid y spread). Al ~13-dic se propone cerrar un exchange si
   su brecha mediana > 1,5 en BTC y ETH; se propone cerrar todo si pasa en los tres. Decisión al ~13-nov-2027 con los
   mismos 3 criterios, **por exchange**.
+
+## Enmienda 2 (13-nov-2026, antes de que ninguna operación tenga resultado): límite de pérdida por operación
+
+**Por qué (pedido del user):** solo invertiría si el riesgo es bajo. El peor mes del backtest perdió ~5 meses de
+premio; sin límite, una operación puede perder varias veces lo que cobró.
+
+- **Regla, fijada sin mirar resultados (no se optimiza):** en cada corrida, si cerrar la operación AHORA (recomprar
+  las dos opciones al **ask** real, comisión de cierre y deshacer la cobertura) dejara una pérdida **igual o mayor
+  que la prima cobrada** (multiplicador 1,0, la regla clásica de "stop al doble del crédito"), esa versión se cierra
+  ahí y queda afuera hasta el próximo ciclo.
+- **Se mide al lado, no reemplaza:** la regla congelada sin límite sigue igual hasta el vencimiento; cada operación
+  guarda las dos versiones (`stop_*`). Así se ve si el límite ahorra en los meses malos más de lo que corta en los buenos.
+- **Limitación declarada:** el control es una vez por día (la tarea es diaria). Un sistema real lo miraría cada pocos
+  minutos; con un salto grande en el día la pérdida puede pasar el límite antes de verse.
+- **Lectura:** en cada reporte, total en USD con lote mínimo con límite vs sin límite, y el peor resultado de cada una.
+  Para la decisión de ~13-nov-2027 se informan las dos; la de menor peor-caso con media > 0 es la candidata.
