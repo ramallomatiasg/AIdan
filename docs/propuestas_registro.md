@@ -925,4 +925,7 @@ días 05:30 AR, arranca al prender la PC si se la perdió).
   ≈ $690, contra 0,1 BTC en Deribit), misma regla y mismo día para los tres; reporte también en USD con el lote mínimo.
   Día 1: brecha BTC +3,1 (Binance) / +3,2 (Bybit), ETH +4,0 / +5,0; spreads bid-ask más angostos que Deribit (0,3-0,4
   vs ~1,1 puntos). Ciclo 0 abierto en los 6 libros.
+- **Enmienda 2 (13-nov, `da54768`, pedido del user):** límite de pérdida por operación = la prima cobrada (si recomprar al
+  ask deja una pérdida igual o mayor, esa versión se cierra y espera al próximo ciclo). Se mide AL LADO de la regla sin
+  límite; el reporte muestra total y peor resultado de las dos en USD con lote mínimo. Control una vez por día.
 

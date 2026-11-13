@@ -41,6 +41,7 @@ MIN_LOT = {('deribit', 'BTC'): 0.1, ('deribit', 'ETH'): 1.0, ('binance', 'BTC'):
            ('bybit', 'BTC'): 0.01, ('bybit', 'ETH'): 0.1}
 PROXY_COST = 2.0                        # costo del proxy de P39, en puntos de vol
 SETTLE_FALLBACK_D = 2
+STOP_MULT = 1.0                         # enmienda 2: cerrar si la pérdida al recomprar >= 1,0 × prima cobrada
 DAY_MS = 86400000
 HOSTS = ('https://www.deribit.com/api/v2/public/', 'https://api.binance.com/api/v3/',
          'https://fapi.binance.com/fapi/v1/', 'https://eapi.binance.com/eapi/v1/',
@@ -172,6 +173,15 @@ def proxy_vol(dvol, rv_fwd):
     return (iv * iv - (rv_fwd / 100) ** 2) / (2 * iv) * 100 - PROXY_COST
 
 
+def close_now_pnl(premium, fee_in, c_ask, p_ask, fee_close, hedge_pnl, hedge_cost, hedge_close_cost, funding):
+    """Resultado en USD (por unidad) si se recompra todo AHORA al ask y se deshace la cobertura."""
+    return premium - fee_in - (c_ask + p_ask) - fee_close + hedge_pnl - hedge_cost - hedge_close_cost - funding
+
+
+def stop_hit(pnl_now, premium):
+    return pnl_now <= -STOP_MULT * premium
+
+
 def _f(x):
     try:
         return float(x)
@@ -297,6 +307,10 @@ def connect(path):
     for tbl in ('diag', 'trades'):                    # enmienda 1: filas previas = Deribit
         if 'venue' not in [r[1] for r in conn.execute(f'PRAGMA table_info({tbl})')]:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN venue TEXT DEFAULT 'deribit'")
+    cols = [r[1] for r in conn.execute('PRAGMA table_info(trades)')]
+    for col, typ in (('stop_ms', 'INTEGER'), ('stop_pnl_usd', 'REAL'), ('stop_pnl_vol', 'REAL')):  # enmienda 2
+        if col not in cols:
+            conn.execute(f'ALTER TABLE trades ADD COLUMN {col} {typ}')
     conn.commit()
     return conn
 
@@ -350,6 +364,15 @@ def rebalance(conn, tr, cur, now_ms, final=False):
                  ' mtm_usd) VALUES (?,?,?,?,?,?,?,?,?,?)',
                  (tr['id'], now_ms, px, iv, -new, new, traded, cost, fund, mtm))
     conn.commit()
+    if not final and tr['stop_ms'] is None and c['ask_usd'] and p['ask_usd']:
+        t2 = conn.execute('SELECT * FROM trades WHERE id=?', (tr['id'],)).fetchone()
+        fee_close = venue_fee(venue, c['idx'], c['ask_usd']) + venue_fee(venue, c['idx'], p['ask_usd'])
+        now_pnl = close_now_pnl(t2['premium_usd'], t2['fee_in_usd'], c['ask_usd'], p['ask_usd'], fee_close,
+                                t2['hedge_pnl'], t2['hedge_cost'], abs(new) * px * HEDGE_COST, t2['funding_paid'])
+        if stop_hit(now_pnl, t2['premium_usd']):
+            conn.execute('UPDATE trades SET stop_ms=?, stop_pnl_usd=?, stop_pnl_vol=? WHERE id=?',
+                         (now_ms, now_pnl, now_pnl / t2['vega_usd'], tr['id']))
+            conn.commit()
 
 
 def settle(conn, tr, cur, now_ms):
@@ -475,8 +498,17 @@ def report(conn):
                 print(f"    #{t['id']} {t['cur']} ciclo {t['cycle']}: cerrada {t['pnl_vol']:+.2f} pts (proxy "
                       f"{t['proxy_vol'] if t['proxy_vol'] is None else round(t['proxy_vol'], 2)}) = "
                       f"${t['pnl_usd'] * lot:+.2f} con el lote mínimo")
+        for t in tr:
+            if t['stop_ms'] is not None:
+                print(f"    #{t['id']} {t['cur']}: [con límite] cerrada por el límite el {_iso(t['stop_ms'])[:10]} = "
+                      f"${t['stop_pnl_usd'] * MIN_LOT[(venue, t['cur'])]:+.2f} con el lote mínimo")
         closed = [t for t in tr if t['status'] == 'closed']
         if closed:
+            lot = lambda t: MIN_LOT[(venue, t['cur'])]  # noqa: E731
+            sin = [t['pnl_usd'] * lot(t) for t in closed]
+            con = [(t['stop_pnl_usd'] if t['stop_ms'] is not None else t['pnl_usd']) * lot(t) for t in closed]
+            print(f"    sin límite: total ${sum(sin):+.2f}, peor ${min(sin):+.2f}  |  con límite: total "
+                  f"${sum(con):+.2f}, peor ${min(con):+.2f}  (lotes mínimos)")
             mv = sum(t['pnl_vol'] for t in closed) / len(closed)
             usd = sum(t['pnl_usd'] * MIN_LOT[(venue, t['cur'])] for t in closed)
             dif = [t['pnl_vol'] - t['proxy_vol'] for t in closed if t['proxy_vol'] is not None]

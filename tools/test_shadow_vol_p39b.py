@@ -76,3 +76,21 @@ def test_payoff_y_comisiones():
 
 def test_proxy_igual_a_p39():
     assert abs(sv.proxy_vol(60, 50) - ((0.36 - 0.25) / 1.2 * 100 - 2)) < 1e-9
+
+
+def test_limite_de_perdida():
+    """Enmienda 2: se corta cuando recomprar deja una pérdida >= la prima cobrada."""
+    assert sv.STOP_MULT == 1.0
+    # cobró 48, recomprar cuesta 90 + 1 de comisiones: pierde 43 < 48 ⇒ sigue
+    pnl = sv.close_now_pnl(48, 0.4, 50, 40, 0.6, 0, 0, 0, 0)
+    assert abs(pnl + 43) < 1e-9 and not sv.stop_hit(pnl, 48)
+    # recomprar cuesta 97: pierde 50 ⇒ corta
+    pnl = sv.close_now_pnl(48, 0.4, 57, 40, 0.6, 0, 0, 0, 0)
+    assert sv.stop_hit(pnl, 48)
+    # la cobertura que ganó compensa y evita el corte
+    assert not sv.stop_hit(sv.close_now_pnl(48, 0.4, 57, 40, 0.6, 10, 0.2, 0.2, 0), 48)
+
+
+def test_limite_no_reemplaza_la_regla():
+    assert "UPDATE trades SET stop_ms=?, stop_pnl_usd=?, stop_pnl_vol=?" in SRC
+    assert "status='closed'" not in SRC.split('def stop_hit')[1].split('def _f')[0]
