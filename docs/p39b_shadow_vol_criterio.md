@@ -41,3 +41,25 @@ Cada corrida, por moneda: straddle ATM a ~30 días ⇒ IV bid, ask y mark de la 
   3. Real − proxy de P39 para las mismas operaciones, en promedio, ≥ −2 puntos (el proxy no exagera más que su costo).
   Si no pasa ⇒ borrar la tarea y cerrar P39. Si pasa ⇒ propuesta al user (abrir cuenta en Deribit es decisión suya).
 - No se cambia ninguna regla en el camino. No se agregan monedas, filtros ni plazos.
+
+## Enmienda 1 (13-nov-2026, antes de juntar datos de los nuevos exchanges): Binance Options y Bybit Options
+
+**Por qué (pedido del user):** Deribit pide mínimo 0,1 BTC / 1 ETH (~$6.900 / ~$1.950 de tamaño) y el user arranca
+con $100-1.000. Binance y Bybit permiten 0,01 BTC (~$690) y 0,01 / 0,1 ETH. La pregunta es si en un exchange
+alcanzable el premio sobrevive a SU costo real (spreads probablemente más anchos que Deribit).
+
+- **Mismo libro, misma regla, mismas fechas:** la señal es la misma (DVOL de Deribit vs realizada de Binance) para los
+  tres; se abre en los tres el mismo día ⇒ la diferencia entre exchanges es solo el costo de ejecución. Los libros de
+  Binance y Bybit arrancan en la primera corrida (13-nov, ciclo 0).
+- **Precio:** bid real de cada exchange (en USDT). Bybit: solo opciones liquidadas en USDT. Forward: Bybit informa el
+  subyacente; Binance no ⇒ se usa su índice (aproximación declarada).
+- **Comisiones asumidas (tablas públicas al 13-nov):** Binance 0,03% del subyacente por pata con tope 10% del precio,
+  0,015% al ejercicio; Bybit 0,03% con tope 7%, 0,015% al vencimiento (`deliveryFeeRate` de su API). Son chicas
+  frente al spread; si la tabla real difiere, se anota y no se cambia la regla.
+- **Liquidación:** precio de ejercicio publicado por cada exchange (Binance `exerciseHistory`, Bybit
+  `delivery-price`); si a los 2 días no aparece, el de Deribit (anotado en la operación).
+- **Cobertura:** perpetuo USDT de Binance para los tres (igual que el libro de Deribit).
+- **Reporte en plata:** resultado por operación también en USD con el **lote mínimo** de cada exchange.
+- **Lecturas:** diagnóstico por exchange (brecha DVOL − IV bid y spread). Al ~13-dic se propone cerrar un exchange si
+  su brecha mediana > 1,5 en BTC y ETH; se propone cerrar todo si pasa en los tres. Decisión al ~13-nov-2027 con los
+  mismos 3 criterios, **por exchange**.
