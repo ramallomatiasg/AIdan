@@ -22,7 +22,18 @@ def test_no_ordenes_ni_claves():
 def test_solo_endpoints_publicos():
     urls = set(re.findall(r"https://[a-z./0-9]+", SRC))
     assert urls <= set(sv.HOSTS), urls
-    assert all(m.startswith('get_') or m == 'ticker' for m in sv.DERIBIT_METHODS)
+    assert set(sv.METHODS) == set(sv.VENUES) == {'deribit', 'binance', 'bybit'}
+    for ms in sv.METHODS.values():                # solo métodos de lectura
+        for m in ms:
+            assert not re.search(r'order|cancel|buy|sell|position|wallet|account', m, re.I), m
+
+
+def test_comisiones_y_lotes_por_exchange():
+    assert abs(sv.venue_fee('bybit', 70000, 100) - 7.0) < 1e-9            # tope 7% de Bybit
+    assert abs(sv.venue_fee('binance', 70000, 100) - 10.0) < 1e-9         # tope 10% de Binance
+    assert abs(sv.venue_fee('binance', 70000, 1000, at_expiry=True) - 10.5) < 1e-9
+    assert sv.MIN_LOT[('binance', 'BTC')] == sv.MIN_LOT[('bybit', 'BTC')] == 0.01
+    assert set(sv.MIN_LOT) == {(v, c) for v in sv.VENUES for c in sv.CURS}
 
 
 def test_no_toca_aidan():
@@ -59,8 +70,8 @@ def test_pick_expiry():
 
 def test_payoff_y_comisiones():
     assert sv.straddle_payoff(65000, 70000) == 5000 == sv.straddle_payoff(75000, 70000)
-    assert abs(sv.deribit_fee(70000, 1000, sv.FEE_IN) - 21.0) < 1e-9
-    assert sv.deribit_fee(70000, 100, sv.FEE_IN) == 12.5           # tope 12,5% del precio de la opción
+    assert abs(sv.venue_fee('deribit', 70000, 1000) - 21.0) < 1e-9
+    assert abs(sv.venue_fee('deribit', 70000, 100) - 12.5) < 1e-9          # tope 12,5% del precio de la opción
 
 
 def test_proxy_igual_a_p39():

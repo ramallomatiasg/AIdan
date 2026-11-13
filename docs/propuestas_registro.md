@@ -921,4 +921,8 @@ días 05:30 AR, arranca al prender la PC si se la perdió).
   Si se sostiene, el reparo 2 se confirma y la reserva de P39 queda en negativo con precios reales. Ciclo 0 abierto en
   las dos (DVOL BTC 40,1 vs realizada 39,5; ETH 56,1 vs 55,8), vencimiento 4-dic.
 - Lecturas: **~13-dic** (30 días de diagnóstico) · ~13-may-2027 (descriptiva) · **~13-nov-2027** (decisión, n≥18).
+- **Enmienda 1 (13-nov, `7c4606d`, pedido del user):** se suman **Binance Options y Bybit Options** (lote mínimo 0,01 BTC
+  ≈ $690, contra 0,1 BTC en Deribit), misma regla y mismo día para los tres; reporte también en USD con el lote mínimo.
+  Día 1: brecha BTC +3,1 (Binance) / +3,2 (Bybit), ETH +4,0 / +5,0; spreads bid-ask más angostos que Deribit (0,3-0,4
+  vs ~1,1 puntos). Ciclo 0 abierto en los 6 libros.
 
