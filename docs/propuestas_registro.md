@@ -1008,3 +1008,10 @@ Antes de declarar solo se miró el largo del cache (dic-2019 → ago-2026 en los
   un subconjunto elegido después de mirar: no se prueba. Los JPY reservados ya están gastados.
 - Próxima: P45 (carry de funding de Hyperliquid en otras monedas). Nueva en la cola: P51 (cierre del gap de apertura semanal en FX).
 
+### 14 Nov 2026 — P13b shadow binaria en vivo: NO PASA ⇒ tarea borrada
+
+Lectura a n≥400 (`tools/score_shadow_binaria.py`): 432 señales, 427 resueltas, **acierto 48,71% CI [44,0, 53,4]**;
+payout real medido n=365, mediana 71,7% ⇒ break-even 58,24%; EV por $1 −0,21 CI [−0,30, −0,13]. Criterios 1 y 2 ❌.
+Ni el extremo alto del CI llega al break-even ⇒ no hacía falta esperar a n=800. Tarea `aidan-shadow-binaria` borrada
+(OK del user). **Cerrado** A1 como binaria en Deriv. La base `state/binary_shadow.db` queda.
+
