@@ -54,3 +54,12 @@ ni lista de monedas.
 - Monedas nuevas pueden tener funding muy alto en el lanzamiento con riesgo de "squeeze" de la pata corta que el
   motor (velas de 8 h, sin liquidación) no ve; la caída máxima se mide con la marca de 8 h.
 - Riesgo de exchange y de puente no modelados (igual que P21).
+
+## Enmienda 1 (16-nov, después de la 1ra corrida; arregla un error de datos, no la regla)
+
+La 1ra corrida dio JUP +1066% y XPL +389% con la "base" (spot − perpetuo) como fuente: imposible en una posición
+cubierta. Causa: la **primera vela de 8 h del spot de Binance tras el listado** trae un precio de apertura de
+relleno (JUP: perpetuo/spot = 25,3 el 31-ene-2024; XPL 7,9; PUMP 1,29), y la regla entraba justo ahí. Se descarta la
+primera vela del spot de cada moneda (para las que listaron antes de 2023 no cambia nada) y el tool verifica que en
+todas las velas usadas |perpetuo/spot − 1| < 5%; si no, aborta. Lo demás queda igual. El resultado de la 1ra corrida
+no vale.
