@@ -48,3 +48,10 @@ mismos tramos, cuánto aporta el staking (crecimiento del cociente), mínimo del
 
 - Una sola moneda ⇒ sin criterio de "monedas > 0". No incluye un evento de estrés tipo jun-2022 (el par no existía).
 - Riesgo de exchange y de custodia del staking de Binance no modelados.
+
+**Enmienda 1 (17-nov, antes de medir el descubrimiento):** la 1ra corrida abortó por el control de datos en la
+**reserva** (salto de 3,1% del cociente el 11-oct-2025 00:00 UTC). Es el desacople real de WBETH en el desplome del
+10-oct-2025 (Binance compensó a los usuarios), no ruido. El control se aplica ahora **al tramo que se mide**: el
+descubrimiento se mide solo si su tramo no tiene saltos > 2%. Si el descubrimiento pasa, en la reserva ese evento se
+incluye tal cual (es exactamente el riesgo de cola que hay que medir) y el control solo aborta por saltos que no
+vuelven dentro de las 3 velas siguientes. No se miró ningún resultado; reglas, umbrales y criterios no cambian.
