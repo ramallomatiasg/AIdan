@@ -141,7 +141,7 @@ def prices(sym):
         if len(k) < 1500:
             break
         t = int(k[-1][0]) + DAY
-    fu, t = [], 0
+    fu, t = [], (kl[0][0] if kl else 0)  # P72: desde la primera vela (startTime=0 da solo ~333 días)
     while kl:
         r = _get(f'https://fapi.binance.com/fapi/v1/fundingRate?symbol={q}&startTime={t}&limit=1000',
                  {'User-Agent': 'Mozilla/5.0'})
