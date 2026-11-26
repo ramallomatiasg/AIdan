@@ -11,6 +11,7 @@ del user.
 | P21-A | Mismo carry en Hyperliquid | desc. + fuera de muestra (+6,2%/año) | debajo de la letra | P19 libro HL (lectura ~2-feb-2027) | exchange/contrato HL |
 | P45 | Carry de funding HL en ~15 monedas | desc. (+7,3%/año, 14/15 > 0) | +2,7-2,8%, debajo de la letra | no | igual que P21-A, más monedas chicas |
 | P39 | Vender volatilidad de BTC/ETH (Deribit) | BTC + ETH fuera de muestra | **negativo**; reserva con CI que cruza cero | P39b (diagnóstico ~13-dic) | colas (caída brusca) |
+| P76 | Mismo carry en Deribit (BTC/ETH, reglas congeladas) | criterio (+3,75%/año vs letra 2,87%), sin reserva | +0,6% / +0,3%, debajo de la letra | no (mismo premio que P19) | exchange; 2022-26 +1,7%/año vs letra 4,0% |
 | P57 | Vault HLP de Hyperliquid | desc. + reserva (+9,5% s/ letra, CI cruza cero) | +14% en 2025, +11% en 2026, bajando | no (propuesto, falta OK) | hackeo/manipulación (JELLY), puente |
 
 **Lectura honesta (20-nov):** todo lo que pasó es *premio por riesgo* en cripto, y casi todo rindió mucho en 2021-24 y
@@ -22,6 +23,13 @@ misma ventana (+2,65%), contra una letra media de 3,65% ⇒ el carry replica en 
 le gana a la letra en ninguno de los dos** (2025 +0,9%, 2026 0%). Correlación diaria Bybit-Binance +0,57: sumar Bybit
 reparte el riesgo de exchange, no agrega rendimiento.
 
-## Pendiente (próxima corrida)
-- Alinear las series mensuales de P15, P21-A, P45, P39 y P57 en el mismo período y medir la cartera de peso igual:
-  rendimiento, caída máxima, correlación entre ellas, peor mes en USD con $500-1.000.
+**26-nov (P76 + primera medición de la cartera, `tools/cartera_combinada.py`, jun-2023 → oct-2026, letra 4,56%):**
+Deribit pasa el criterio solo porque su historia incluye 2019-21 (2022-26: +1,7%/año vs letra 4,0%). En el período
+común: carry Binance +2,7 · Bybit +2,7 · Deribit +2,5 · Hyperliquid +7,3%/año; **correlación mensual entre los carry
+0,86-0,96** (un solo premio, cuatro contrapartes). HLP +47,7%/año (inflado en 2023-24 por depósitos, ver P57),
+correlación con el carry 0,35-0,54. Cartera de los 5 a peso igual: +11,8%/año, caída máx 0,3%, peor mes −0,14% (−$1 con
+$1.000); 2025 +4,8%, 2026 +1,9% ⇒ en lo reciente casi todo viene del HLP. Lo que diversifica de verdad es sumar otro
+MOTOR, no otro exchange del mismo carry.
+
+## Pendiente
+- Sumar P45 (HL otras monedas) y P39 (libro diario de P39b cuando haya historia) a `tools/cartera_combinada.py`.
