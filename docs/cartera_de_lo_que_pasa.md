@@ -17,6 +17,11 @@ del user.
 poco en 2025-26. Juntarlo reduce el riesgo de un solo exchange o de un solo mecanismo, pero muchas comparten el mismo
 motor (el apalancamiento de los minoristas de cripto) ⇒ hay que medir la correlación, no suponer que diversifica.
 
+**25-nov (P74):** la misma regla de P15 con datos de Bybit (jul-2021 → nov-2026) da +2,66%/año, igual que Binance en la
+misma ventana (+2,65%), contra una letra media de 3,65% ⇒ el carry replica en otro exchange (bien) pero **desde 2021 no
+le gana a la letra en ninguno de los dos** (2025 +0,9%, 2026 0%). Correlación diaria Bybit-Binance +0,57: sumar Bybit
+reparte el riesgo de exchange, no agrega rendimiento.
+
 ## Pendiente (próxima corrida)
 - Alinear las series mensuales de P15, P21-A, P45, P39 y P57 en el mismo período y medir la cartera de peso igual:
   rendimiento, caída máxima, correlación entre ellas, peor mes en USD con $500-1.000.
