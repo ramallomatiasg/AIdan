@@ -1,7 +1,7 @@
 """
 cartera_combinada.py — mide la cartera de peso igual de lo que pasó (docs/cartera_de_lo_que_pasa.md). DESCRIPTIVO.
 
-READ-ONLY: sin MT5, no toca la DB, sin red (usa los caches de P15, P21, P74, P76 y P57). Período común: desde que
+READ-ONLY: sin MT5, no toca la DB, sin red (usa los caches de P15, P21, P74, P76, P57 y P80). Período común: desde que
 existen todos los libros (Hyperliquid, may-2023) hasta el 22-oct-2026. Retornos mensuales sobre el capital de cada libro.
 
     python tools/cartera_combinada.py
@@ -58,6 +58,17 @@ def hlp():
     return {m: float(np.prod(1 + np.array(v)) - 1) for m, v in out.items()}
 
 
+def bitfinex():
+    import backtest_p80_prestamo_bitfinex as p80
+    lo = dt.datetime.utcfromtimestamp(START / 1000).date()
+    hi = dt.datetime.utcfromtimestamp(END / 1000).date() - dt.timedelta(days=1)
+    ser = p80.series(p80.load_rates(p80.C), lo, hi, 1.0, 0.15, True, lambda d: 0.0)
+    out = {}
+    for d, _, pr in ser:                       # pr = log del patrimonio neto del 1%/año de entrada/salida
+        out.setdefault(d.strftime('%Y-%m'), []).append(pr)
+    return {m: float(np.exp(np.sum(v)) - 1) for m, v in out.items()}
+
+
 def main():
     s3 = ['BTC', 'ETH', 'SOL']
     books = {
@@ -67,6 +78,7 @@ def main():
         'P21-A Hyperliquid': book([dict(spot=load('.cache_p15', s)['spot'], perp=load('.cache_p21', s)['perp'],
                                         funding=load('.cache_p21', s)['funding']) for s in s3], COST_HL),
         'P57 vault HLP': hlp(),
+        'P80 préstamo Bitfinex': bitfinex(),
     }
     months = sorted(set.intersection(*[set(b) for b in books.values()]))
     M = np.array([[books[k][m] for m in months] for k in books])
@@ -86,7 +98,7 @@ def main():
         res[k] = stat(x)
     port = M.mean(axis=0)
     carry = M[:4].mean(axis=0)
-    res['CARTERA peso igual (5)'] = stat(port)
+    res['CARTERA peso igual (6)'] = stat(port)
     res['solo carry (4 exchanges)'] = stat(carry)
     for k, v in res.items():
         print(f"  {k:26s} {v['anual']:+6.2%}/año  vol {v['vol']:5.2%}  caída máx {v['caida_max']:5.2%}  "
@@ -96,7 +108,7 @@ def main():
     for i, k in enumerate(names):
         print(f"    {k:18s} " + ' '.join(f'{C[i, j]:+.2f}' for j in range(len(names))))
     vol_sum = float(np.mean([res[k]['vol'] for k in names]))
-    print(f"  vol promedio de los libros {vol_sum:.2%} vs vol de la cartera {res['CARTERA peso igual (5)']['vol']:.2%}"
+    print(f"  vol promedio de los libros {vol_sum:.2%} vs vol de la cartera {res['CARTERA peso igual (6)']['vol']:.2%}"
           f"  | por año: " + '  '.join(f"{y} {np.prod(1 + port[[m.startswith(y) for m in months]]) - 1:+.1%}"
                                          for y in sorted({m[:4] for m in months})))
     json.dump(dict(periodo=[months[0], months[-1]], letra=letra, libros=res, correlacion=C.tolist(), nombres=names,
